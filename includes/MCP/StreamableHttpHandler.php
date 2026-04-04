@@ -108,7 +108,7 @@ final class StreamableHttpHandler {
 	public function __construct( Router $router ) {
 		$this->router            = $router;
 		$this->resource_registry = new ResourceRegistry( $router->get_bricks_service() );
-		$this->prompt_registry   = new PromptRegistry();
+		$this->prompt_registry   = new PromptRegistry( $router->get_bricks_service() );
 	}
 
 	/**
