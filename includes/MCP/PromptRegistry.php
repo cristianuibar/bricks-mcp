@@ -95,6 +95,17 @@ final class PromptRegistry {
 			);
 		}
 
+		if ( self::AUDIT_PAGE_PROMPT !== $name ) {
+			return new \WP_Error(
+				'unknown_prompt',
+				sprintf(
+					/* translators: %s: Prompt name */
+					__( 'Unknown prompt: %s', 'bricks-mcp' ),
+					$name
+				)
+			);
+		}
+
 		return array(
 			'description' => $prompt['description'],
 			'messages'    => array(
