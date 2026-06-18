@@ -51,7 +51,7 @@ class ValidationService {
 	 * @param array<string, mixed> $element Element to validate.
 	 * @return true|\WP_Error True if valid, WP_Error with validation details on failure.
 	 */
-	public function validate_element( array $element ): true|\WP_Error {
+	public function validate_element( array $element ): bool|\WP_Error {
 		// Check element has required 'name' key.
 		if ( ! isset( $element['name'] ) || ! is_string( $element['name'] ) ) {
 			return new \WP_Error(
@@ -160,7 +160,7 @@ class ValidationService {
 	 * @param array<int, array<string, mixed>> $elements Flat array of elements.
 	 * @return true|\WP_Error True if all valid, WP_Error with aggregated errors on failure.
 	 */
-	public function validate_elements( array $elements ): true|\WP_Error {
+	public function validate_elements( array $elements ): bool|\WP_Error {
 		$all_errors = [];
 
 		foreach ( $elements as $index => $element ) {
@@ -283,7 +283,7 @@ class ValidationService {
 	 * @param string               $tool_name    Tool name for error messages.
 	 * @return true|\WP_Error True if valid, WP_Error with validation details on failure.
 	 */
-	public function validate_arguments( array $arguments, array $input_schema, string $tool_name ): true|\WP_Error {
+	public function validate_arguments( array $arguments, array $input_schema, string $tool_name ): bool|\WP_Error {
 		if ( ! class_exists( Validator::class ) ) {
 			return new \WP_Error(
 				'validation_unavailable',

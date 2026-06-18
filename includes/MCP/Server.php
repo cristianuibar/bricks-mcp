@@ -62,6 +62,8 @@ final class Server {
 		add_filter( 'rest_request_before_callbacks', [ $this, 'intercept_json_parse_error' ], 10, 3 );
 		add_filter( 'rest_post_dispatch', [ $this, 'add_www_authenticate_header' ], 10, 3 );
 		add_action( 'parse_request', [ $this, 'handle_well_known_request' ] );
+		// Strip LiteSpeed-injected Retry-After headers on MCP routes (causes mcp-remote to back off).
+		add_filter( 'rest_post_dispatch', [ $this, 'strip_retry_after_header' ], 99, 3 );
 	}
 
 	/**
@@ -282,14 +284,20 @@ final class Server {
 			}
 		}
 
-		// Rate limit all requests (authenticated by user ID, anonymous by IP).
-		$remote_addr = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : 'unknown';
-		$identifier  = is_user_logged_in()
-			? 'user_' . get_current_user_id()
-			: 'ip_' . $remote_addr;
-		$rate_check  = RateLimiter::check( $identifier );
-		if ( is_wp_error( $rate_check ) ) {
-			return $rate_check;
+		// Skip rate limiting for GET/DELETE requests (SSE keepalive + session close).
+		// mcp-remote reconnects the SSE GET stream frequently on LiteSpeed/shared hosting.
+		// Counting these reconnects as rate-limit tokens causes false 429s that break
+		// Claude Desktop + mcp-remote. Only POST requests (actual tool calls) are counted.
+		$http_method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) ) : 'POST';
+		if ( 'POST' === $http_method ) {
+			$remote_addr = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : 'unknown';
+			$identifier  = is_user_logged_in()
+				? 'user_' . get_current_user_id()
+				: 'ip_' . $remote_addr;
+			$rate_check  = RateLimiter::check( $identifier );
+			if ( is_wp_error( $rate_check ) ) {
+				return $rate_check;
+			}
 		}
 
 		return true;
@@ -312,4 +320,33 @@ final class Server {
 	public function get_namespace(): string {
 		return self::API_NAMESPACE;
 	}
+
+	/**
+	 * Strip Retry-After headers injected by LiteSpeed on MCP routes.
+	 *
+	 * LiteSpeed on Hostinger injects a Retry-After: 60 header on all REST API
+	 * responses regardless of status code. This causes mcp-remote to interpret
+	 * successful 200 responses as rate-limited and back off, breaking the
+	 * Claude Desktop connection. We strip it on all non-429 MCP responses.
+	 *
+	 * @param \WP_REST_Response $response The REST response.
+	 * @param \WP_REST_Server   $server   The REST server (unused).
+	 * @param \WP_REST_Request  $request  The REST request.
+	 * @return \WP_REST_Response The response with Retry-After removed.
+	 */
+	public function strip_retry_after_header(
+    \WP_REST_Response $response,
+    \WP_REST_Server $server,
+    \WP_REST_Request $request
+): \WP_REST_Response {
+    $route = $request->get_route();
+    if ( ! str_starts_with( $route, '/' . self::API_NAMESPACE ) ) {
+        return $response;
+    }
+    if ( 429 !== $response->get_status() ) {
+        header_remove( 'Retry-After' );
+    }
+    return $response;
+}
+
 }

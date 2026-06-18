@@ -54,6 +54,8 @@ final class Settings {
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin_scripts' ] );
 		add_action( 'wp_ajax_bricks_mcp_run_diagnostics', [ $this, 'ajax_run_diagnostics' ] );
 		add_action( 'wp_ajax_bricks_mcp_generate_app_password', [ $this, 'ajax_generate_app_password' ] );
+		// Phase 2 — ApiFlash key test handler.
+		add_action( 'wp_ajax_bricks_mcp_test_screenshot', [ $this, 'ajax_test_screenshot' ] );
 	}
 
 	/**
@@ -140,6 +142,24 @@ final class Settings {
 			self::PAGE_SLUG,
 			'bricks_mcp_general'
 		);
+
+		// Phase 2 — ApiFlash API key (fallback screenshot service).
+		add_settings_field(
+			'bricks_mcp_apiflash_key',
+			__( 'ApiFlash API Key', 'bricks-mcp' ),
+			[ $this, 'render_apiflash_key_field' ],
+			self::PAGE_SLUG,
+			'bricks_mcp_general'
+		);
+
+		// Phase 2 — Anthropic API key (page_visual_review / Claude Vision).
+		add_settings_field(
+			'bricks_mcp_anthropic_api_key',
+			__( 'Anthropic API Key', 'bricks-mcp' ),
+			[ $this, 'render_anthropic_api_key_field' ],
+			self::PAGE_SLUG,
+			'bricks_mcp_general'
+		);
 	}
 
 	/**
@@ -154,6 +174,9 @@ final class Settings {
 			'custom_base_url'   => '',
 			'dangerous_actions' => false,
 			'rate_limit_rpm'    => 120,
+			// Phase 2 — screenshot and visual review API keys.
+			'apiflash_key'      => '',
+			'anthropic_api_key' => '',
 		];
 	}
 
@@ -174,6 +197,9 @@ final class Settings {
 
 		$sanitized['dangerous_actions'] = ! empty( $input['dangerous_actions'] );
 		$sanitized['rate_limit_rpm']    = max( 10, min( 1000, (int) ( $input['rate_limit_rpm'] ?? 120 ) ) );
+		// Phase 2 — sanitize new API key fields.
+		$sanitized['apiflash_key']      = sanitize_text_field( $input['apiflash_key'] ?? '' );
+		$sanitized['anthropic_api_key'] = sanitize_text_field( $input['anthropic_api_key'] ?? '' );
 
 		return $sanitized;
 	}
@@ -346,6 +372,146 @@ final class Settings {
 		<?php
 	}
 
+	// =========================================================================
+	// Phase 2 additions — screenshot and visual review API key fields + AJAX
+	// =========================================================================
+
+	/**
+	 * Render ApiFlash API key field.
+	 *
+	 * ApiFlash is the fallback screenshot service for page_screenshot and
+	 * page_visual_review. Primary service is Microlink (50 req/day, no key).
+	 * ApiFlash provides 100 free screenshots/month with a free API key.
+	 *
+	 * @return void
+	 */
+	public function render_apiflash_key_field(): void {
+		$options   = get_option( self::OPTION_NAME, $this->get_defaults() );
+		$field_val = sanitize_text_field( $options['apiflash_key'] ?? '' );
+		printf(
+			'<input type="password" id="bricks_mcp_apiflash_key" name="%s[apiflash_key]" value="%s" class="regular-text" autocomplete="new-password" />',
+			esc_attr( self::OPTION_NAME ),
+			esc_attr( $field_val )
+		);
+		echo ' <button type="button" class="button" id="bricks-mcp-test-apiflash">'
+			. esc_html__( 'Test Key', 'bricks-mcp' )
+			. '</button>';
+		echo ' <span id="bricks-mcp-test-apiflash-result" aria-live="polite"></span>';
+		echo '<p class="description">'
+			. wp_kses(
+				__( 'Fallback screenshot service for <code>page_screenshot</code> and <code>page_visual_review</code>. 100 free/month. Get key at <a href="https://apiflash.com" target="_blank" rel="noopener noreferrer">apiflash.com</a>. Leave empty to use Microlink only (50 free/day, no key needed).', 'bricks-mcp' ),
+				[
+					'code' => [],
+					'a'    => [ 'href' => [], 'target' => [], 'rel' => [] ],
+				]
+			)
+			. '</p>';
+	}
+
+	/**
+	 * Render Anthropic API key field.
+	 *
+	 * Required for the page_visual_review tool which sends a page screenshot
+	 * to Claude Vision (claude-sonnet-4-20250514) for structured visual feedback.
+	 * The key is stored in wp_options and is never echoed to the browser.
+	 *
+	 * @return void
+	 */
+	public function render_anthropic_api_key_field(): void {
+		$options   = get_option( self::OPTION_NAME, $this->get_defaults() );
+		$field_val = sanitize_text_field( $options['anthropic_api_key'] ?? '' );
+		$has_key   = ! empty( $field_val );
+		printf(
+			'<input type="password" id="bricks_mcp_anthropic_api_key" name="%s[anthropic_api_key]" value="%s" class="regular-text" autocomplete="new-password" />',
+			esc_attr( self::OPTION_NAME ),
+			esc_attr( $field_val )
+		);
+		if ( $has_key ) {
+			echo ' <span style="color:#46b450;font-weight:600;">&#10003; '
+				. esc_html__( 'Key saved', 'bricks-mcp' )
+				. '</span>';
+		}
+		echo '<p class="description">'
+			. wp_kses(
+				__( 'Required for <code>page_visual_review</code> (Claude Vision AI feedback). Get key at <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>. Stored securely — never sent to the browser.', 'bricks-mcp' ),
+				[
+					'code' => [],
+					'a'    => [ 'href' => [], 'target' => [], 'rel' => [] ],
+				]
+			)
+			. '</p>';
+	}
+
+	/**
+	 * AJAX handler: Test ApiFlash API key validity.
+	 *
+	 * Makes a minimal test request to ApiFlash (320×240 PNG of the homepage).
+	 * Cached responses do not count against the monthly quota, so this is safe
+	 * to call repeatedly. Returns JSON success/error with a human-readable message.
+	 *
+	 * @return void
+	 */
+	public function ajax_test_screenshot(): void {
+		check_ajax_referer( 'bricks_mcp_settings_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'bricks-mcp' ) ] );
+			return;
+		}
+
+		$api_key = sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) );
+		if ( empty( $api_key ) ) {
+			wp_send_json_error( [ 'message' => __( 'No API key provided.', 'bricks-mcp' ) ] );
+			return;
+		}
+
+		$test_url = add_query_arg(
+			[
+				'access_key' => $api_key,
+				'url'        => rawurlencode( home_url( '/' ) ),
+				'format'     => 'png',
+				'width'      => 320,
+				'height'     => 240,
+				'full_page'  => 'false',
+			],
+			'https://api.apiflash.com/v1/urltoimage'
+		);
+
+		$response = wp_remote_get(
+			esc_url_raw( $test_url ),
+			[
+				'timeout'   => 20,
+				'sslverify' => true,
+			]
+		);
+
+		if ( is_wp_error( $response ) ) {
+			wp_send_json_error( [ 'message' => $response->get_error_message() ] );
+			return;
+		}
+
+		$code         = wp_remote_retrieve_response_code( $response );
+		$content_type = wp_remote_retrieve_header( $response, 'content-type' );
+
+		if ( 200 === $code && str_contains( $content_type, 'image' ) ) {
+			wp_send_json_success( [ 'message' => __( 'Key valid — ApiFlash connection successful.', 'bricks-mcp' ) ] );
+		} else {
+			wp_send_json_error(
+				[
+					'message' => sprintf(
+						/* translators: %d: HTTP status code returned by ApiFlash */
+						__( 'ApiFlash returned HTTP %d. Check your API key.', 'bricks-mcp' ),
+						(int) $code
+					),
+				]
+			);
+		}
+	}
+
+	// =========================================================================
+	// End Phase 2 additions
+	// =========================================================================
+
 	/**
 	 * Enqueue admin scripts on the settings page.
 	 *
@@ -484,6 +650,25 @@ final class Settings {
 			JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 		);
 
+		// Build Claude Desktop config snippet.
+		$desktop_config = json_encode(
+			[
+				'mcpServers' => [
+					'bricks-mcp' => [
+						'command' => 'npx',
+						'args'    => [
+							'-y',
+							'mcp-remote@latest',
+							$mcp_url,
+							'--header',
+							'Authorization: Basic YOUR_BASE64_AUTH_STRING',
+						],
+					],
+				],
+			],
+			JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
+		);
+
 		?>
 		<div class="bricks-mcp-config-section">
 			<h2><?php esc_html_e( 'MCP Configuration', 'bricks-mcp' ); ?></h2>
@@ -532,6 +717,14 @@ final class Settings {
 							<?php esc_html_e( 'Copy to Clipboard', 'bricks-mcp' ); ?>
 						</button>
 					</div>
+
+					<h4><?php esc_html_e( 'Claude Desktop (JSON config):', 'bricks-mcp' ); ?></h4>
+					<div class="bricks-mcp-code-wrap">
+						<pre><code id="bricks-mcp-generated-desktop-config"></code></pre>
+						<button type="button" class="button bricks-mcp-copy-btn" data-target="bricks-mcp-generated-desktop-config">
+							<?php esc_html_e( 'Copy to Clipboard', 'bricks-mcp' ); ?>
+						</button>
+					</div>
 				</div>
 			</div>
 
@@ -544,6 +737,9 @@ final class Settings {
 					</button>
 					<button type="button" role="tab" id="bricks-mcp-tab-gemini" data-tab="gemini" aria-selected="false" aria-controls="bricks-mcp-panel-gemini" tabindex="-1">
 						<?php esc_html_e( 'Gemini', 'bricks-mcp' ); ?>
+					</button>
+					<button type="button" role="tab" id="bricks-mcp-tab-claude-desktop" data-tab="claude-desktop" aria-selected="false" aria-controls="bricks-mcp-panel-claude-desktop" tabindex="-1">
+						<?php esc_html_e( 'Claude Desktop', 'bricks-mcp' ); ?>
 					</button>
 				</div>
 
@@ -582,6 +778,32 @@ final class Settings {
 					</div>
 					<p class="description bricks-mcp-tab-description">
 						<?php esc_html_e( 'Add this to your ~/.gemini/settings.json file.', 'bricks-mcp' ); ?>
+					</p>
+					<p class="description">
+						<?php
+						echo wp_kses(
+							__( 'Replace <code>YOUR_BASE64_AUTH_STRING</code> with the Base64-encoded value of <code>username:app_password</code>. Or use the <strong>Generate Setup Command</strong> button above for a ready-to-paste config.', 'bricks-mcp' ),
+							[
+								'code'   => [],
+								'strong' => [],
+							]
+						);
+						?>
+					</p>
+				</div>
+
+				<!-- Claude Desktop Panel -->
+				<div role="tabpanel" id="bricks-mcp-panel-claude-desktop" aria-labelledby="bricks-mcp-tab-claude-desktop" data-panel="claude-desktop" style="display:none;">
+					<div class="bricks-mcp-code-wrap">
+						<pre><code id="bricks-mcp-desktop-config"><?php echo esc_html( $desktop_config ); ?></code></pre>
+						<button type="button" class="button bricks-mcp-copy-btn" data-target="bricks-mcp-desktop-config">
+							<?php esc_html_e( 'Copy to Clipboard', 'bricks-mcp' ); ?>
+						</button>
+					</div>
+					<p class="description bricks-mcp-tab-description">
+						<?php esc_html_e( 'Add this to your Claude Desktop config file:', 'bricks-mcp' ); ?>
+						<code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (Mac) or
+						<code>%APPDATA%\\Claude\\claude_desktop_config.json</code> (Windows)
 					</p>
 					<p class="description">
 						<?php

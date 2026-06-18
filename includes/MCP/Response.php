@@ -39,14 +39,13 @@ final class Response {
 	/**
 	 * Create an error response.
 	 *
-	 * @param string $code     Error code.
-	 * @param string $message  Error message.
-	 * @param int    $status   HTTP status code (default: 400).
-	 * @param mixed  $data     Additional error data.
-	 * @param string $guidance Optional remediation guidance for the client.
+	 * @param string $code    Error code.
+	 * @param string $message Error message.
+	 * @param int    $status  HTTP status code (default: 400).
+	 * @param mixed  $data    Additional error data.
 	 * @return \WP_REST_Response The REST response.
 	 */
-	public static function error( string $code, string $message, int $status = 400, mixed $data = null, string $guidance = '' ): \WP_REST_Response {
+	public static function error( string $code, string $message, int $status = 400, mixed $data = null ): \WP_REST_Response {
 		$error_data = [
 			'code'    => $code,
 			'message' => $message,
@@ -54,10 +53,6 @@ final class Response {
 
 		if ( null !== $data ) {
 			$error_data['data'] = $data;
-		}
-
-		if ( '' !== $guidance ) {
-			$error_data['guidance'] = $guidance;
 		}
 
 		$response = new \WP_REST_Response(
@@ -85,11 +80,10 @@ final class Response {
 	 * Used when a tool handler returns WP_Error.
 	 * Error text is structured JSON per MCP spec.
 	 *
-	 * @param \WP_Error $error    The WP_Error from the tool handler.
-	 * @param string    $guidance Optional remediation guidance for the client.
+	 * @param \WP_Error $error The WP_Error from the tool handler.
 	 * @return \WP_REST_Response The REST response.
 	 */
-	public static function tool_error( \WP_Error $error, string $guidance = '' ): \WP_REST_Response {
+	public static function tool_error( \WP_Error $error ): \WP_REST_Response {
 		$payload = [
 			'code'    => $error->get_error_code(),
 			'message' => $error->get_error_message(),
@@ -106,10 +100,6 @@ final class Response {
 					fn( $v ) => is_scalar( $v ) || is_null( $v )
 				);
 			}
-		}
-
-		if ( '' !== $guidance ) {
-			$payload['guidance'] = $guidance;
 		}
 
 		return self::success(

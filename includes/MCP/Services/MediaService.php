@@ -1,9 +1,24 @@
 <?php
 /**
+ * File: includes/MCP/Services/MediaService.php
+ *
  * Media service for Unsplash search, image sideloading, and media library operations.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
+ * @version 1.5.2
+ *
+ * Changelog:
+ * ----------
+ * 1.5.2 — 2026-03-31
+ *   - FIX (GitHub #10): sideload_from_url() — added DNS-rebinding guard.
+ *                       wp_http_validate_url() blocks obvious private IP literals but
+ *                       does NOT protect against DNS rebinding where a public domain
+ *                       resolves to a private IP at request time. download_url() uses
+ *                       wp_remote_get() internally (not wp_safe_remote_get()), so
+ *                       we now call gethostbyname() and validate the resolved IP against
+ *                       private/reserved ranges (10.x, 172.16.x, 192.168.x, 127.x,
+ *                       169.254.x, 0.x) before proceeding with the download.
  */
 
 declare(strict_types=1);
@@ -139,6 +154,36 @@ class MediaService {
 		// Validate URL against internal/private IPs.
 		if ( ! wp_http_validate_url( $url ) ) {
 			return new \WP_Error( 'invalid_url', 'URL validation failed.' );
+		}
+
+		// GitHub #10: DNS-rebinding guard — wp_http_validate_url() blocks obvious private IP
+		// literals but does NOT protect against DNS rebinding, where a public-looking domain
+		// resolves to a private IP at request time. download_url() calls wp_remote_get()
+		// (not wp_safe_remote_get()) internally, so we must validate the resolved IP ourselves.
+		$_mcp_host = wp_parse_url( $url, PHP_URL_HOST );
+		if ( $_mcp_host ) {
+			$_mcp_resolved = gethostbyname( $_mcp_host );
+			if ( $_mcp_resolved !== $_mcp_host ) {
+				$_mcp_private = array(
+					array( '10.0.0.0',   '10.255.255.255'  ),
+					array( '172.16.0.0',  '172.31.255.255'  ),
+					array( '192.168.0.0', '192.168.255.255' ),
+					array( '127.0.0.0',   '127.255.255.255' ),
+					array( '169.254.0.0', '169.254.255.255' ),
+					array( '0.0.0.0',     '0.255.255.255'   ),
+				);
+				$_mcp_ip_long = ip2long( $_mcp_resolved );
+				if ( false !== $_mcp_ip_long ) {
+					foreach ( $_mcp_private as $_mcp_range ) {
+						if ( $_mcp_ip_long >= ip2long( $_mcp_range[0] ) && $_mcp_ip_long <= ip2long( $_mcp_range[1] ) ) {
+							return new \WP_Error(
+								'ssrf_blocked',
+								__( 'Image URL resolves to a private or reserved IP address and cannot be sideloaded.', 'bricks-mcp' )
+							);
+						}
+					}
+				}
+			}
 		}
 
 		// Require admin includes for sideloading (safe to call multiple times).

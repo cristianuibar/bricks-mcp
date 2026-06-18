@@ -1,9 +1,76 @@
 <?php
 /**
+ * File: includes/MCP/Router.php
+ *
  * MCP Router implementation.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
+ * @version 1.5.5
+ *
+ * Changelog:
+ * ----------
+ * 1.5.5 — 2026-03-31
+ *   - FIX (Code quality): Removed 4 orphaned/displaced PHPDoc blocks that had
+ *                         been separated from their function declarations (lines
+ *                         1877-1913). Restored correct @param/@return docblocks
+ *                         on require_bricks(), enrich_error(), apply_smart_defaults(),
+ *                         and apply_minimal_format(). No functional change.
+ *
+ * 1.5.4 — 2026-03-31
+ *   - FIX (Critical): register_output_schemas() — 6 occurrences of corrupted
+ *                     array access syntax ($this->toolsarray('key')) restored to
+ *                     correct PHP array notation ($this->tools['key']). The
+ *                     corruption caused a fatal PHP parse error on every request,
+ *                     making the entire MCP endpoint return HTTP 500 and preventing
+ *                     any tool from executing.
+ *
+ * 1.5.3 — 2026-03-31
+ *   - FIX (Critical): tool_page_diagnose(), tool_page_spacing_audit(),
+ *                     tool_page_screenshot(), tool_page_visual_review() —
+ *                     All $args array accesses were corrupted as $argsarray('key')
+ *                     (12 occurrences across 4 methods) causing a fatal PHP parse
+ *                     error that crashed the entire MCP endpoint with HTTP 500.
+ *                     Corrected to $args['key'] throughout.
+ *   - FIX (Consistency): Changed tool_page_diagnose(), tool_page_spacing_audit(),
+ *                        tool_page_screenshot(), tool_page_visual_review() from
+ *                        public to private to match all other tool handler methods.
+ *   - FIX (Code quality): Expanded single-line if/return blocks in the 4 new
+ *                         handlers to proper multi-line format. Removed redundant
+ *                         is_wp_error() ternary no-ops (result was returned either
+ *                         way). Added proper PHPDoc blocks to all 4 methods.
+ *   - FIX (Type safety): Added explicit (string) cast on $viewport and $focus
+ *                        before passing to BricksService methods.
+ *
+ * 1.5.2 — 2026-03-31
+ *   - FIX (Issue 9):    tool_get_posts() — replaced unsafe wp_list_pluck() +
+ *                       update_postmeta_cache() with null-safe ID extraction to
+ *                       prevent "Attempt to assign property thumbnails_cached on
+ *                       array" crash caused by WP Rocket / Rank Math hook interference.
+ *   - FIX (GitHub #5):  tool_get_posts() — added $allowed_orderby allowlist and
+ *                       validated post_type against get_post_types() to prevent
+ *                       WP_Query parameter injection.
+ *   - FIX (GitHub #6):  tool_get_users() — validated role parameter against
+ *                       wp_roles()->get_names() to prevent WP_User_Query returning
+ *                       all users when an invalid role string is supplied.
+ *   - FIX (Issue 11 /
+ *     GitHub #8):       tool_get_users() — added server-side manage_options
+ *                       capability check before exposing PII (email/login). Any
+ *                       authenticated MCP client could previously pass include_pii=true
+ *                       regardless of their WordPress role.
+ *   - FIX (Issue 5a):   Corrected misplaced PHPDoc blocks — register_output_schemas()
+ *                       and require_bricks() docblocks were displaced from their
+ *                       function declarations.
+ *   - FIX (Issue 5b):   register_bricks_tools() changed from public to private.
+ *                       Updated add_action() calls to use closures so WordPress
+ *                       can invoke the private method correctly.
+ *   - FIX (Issue 5c):   Normalised array syntax to array() in register_output_schemas()
+ *                       and PR#29 tool registrations / handlers (was using [] short
+ *                       syntax inconsistently against codebase standard).
+ *   - FIX (Issue 5d):   Moved apply_filters('bricks_mcp_tools') from
+ *                       register_default_tools() (fired with only 2 tools registered)
+ *                       to the end of register_bricks_tools() (fires after all tools
+ *                       are registered). Third-party filter hooks now see the full list.
  */
 
 declare(strict_types=1);
@@ -38,38 +105,9 @@ final class Router {
 	private const COMPONENTS_OPTION = 'bricks_components';
 
 	/**
-	 * Tool names exposed to MCP clients in tools/list.
-	 *
-	 * Hidden legacy tools remain callable through execute_tool() alias shims.
-	 *
-	 * @var array<int, string>
-	 */
-	private const VISIBLE_TOOL_NAMES = array(
-		'get_site_info',
-		'get_builder_guide',
-		'bricks',
-		'content',
-		'template',
-		'design',
-		'media',
-		'menu',
-		'component',
-		'woocommerce',
-		'code',
-	);
-
-	/**
 	 * Registered tools.
 	 *
-	 * @var array<string, array{
-	 *     name: string,
-	 *     description: string,
-	 *     inputSchema: array,
-	 *     handler: callable,
-	 *     annotations?: array<string, mixed>,
-	 *     outputSchema?: array<string, mixed>,
-	 *     defaults?: array<string, mixed>
-	 * }>
+	 * @var array<string, array{name: string, description: string, inputSchema: array, handler: callable}>
 	 */
 	private array $tools = array();
 
@@ -125,8 +163,10 @@ final class Router {
 		// Bricks is a theme, so \Bricks\Elements isn't available on plugins_loaded.
 		if ( did_action( 'after_setup_theme' ) ) {
 			$this->register_bricks_tools();
+			$this->register_output_schemas();
 		} else {
-			add_action( 'after_setup_theme', array( $this, 'register_bricks_tools' ), 20 );
+			add_action( 'after_setup_theme', function(): void { $this->register_bricks_tools(); }, 20 );
+			add_action( 'after_setup_theme', function(): void { $this->register_output_schemas(); }, 25 );
 		}
 
 		// Flush schema cache when plugins are updated.
@@ -149,7 +189,7 @@ final class Router {
 		// Get site info tool.
 		$this->register_tool(
 			'get_site_info',
-			__( "Get WordPress site information.\n\nActions:\n- info: Basic site info (default)\n- diagnose: Run connection diagnostics (REST API, App Passwords, security plugins, hosting provider, MCP endpoint)", 'bricks-mcp' ),
+			__( "Get WordPress site info or run MCP connection diagnostics. Call with action=diagnose when troubleshooting connection issues.\n\nActions:\n- info: Site name, URL, version, timezone, charset (default)\n- diagnose: Full connection health check — REST API, App Passwords, security plugins, hosting, MCP endpoint status", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -160,13 +200,19 @@ final class Router {
 					),
 				),
 			),
-			array( $this, 'tool_get_site_info' )
+			array( $this, 'tool_get_site_info' ),
+		array(
+			'readOnlyHint'    => true,
+			'destructiveHint' => false,
+			'idempotentHint'  => true,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// WordPress consolidated tool (replaces get_posts, get_post, get_users, get_plugins).
 		$this->register_tool(
 			'wordpress',
-			__( "Query WordPress data.\n\nActions:\n- get_posts: List published posts (optional: post_type, posts_per_page, orderby, order)\n- get_post: Get single post/page by ID (requires: id)\n- get_users: List users (no required params)\n- get_plugins: List plugins (no required params)", 'bricks-mcp' ),
+			__( "Read WordPress posts, users, and plugins. Use this for general WordPress data queries not specific to Bricks.\n\nWHEN: Use get_posts to list content before editing. Use get_plugins to check if a plugin is active before using its features. Use get_users to find author IDs.\n\nActions:\n- get_posts: List posts (optional: post_type, posts_per_page=20, orderby, order)\n- get_post: Single post by ID (requires: id)\n- get_users: List users (optional: role, number)\n- get_plugins: List all plugins with active status (optional: status=all|active|inactive)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -216,572 +262,43 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_wordpress' )
+			array( $this, 'tool_wordpress' ),
+		array(
+			'readOnlyHint'    => true,
+			'destructiveHint' => false,
+			'idempotentHint'  => true,
+			'openWorldHint'   => false,
+		)
 		);
 
-		$this->register_tool(
-			'content',
-			__( 'Manage WordPress and Bricks content for a given site; requires an action and validates target-specific inputs.', 'bricks-mcp' ),
-			$this->get_content_tool_schema(),
-			array( $this, 'tool_content' )
-		);
-
-		/**
-		 * Filter the registered MCP tools.
-		 *
-		 * Allows other plugins to add or modify MCP tools.
-		 *
-		 * @param array $tools Registered tools.
-		 */
-		$this->tools = apply_filters( 'bricks_mcp_tools', $this->tools );
+		// NOTE: apply_filters( 'bricks_mcp_tools' ) is intentionally NOT called here.
+		// It is called at the end of register_bricks_tools() after ALL tools have been
+		// registered, so third-party plugins see the complete tool list. (Issue 5d fix)
 	}
 
 	/**
 	 * Register a tool.
 	 *
-	 * @param string               $name          Tool name.
-	 * @param string               $description   Tool description.
-	 * @param array<string, mixed> $input_schema  Tool input schema.
-	 * @param callable             $handler       Tool handler callback.
-	 * @param array<string, mixed> $annotations   Optional MCP tool annotations.
-	 * @param array<string, mixed> $output_schema Optional MCP output schema.
-	 * @param array<string, mixed> $defaults      Optional smart defaults metadata.
+	 * @param string   $name             Tool name.
+	 * @param string   $description      Tool description.
+	 * @param array    $input_schema     Tool input schema.
+	 * @param callable $handler          Tool handler callback.
 	 * @return void
 	 */
-	public function register_tool(
-		string $name,
-		string $description,
-		array $input_schema,
-		callable $handler,
-		array $annotations = array(),
-		array $output_schema = array(),
-		array $defaults = array()
-	): void {
-		$description   = $this->get_normalized_tool_description( $name, $description );
-		$input_schema  = $this->inject_response_format_property( $input_schema );
-
-		// Auto-populate v2.0 metadata when callers use the legacy 4-arg signature.
-		// This ensures every tool exposes annotations, outputSchema, and defaults
-		// without requiring existing `bricks_mcp_tools` filter callbacks to change.
-		$annotations   = array() === $annotations ? $this->get_default_tool_annotations( $name ) : $annotations;
-		$output_schema = array() === $output_schema ? $this->get_default_tool_output_schema( $name ) : $output_schema;
-		$defaults      = array() === $defaults ? $this->get_default_tool_defaults( $name ) : $defaults;
-
-		$tool = array(
+	public function register_tool( string $name, string $description, array $input_schema, callable $handler, array $annotations = [], array $output_schema = [] ): void {
+		$entry = array(
 			'name'        => $name,
 			'description' => $description,
 			'inputSchema' => $input_schema,
 			'handler'     => $handler,
 		);
-
-		if ( array() !== $annotations ) {
-			$tool['annotations'] = $annotations;
+		if ( ! empty( $annotations ) ) {
+			$entry['annotations'] = $annotations;
 		}
-
-		if ( array() !== $output_schema ) {
-			$tool['outputSchema'] = $output_schema;
+		if ( ! empty( $output_schema ) ) {
+			$entry['outputSchema'] = $output_schema;
 		}
-
-		if ( array() !== $defaults ) {
-			$tool['defaults'] = $defaults;
-		}
-
-		$this->tools[ $name ] = $tool;
-	}
-
-	/**
-	 * Get the Bricks service for protocol registries.
-	 *
-	 * @return BricksService
-	 */
-	public function get_bricks_service(): BricksService {
-		return $this->bricks_service;
-	}
-
-	/**
-	 * Inject response_format into a tool schema.
-	 *
-	 * @param array<string, mixed> $input_schema Tool input schema.
-	 * @return array<string, mixed>
-	 */
-	private function inject_response_format_property( array $input_schema ): array {
-		$properties = $input_schema['properties'] ?? array();
-
-		if ( ! is_array( $properties ) || isset( $properties['response_format'] ) ) {
-			return $input_schema;
-		}
-
-		$properties['response_format'] = array(
-			'type'        => 'string',
-			'enum'        => array( 'verbose', 'compact' ),
-			'description' => __( 'Response verbosity. Use verbose for full detail or compact to omit empty fields and reduce token usage.', 'bricks-mcp' ),
-		);
-
-		$input_schema['properties'] = $properties;
-
-		return $input_schema;
-	}
-
-	/**
-	 * Build default annotations for a tool.
-	 *
-	 * @param string $name Tool name.
-	 * @return array<string, bool>
-	 */
-	private function get_default_tool_annotations( string $name ): array {
-		$read_only_tools = array(
-			'get_site_info',
-			'get_builder_guide',
-			'wordpress',
-		);
-
-		$destructive_tools = array(
-			'bricks',
-			'content',
-			'page',
-			'element',
-			'template',
-			'template_taxonomy',
-			'global_class',
-			'theme_style',
-			'typography_scale',
-			'color_palette',
-			'global_variable',
-			'menu',
-			'component',
-			'design',
-		);
-
-		$open_world_tools = array(
-			'media',
-			'template',
-		);
-
-		return array(
-			'readOnlyHint'    => in_array( $name, $read_only_tools, true ),
-			'destructiveHint' => in_array( $name, $destructive_tools, true ),
-			'idempotentHint'  => in_array( $name, $read_only_tools, true ),
-			'openWorldHint'   => in_array( $name, $open_world_tools, true ),
-		);
-	}
-
-	/**
-	 * Build default output schema for a tool.
-	 *
-	 * @param string $name Tool name.
-	 * @return array<string, mixed>
-	 */
-	private function get_default_tool_output_schema( string $name ): array { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found
-		return array(
-			'type'                 => 'object',
-			'additionalProperties' => true,
-		);
-	}
-
-	/**
-	 * Build default smart-default metadata for a tool.
-	 *
-	 * @param string $name Tool name.
-	 * @return array<string, mixed>
-	 */
-	private function get_default_tool_defaults( string $name ): array {
-		return match ( $name ) {
-			'wordpress' => array(
-				'get_posts' => array(
-					'post_type'      => 'post',
-					'posts_per_page' => 10,
-					'orderby'        => 'date',
-					'order'          => 'DESC',
-					'post_status'    => 'publish',
-				),
-				'get_users' => array(
-					'number' => 10,
-				),
-				'get_plugins' => array(
-					'status' => 'all',
-				),
-			),
-			'content' => array(
-				'list' => array(
-					'post_type'      => 'page',
-					'status'         => 'any',
-					'posts_per_page' => 20,
-					'paged'          => 1,
-					'bricks_only'    => true,
-				),
-				'get_posts' => array(
-					'post_type'      => 'post',
-					'posts_per_page' => 10,
-					'orderby'        => 'date',
-					'order'          => 'DESC',
-					'post_status'    => 'publish',
-				),
-			),
-			'page' => array(
-				'list' => array(
-					'post_type'      => 'page',
-					'status'         => 'any',
-					'posts_per_page' => 20,
-					'paged'          => 1,
-					'bricks_only'    => true,
-				),
-			),
-			'bricks' => array(
-				'get_settings' => array(
-					'category' => 'general',
-				),
-			),
-			'template' => array(
-				'list' => array(
-					'status' => 'publish',
-				),
-			),
-			'media' => array(
-				'list' => array(
-					'per_page' => 20,
-					'page'     => 1,
-				),
-			),
-			default => array(),
-		};
-	}
-
-	/**
-	 * Normalize tool descriptions to the action + target + constraint format.
-	 *
-	 * @param string $name        Tool name.
-	 * @param string $description Existing description.
-	 * @return string
-	 */
-	private function get_normalized_tool_description( string $name, string $description ): string {
-		return match ( $name ) {
-			'get_site_info'      => 'Read WordPress site details for the current installation; optionally runs diagnostics for connection health.',
-			'get_builder_guide'  => 'Read the Bricks builder guide for the current site; use it before editing Bricks content.',
-			'bricks'             => 'Manage Bricks builder settings and schema for the current site; requires an action scoped to builder data.',
-			'content'            => 'Manage WordPress and Bricks content for a given site; requires an action and validates target-specific inputs.',
-			'template'           => 'Manage Bricks templates and targeting rules for a given site; requires an action and validates template-specific inputs.',
-			'design'             => 'Manage Bricks design tokens and style systems for a given site; requires a design domain and an action.',
-			'media'              => 'Manage media assets for the current site; requires an action and validates upload or library constraints.',
-			'menu'               => 'Manage WordPress navigation menus for the current site; requires an action and a menu target when writing.',
-			'component'          => 'Manage Bricks components for the current site; requires an action and component-specific identifiers when writing.',
-			'woocommerce'        => 'Manage WooCommerce builder data for the current site; requires WooCommerce to be active and an action.',
-			'code'               => 'Manage page-level custom CSS and scripts for a given post; requires an action and a post ID.',
-			'wordpress'          => 'Read WordPress core data for the current site; requires a read-only action scoped to posts, users, or plugins.',
-			'page'               => 'Manage Bricks pages for the current site; requires an action and a page target when writing.',
-			'element'            => 'Manage Bricks elements for a given page; requires an action and explicit element identifiers when writing.',
-			'template_condition' => 'Manage Bricks template targeting rules for the current site; requires an action and template condition data.',
-			'template_taxonomy'  => 'Manage Bricks template tags and bundles for the current site; requires an action and taxonomy-specific identifiers when writing.',
-			'global_class'       => 'Manage Bricks global classes for the current site; requires an action and explicit class identifiers when writing.',
-			'theme_style'        => 'Manage Bricks theme styles for the current site; requires an action and explicit style identifiers when writing.',
-			'typography_scale'   => 'Manage Bricks typography scales for the current site; requires an action and explicit scale identifiers when writing.',
-			'color_palette'      => 'Manage Bricks color palettes for the current site; requires an action and explicit palette identifiers when writing.',
-			'global_variable'    => 'Manage Bricks global variables for the current site; requires an action and explicit variable identifiers when writing.',
-			'font'               => 'Manage Bricks font settings for the current site; requires an action and updates only explicit font options.',
-			default              => $description,
-		};
-	}
-
-	/**
-	 * Resolve alias tool calls to canonical tool names and arguments.
-	 *
-	 * @param string               $name      Requested tool name.
-	 * @param array<string, mixed> $arguments Tool arguments.
-	 * @return array{name: string, arguments: array<string, mixed>}|\WP_Error
-	 */
-	private function resolve_tool_call( string $name, array $arguments ): array|\WP_Error {
-		$aliases = $this->get_tool_aliases();
-
-		if ( isset( $this->tools[ $name ] ) ) {
-			return array(
-				'name'      => $name,
-				'arguments' => $arguments,
-			);
-		}
-
-		if ( ! isset( $aliases[ $name ] ) ) {
-			return new \WP_Error(
-				'unknown_tool',
-				sprintf(
-					/* translators: %s: Tool name */
-					__( 'Unknown tool: %s', 'bricks-mcp' ),
-					$name
-				)
-			);
-		}
-
-		$alias_arguments = $aliases[ $name ]['arguments'] ?? array();
-
-		return array(
-			'name'      => $aliases[ $name ]['name'],
-			'arguments' => array_merge( $alias_arguments, $arguments ),
-		);
-	}
-
-	/**
-	 * Format a tool result according to response_format.
-	 *
-	 * @param string               $name            Tool name.
-	 * @param array<string, mixed>|string $result   Raw result.
-	 * @param mixed                $response_format Requested response format.
-	 * @return array<string, mixed>|string
-	 */
-	private function format_tool_result( string $name, array|string $result, mixed $response_format ): array|string { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found
-		if ( 'compact' !== $response_format || ! is_array( $result ) ) {
-			return $result;
-		}
-
-		return $this->trim_compact_result( $result );
-	}
-
-	/**
-	 * Recursively trim null and empty collection values for compact responses.
-	 *
-	 * @param mixed $value Value to trim.
-	 * @return mixed
-	 */
-	private function trim_compact_result( mixed $value ): mixed {
-		if ( ! is_array( $value ) ) {
-			return $value;
-		}
-
-		if ( array() === $value ) {
-			return array();
-		}
-
-		$is_list = array_keys( $value ) === range( 0, count( $value ) - 1 );
-		$trimmed = array();
-
-		foreach ( $value as $key => $item ) {
-			$normalized = $this->trim_compact_result( $item );
-
-			if ( null === $normalized ) {
-				continue;
-			}
-
-			if ( is_array( $normalized ) && array() === $normalized ) {
-				continue;
-			}
-
-			$trimmed[ $key ] = $normalized;
-		}
-
-		return $is_list ? array_values( $trimmed ) : $trimmed;
-	}
-
-	/**
-	 * Schema for the consolidated content tool.
-	 *
-	 * @return array<string, mixed>
-	 */
-	private function get_content_tool_schema(): array {
-		return array(
-			'type'       => 'object',
-			'properties' => array(
-				'action'         => array(
-					'type'        => 'string',
-					'enum'        => array( 'get_posts', 'get_post', 'get_users', 'get_plugins', 'list', 'search', 'get', 'create', 'update_content', 'update_meta', 'delete', 'duplicate', 'get_settings', 'update_settings', 'get_seo', 'update_seo', 'add', 'update', 'remove', 'get_conditions', 'set_conditions', 'move', 'bulk_update' ),
-					'description' => __( 'Action to perform.', 'bricks-mcp' ),
-				),
-				'post_id'        => array( 'type' => 'integer' ),
-				'post_type'      => array( 'type' => 'string' ),
-				'posts_per_page' => array( 'type' => 'integer' ),
-				'paged'          => array( 'type' => 'integer' ),
-				'orderby'        => array( 'type' => 'string' ),
-				'order'          => array( 'type' => 'string', 'enum' => array( 'ASC', 'DESC' ) ),
-				'status'         => array( 'type' => 'string' ),
-				'role'           => array( 'type' => 'string' ),
-				'number'         => array( 'type' => 'integer' ),
-				'id'             => array( 'type' => 'integer' ),
-				'include_pii'    => array( 'type' => 'boolean' ),
-				'bricks_only'    => array( 'type' => 'boolean' ),
-				'search'         => array( 'type' => 'string' ),
-				'view'           => array( 'type' => 'string', 'enum' => array( 'detail', 'summary' ) ),
-				'title'          => array( 'type' => 'string' ),
-				'elements'       => array( 'type' => 'array' ),
-				'slug'           => array( 'type' => 'string' ),
-				'settings'       => array( 'type' => 'object' ),
-				'description'    => array( 'type' => 'string' ),
-				'robots_noindex' => array( 'type' => 'boolean' ),
-				'robots_nofollow' => array( 'type' => 'boolean' ),
-				'canonical'      => array( 'type' => 'string' ),
-				'og_title'       => array( 'type' => 'string' ),
-				'og_description' => array( 'type' => 'string' ),
-				'og_image'       => array( 'type' => 'string' ),
-				'twitter_title'  => array( 'type' => 'string' ),
-				'twitter_description' => array( 'type' => 'string' ),
-				'twitter_image'  => array( 'type' => 'string' ),
-				'focus_keyword'  => array( 'type' => 'string' ),
-				'element'        => array( 'type' => 'object' ),
-				'name'           => array( 'type' => 'string' ),
-				'element_id'     => array( 'type' => 'string' ),
-				'position'       => array( 'type' => 'integer' ),
-				'parent_id'      => array( 'type' => 'string' ),
-				'conditions'     => array( 'type' => 'array' ),
-				'target_parent_id' => array( 'type' => 'string' ),
-				'updates'        => array( 'type' => 'array' ),
-			),
-			'required'   => array( 'action' ),
-		);
-	}
-
-	/**
-	 * Schema for the consolidated design tool.
-	 *
-	 * @return array<string, mixed>
-	 */
-	private function get_design_tool_schema(): array {
-		return array(
-			'type'       => 'object',
-			'properties' => array(
-				'action'      => array(
-					'type'        => 'string',
-					'enum'        => array( 'list', 'get', 'create', 'update', 'delete', 'apply', 'remove', 'batch_create', 'batch_delete', 'import_css', 'list_categories', 'create_category', 'update_category', 'delete_category', 'export', 'import_json', 'add_color', 'update_color', 'delete_color', 'search', 'get_status', 'get_adobe_fonts', 'update_settings' ),
-					'description' => __( 'Action to perform.', 'bricks-mcp' ),
-				),
-				'domain'      => array(
-					'type'        => 'string',
-					'enum'        => array( 'global_class', 'theme_style', 'typography_scale', 'color_palette', 'global_variable', 'font' ),
-					'description' => __( 'Design subsystem to target.', 'bricks-mcp' ),
-				),
-				'class_name'  => array( 'type' => 'string' ),
-				'name'        => array( 'type' => 'string' ),
-				'styles'      => array( 'type' => 'object' ),
-				'color'       => array( 'type' => 'object' ),
-				'category'    => array( 'type' => 'string' ),
-				'post_id'     => array( 'type' => 'integer' ),
-				'element_ids' => array( 'type' => 'array' ),
-				'classes'     => array( 'type' => 'array' ),
-				'css'         => array( 'type' => 'string' ),
-				'category_name' => array( 'type' => 'string' ),
-				'category_id' => array( 'type' => 'string' ),
-				'search'      => array( 'type' => 'string' ),
-				'classes_data' => array( 'type' => 'object' ),
-				'style_id'    => array( 'type' => 'string' ),
-				'conditions'  => array( 'type' => 'array' ),
-				'active'      => array( 'type' => 'boolean' ),
-				'replace_section' => array( 'type' => 'boolean' ),
-				'hard_delete' => array( 'type' => 'boolean' ),
-				'scale_id'    => array( 'type' => 'string' ),
-				'palette_id'  => array( 'type' => 'string' ),
-				'colors'      => array( 'type' => 'array' ),
-				'color_id'    => array( 'type' => 'string' ),
-				'variable_id' => array( 'type' => 'string' ),
-				'value'       => array( 'type' => 'string' ),
-				'variables'   => array( 'type' => 'array' ),
-				'variable_ids' => array( 'type' => 'array' ),
-				'value_query' => array( 'type' => 'string' ),
-				'disable_google_fonts' => array( 'type' => 'boolean' ),
-				'webfont_loading' => array( 'type' => 'string' ),
-				'custom_fonts_preload' => array( 'type' => 'boolean' ),
-			),
-			'required'   => array( 'action', 'domain' ),
-		);
-	}
-
-	/**
-	 * Get alias map for legacy and hidden tool names.
-	 *
-	 * @return array<string, array{name: string, arguments: array<string, mixed>}>
-	 */
-	private function get_tool_aliases(): array {
-		return array(
-			'wordpress'              => array( 'name' => 'content', 'arguments' => array() ),
-			'page'                   => array( 'name' => 'content', 'arguments' => array() ),
-			'element'                => array( 'name' => 'content', 'arguments' => array() ),
-			'template_condition'     => array( 'name' => 'template', 'arguments' => array() ),
-			'template_taxonomy'      => array( 'name' => 'template', 'arguments' => array() ),
-			'global_class'           => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class' ) ),
-			'theme_style'            => array( 'name' => 'design', 'arguments' => array( 'domain' => 'theme_style' ) ),
-			'typography_scale'       => array( 'name' => 'design', 'arguments' => array( 'domain' => 'typography_scale' ) ),
-			'color_palette'          => array( 'name' => 'design', 'arguments' => array( 'domain' => 'color_palette' ) ),
-			'global_variable'        => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable' ) ),
-			'font'                   => array( 'name' => 'design', 'arguments' => array( 'domain' => 'font' ) ),
-			'get_posts'              => array( 'name' => 'content', 'arguments' => array( 'action' => 'get_posts' ) ),
-			'get_post'               => array( 'name' => 'content', 'arguments' => array( 'action' => 'get_post' ) ),
-			'get_users'              => array( 'name' => 'content', 'arguments' => array( 'action' => 'get_users' ) ),
-			'get_plugins'            => array( 'name' => 'content', 'arguments' => array( 'action' => 'get_plugins' ) ),
-			'list_pages'             => array( 'name' => 'content', 'arguments' => array( 'action' => 'list' ) ),
-			'search_pages'           => array( 'name' => 'content', 'arguments' => array( 'action' => 'search' ) ),
-			'get_bricks_content'     => array( 'name' => 'content', 'arguments' => array( 'action' => 'get' ) ),
-			'create_bricks_page'     => array( 'name' => 'content', 'arguments' => array( 'action' => 'create' ) ),
-			'update_bricks_content'  => array( 'name' => 'content', 'arguments' => array( 'action' => 'update_content' ) ),
-			'update_page'            => array( 'name' => 'content', 'arguments' => array( 'action' => 'update_meta' ) ),
-			'delete_page'            => array( 'name' => 'content', 'arguments' => array( 'action' => 'delete' ) ),
-			'duplicate_page'         => array( 'name' => 'content', 'arguments' => array( 'action' => 'duplicate' ) ),
-			'get_page_settings'      => array( 'name' => 'content', 'arguments' => array( 'action' => 'get_settings' ) ),
-			'update_page_settings'   => array( 'name' => 'content', 'arguments' => array( 'action' => 'update_settings' ) ),
-			'add_element'            => array( 'name' => 'content', 'arguments' => array( 'action' => 'add' ) ),
-			'update_element'         => array( 'name' => 'content', 'arguments' => array( 'action' => 'update' ) ),
-			'remove_element'         => array( 'name' => 'content', 'arguments' => array( 'action' => 'remove' ) ),
-			'get_condition_types'    => array( 'name' => 'template', 'arguments' => array( 'action' => 'get_types' ) ),
-			'set_template_conditions' => array( 'name' => 'template', 'arguments' => array( 'action' => 'set' ) ),
-			'resolve_templates'      => array( 'name' => 'template', 'arguments' => array( 'action' => 'resolve' ) ),
-			'list_template_tags'     => array( 'name' => 'template', 'arguments' => array( 'action' => 'list_tags' ) ),
-			'list_template_bundles'  => array( 'name' => 'template', 'arguments' => array( 'action' => 'list_bundles' ) ),
-			'create_template_tag'    => array( 'name' => 'template', 'arguments' => array( 'action' => 'create_tag' ) ),
-			'create_template_bundle' => array( 'name' => 'template', 'arguments' => array( 'action' => 'create_bundle' ) ),
-			'delete_template_tag'    => array( 'name' => 'template', 'arguments' => array( 'action' => 'delete_tag' ) ),
-			'delete_template_bundle' => array( 'name' => 'template', 'arguments' => array( 'action' => 'delete_bundle' ) ),
-			'enable_bricks'         => array( 'name' => 'bricks', 'arguments' => array( 'action' => 'enable' ) ),
-			'disable_bricks'        => array( 'name' => 'bricks', 'arguments' => array( 'action' => 'disable' ) ),
-			'get_bricks_settings'   => array( 'name' => 'bricks', 'arguments' => array( 'action' => 'get_settings' ) ),
-			'get_breakpoints'       => array( 'name' => 'bricks', 'arguments' => array( 'action' => 'get_breakpoints' ) ),
-			'get_element_schemas'   => array( 'name' => 'bricks', 'arguments' => array( 'action' => 'get_element_schemas' ) ),
-			'list_templates'        => array( 'name' => 'template', 'arguments' => array( 'action' => 'list' ) ),
-			'get_template_content'  => array( 'name' => 'template', 'arguments' => array( 'action' => 'get' ) ),
-			'create_template'       => array( 'name' => 'template', 'arguments' => array( 'action' => 'create' ) ),
-			'update_template'       => array( 'name' => 'template', 'arguments' => array( 'action' => 'update' ) ),
-			'delete_template'       => array( 'name' => 'template', 'arguments' => array( 'action' => 'delete' ) ),
-			'duplicate_template'    => array( 'name' => 'template', 'arguments' => array( 'action' => 'duplicate' ) ),
-			'get_global_classes'    => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'list' ) ),
-			'create_global_class'   => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'create' ) ),
-			'update_global_class'   => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'update' ) ),
-			'delete_global_class'   => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'delete' ) ),
-			'apply_global_class'    => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'apply' ) ),
-			'remove_global_class'   => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'remove' ) ),
-			'batch_create_global_classes' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'batch_create' ) ),
-			'batch_delete_global_classes' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'batch_delete' ) ),
-			'import_classes_from_css' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'import_css' ) ),
-			'list_global_class_categories' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'list_categories' ) ),
-			'create_global_class_category' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'create_category' ) ),
-			'delete_global_class_category' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_class', 'action' => 'delete_category' ) ),
-			'list_theme_styles'     => array( 'name' => 'design', 'arguments' => array( 'domain' => 'theme_style', 'action' => 'list' ) ),
-			'get_theme_style'       => array( 'name' => 'design', 'arguments' => array( 'domain' => 'theme_style', 'action' => 'get' ) ),
-			'create_theme_style'    => array( 'name' => 'design', 'arguments' => array( 'domain' => 'theme_style', 'action' => 'create' ) ),
-			'update_theme_style'    => array( 'name' => 'design', 'arguments' => array( 'domain' => 'theme_style', 'action' => 'update' ) ),
-			'delete_theme_style'    => array( 'name' => 'design', 'arguments' => array( 'domain' => 'theme_style', 'action' => 'delete' ) ),
-			'get_typography_scales' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'typography_scale', 'action' => 'list' ) ),
-			'create_typography_scale' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'typography_scale', 'action' => 'create' ) ),
-			'update_typography_scale' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'typography_scale', 'action' => 'update' ) ),
-			'delete_typography_scale' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'typography_scale', 'action' => 'delete' ) ),
-			'list_color_palettes'  => array( 'name' => 'design', 'arguments' => array( 'domain' => 'color_palette', 'action' => 'list' ) ),
-			'create_color_palette' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'color_palette', 'action' => 'create' ) ),
-			'update_color_palette' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'color_palette', 'action' => 'update' ) ),
-			'delete_color_palette' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'color_palette', 'action' => 'delete' ) ),
-			'add_color_to_palette' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'color_palette', 'action' => 'add_color' ) ),
-			'update_color_in_palette' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'color_palette', 'action' => 'update_color' ) ),
-			'delete_color_from_palette' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'color_palette', 'action' => 'delete_color' ) ),
-			'list_global_variables' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'list' ) ),
-			'create_variable_category' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'create_category' ) ),
-			'update_variable_category' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'update_category' ) ),
-			'delete_variable_category' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'delete_category' ) ),
-			'create_global_variable' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'create' ) ),
-			'update_global_variable' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'update' ) ),
-			'delete_global_variable' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'delete' ) ),
-			'batch_create_global_variables' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'batch_create' ) ),
-			'batch_delete_global_variables' => array( 'name' => 'design', 'arguments' => array( 'domain' => 'global_variable', 'action' => 'batch_delete' ) ),
-			'get_media_library'     => array( 'name' => 'media', 'arguments' => array( 'action' => 'list' ) ),
-			'search_unsplash'       => array( 'name' => 'media', 'arguments' => array( 'action' => 'search_unsplash' ) ),
-			'sideload_image'        => array( 'name' => 'media', 'arguments' => array( 'action' => 'sideload' ) ),
-			'set_featured_image'    => array( 'name' => 'media', 'arguments' => array( 'action' => 'set_featured' ) ),
-			'remove_featured_image' => array( 'name' => 'media', 'arguments' => array( 'action' => 'remove_featured' ) ),
-			'get_image_element_settings' => array( 'name' => 'media', 'arguments' => array( 'action' => 'get_image_settings' ) ),
-			'list_menus'            => array( 'name' => 'menu', 'arguments' => array( 'action' => 'list' ) ),
-			'get_menu'              => array( 'name' => 'menu', 'arguments' => array( 'action' => 'get' ) ),
-			'create_menu'           => array( 'name' => 'menu', 'arguments' => array( 'action' => 'create' ) ),
-			'update_menu'           => array( 'name' => 'menu', 'arguments' => array( 'action' => 'update' ) ),
-			'delete_menu'           => array( 'name' => 'menu', 'arguments' => array( 'action' => 'delete' ) ),
-		);
+		$this->tools[ $name ] = $entry;
 	}
 
 	/**
@@ -796,35 +313,29 @@ final class Router {
 	/**
 	 * Get available tools in MCP format.
 	 *
-	 * @return array<int, array<string, mixed>> Tools list.
+	 * @return array<int, array{name: string, description: string, inputSchema: array}> Tools list.
 	 */
-	public function get_available_tools(): array {
+	public function get_available_tools( string $protocol_version = '2025-03-26' ): array {
 		$tools = array();
 
-		foreach ( $this->tools as $tool ) {
-			if ( ! in_array( $tool['name'], self::VISIBLE_TOOL_NAMES, true ) ) {
-				continue;
-			}
+		// outputSchema was introduced in MCP spec 2025-11-25.
+		// Clients negotiating the older 2025-03-26 spec do not understand it
+		// and will silently fail on any tool that includes it.
+		$include_output_schema = ( '2025-11-25' === $protocol_version );
 
-			$available_tool = array(
+		foreach ( $this->tools as $tool ) {
+			$entry = array(
 				'name'        => $tool['name'],
 				'description' => $tool['description'],
 				'inputSchema' => $tool['inputSchema'],
 			);
-
-			if ( isset( $tool['annotations'] ) ) {
-				$available_tool['annotations'] = $tool['annotations'];
+			if ( ! empty( $tool['annotations'] ) ) {
+				$entry['annotations'] = $tool['annotations'];
 			}
-
-			if ( isset( $tool['outputSchema'] ) ) {
-				$available_tool['outputSchema'] = $tool['outputSchema'];
+			if ( $include_output_schema && ! empty( $tool['outputSchema'] ) ) {
+				$entry['outputSchema'] = $tool['outputSchema'];
 			}
-
-			if ( isset( $tool['defaults'] ) ) {
-				$available_tool['defaults'] = $tool['defaults'];
-			}
-
-			$tools[] = $available_tool;
+			$tools[] = $entry;
 		}
 
 		return $tools;
@@ -838,21 +349,6 @@ final class Router {
 	 * @return \WP_REST_Response The response.
 	 */
 	public function execute_tool( string $name, array $arguments ): \WP_REST_Response {
-		$resolved = $this->resolve_tool_call( $name, $arguments );
-
-		if ( is_wp_error( $resolved ) ) {
-			return Response::error(
-				'unknown_tool',
-				$resolved->get_error_message(),
-				404,
-				null,
-				__( 'Call tools/list to discover the supported canonical tool names and aliases.', 'bricks-mcp' )
-			);
-		}
-
-		$name      = $resolved['name'];
-		$arguments = $resolved['arguments'];
-
 		if ( ! isset( $this->tools[ $name ] ) ) {
 			return Response::error(
 				'unknown_tool',
@@ -874,6 +370,13 @@ final class Router {
 			);
 		}
 
+		// Apply smart defaults to reduce required parameters (Issue #26).
+		$arguments = $this->apply_smart_defaults( $name, $arguments );
+
+		// Strip meta-params before passing to handlers (response_format is consumed above).
+		$handler_args = $arguments;
+		unset( $handler_args['response_format'] );
+
 		// Validate tool arguments against inputSchema.
 		$validation = $this->validation_service->validate_arguments( $arguments, $tool['inputSchema'], $name );
 		if ( is_wp_error( $validation ) ) {
@@ -885,21 +388,24 @@ final class Router {
 		}
 
 		try {
-			$result = call_user_func( $tool['handler'], $arguments );
+			$result = call_user_func( $tool['handler'], $handler_args );
 
 			if ( is_wp_error( $result ) ) {
 				return Response::tool_error( $result );
 			}
 
-			$result          = $this->format_tool_result( $name, $result, $arguments['response_format'] ?? 'verbose' );
-			$encoded_result  = is_string( $result ) ? $result : wp_json_encode( $result, JSON_PRETTY_PRINT );
+			// Apply response_format optimization (Issue #23).
+			$response_format = $arguments['response_format'] ?? 'full';
+			if ( 'minimal' === $response_format && is_array( $result ) ) {
+				$result = $this->apply_minimal_format( $result );
+			}
 
 			return Response::success(
 				array(
 					'content' => array(
 						array(
 							'type' => 'text',
-							'text' => $encoded_result,
+							'text' => is_string( $result ) ? $result : wp_json_encode( $result, JSON_PRETTY_PRINT ),
 						),
 					),
 				)
@@ -925,7 +431,6 @@ final class Router {
 		$public_tools = array(
 			'get_builder_guide',
 			'wordpress', // Per-action checks handled inside tool_wordpress().
-			'content',   // Per-action checks handled inside content dispatcher.
 		);
 
 		if ( in_array( $tool_name, $public_tools, true ) ) {
@@ -980,10 +485,20 @@ final class Router {
 	private function tool_get_posts( array $args ): array {
 		$order = isset( $args['order'] ) && 'ASC' === strtoupper( (string) $args['order'] ) ? 'ASC' : 'DESC';
 
+		// GitHub #5: validate orderby against an allowlist to prevent WP_Query parameter injection.
+		$allowed_orderby = array( 'date', 'title', 'modified', 'ID', 'author', 'name', 'menu_order' );
+		$requested_orderby = isset( $args['orderby'] ) ? sanitize_text_field( (string) $args['orderby'] ) : 'date';
+		$orderby = in_array( $requested_orderby, $allowed_orderby, true ) ? $requested_orderby : 'date';
+
+		// GitHub #5: validate post_type against registered post types to prevent parameter injection.
+		$requested_post_type = isset( $args['post_type'] ) ? sanitize_text_field( (string) $args['post_type'] ) : 'post';
+		$registered_types    = array_keys( get_post_types() );
+		$post_type           = in_array( $requested_post_type, $registered_types, true ) ? $requested_post_type : 'post';
+
 		$query_args = array(
-			'post_type'      => isset( $args['post_type'] ) ? sanitize_text_field( (string) $args['post_type'] ) : 'post',
+			'post_type'      => $post_type,
 			'posts_per_page' => isset( $args['posts_per_page'] ) ? min( absint( $args['posts_per_page'] ), 100 ) : 10,
-			'orderby'        => isset( $args['orderby'] ) ? sanitize_text_field( (string) $args['orderby'] ) : 'date',
+			'orderby'        => $orderby,
 			'order'          => $order,
 			'post_status'    => 'publish',
 			's'              => isset( $args['s'] ) ? sanitize_text_field( (string) $args['s'] ) : '',
@@ -995,8 +510,26 @@ final class Router {
 
 		$posts = get_posts( $query_args );
 
-		// Prime meta cache (includes thumbnail IDs) to avoid N+1 queries for get_the_post_thumbnail_url().
-		update_postmeta_cache( wp_list_pluck( $posts, 'ID' ) );
+		// Issue 9: null-safe meta cache priming — third-party plugins (e.g. WP Rocket, Rank Math)
+		// can modify the posts array mid-hook so that entries are plain arrays rather than WP_Post
+		// objects. wp_list_pluck() + update_postmeta_cache() then crashes with
+		// "Attempt to assign property thumbnails_cached on array". Extract IDs safely instead.
+		$post_ids = array_values(
+			array_filter(
+				array_map(
+					function ( $p ) {
+						return is_object( $p ) && isset( $p->ID ) ? (int) $p->ID : 0;
+					},
+					$posts
+				),
+				function ( $id ) {
+					return $id > 0;
+				}
+			)
+		);
+		if ( ! empty( $post_ids ) ) {
+			update_postmeta_cache( $post_ids );
+		}
 
 		$result = array();
 
@@ -1068,13 +601,21 @@ final class Router {
 	 * @param array<string, mixed> $args Tool arguments.
 	 * @return array<int, array<string, mixed>> Users list.
 	 */
-	private function tool_get_users( array $args ): array {
+	private function tool_get_users( array $args ): array|\WP_Error {
 		$allowed_orderby = array( 'display_name', 'registered', 'ID' );
 		$allowed_order   = array( 'ASC', 'DESC' );
 
+		// GitHub #6: validate role against registered WordPress roles to prevent WP_User_Query
+		// returning all users when an invalid or empty role string is supplied.
+		$requested_role    = isset( $args['role'] ) ? sanitize_text_field( (string) $args['role'] ) : '';
+		$registered_roles  = array_keys( wp_roles()->get_names() );
+		$role              = ( '' === $requested_role || in_array( $requested_role, $registered_roles, true ) )
+			? $requested_role
+			: '';
+
 		$query_args = array(
 			'number'  => min( isset( $args['number'] ) ? absint( $args['number'] ) : 10, 100 ),
-			'role'    => isset( $args['role'] ) ? sanitize_text_field( (string) $args['role'] ) : '',
+			'role'    => $role,
 			'orderby' => isset( $args['orderby'] ) && in_array( $args['orderby'], $allowed_orderby, true )
 				? $args['orderby']
 				: 'display_name',
@@ -1087,7 +628,10 @@ final class Router {
 		$users  = get_users( $query_args );
 		$result = array();
 
-		$include_pii = ! empty( $args['include_pii'] );
+		// Issue 11 / GitHub #8: include_pii requires the caller to hold manage_options capability.
+		// Without this server-side check any authenticated MCP client could pass include_pii=true
+		// and extract all user emails and logins regardless of their WordPress role.
+		$include_pii = ! empty( $args['include_pii'] ) && current_user_can( 'manage_options' );
 
 		foreach ( $users as $user ) {
 			$user_data = array(
@@ -1149,14 +693,102 @@ final class Router {
 	}
 
 	/**
+	 * Register output schemas for key tools (Issue #25).
+	 *
+	 * Adds structured output type hints so MCP clients can validate
+	 * and display responses more intelligently.
+	 *
+	 * @return void
+	 */
+	public function register_output_schemas(): void {
+		$page_schema = array(
+			'type' => 'object',
+			'properties' => array(
+				'id'            => array('type'=>'integer'),
+				'title'         => array('type'=>'string'),
+				'status'        => array('type'=>'string'),
+				'permalink'     => array('type'=>'string'),
+				'element_count' => array('type'=>'integer'),
+			),
+		);
+		$element_schema = array(
+			'type' => 'object',
+			'properties' => array(
+				'id'         => array('type'=>'string'),
+				'name'       => array('type'=>'string'),
+				'parent'     => array('type'=>array('string','integer')),
+				'children'   => array('type'=>'array'),
+				'settings'   => array('type'=>'object'),
+			),
+		);
+		$diagnose_schema = array(
+			'type' => 'object',
+			'properties' => array(
+				'post_id'       => array('type'=>'integer'),
+				'status'        => array('type'=>'string','enum'=>array('clean','warnings','errors')),
+				'issue_count'   => array('type'=>'integer'),
+				'error_count'   => array('type'=>'integer'),
+				'warning_count' => array('type'=>'integer'),
+				'issues'        => array(
+					'type'=>'array',
+					'items'=>array(
+						'type'=>'object',
+						'properties'=>array(
+							'element_id'=>array('type'=>array('string','null')),
+							'severity'  =>array('type'=>'string','enum'=>array('error','warning')),
+							'type'      =>array('type'=>'string'),
+							'message'   =>array('type'=>'string'),
+							'fix'       =>array('type'=>'string'),
+						),
+					),
+				),
+			),
+		);
+
+		// Attach output schemas to registered tools.
+		if ( isset( $this->tools['page'] ) ) {
+			$this->tools['page']['outputSchema'] = array( 'type' => 'object', 'description' => 'Page data, element tree, or list of pages depending on action' );
+		}
+		if ( isset( $this->tools['page_diagnose'] ) ) {
+			$this->tools['page_diagnose']['outputSchema'] = $diagnose_schema;
+		}
+		if ( isset( $this->tools['element'] ) ) {
+			$this->tools['element']['outputSchema'] = array( 'type' => 'object', 'description' => 'Element operation result with affected element ID and page element count' );
+		}
+		if ( isset( $this->tools['template'] ) ) {
+			$this->tools['template']['outputSchema'] = array( 'type' => 'object', 'description' => 'Template data including id, title, type, status, and element array' );
+		}
+		if ( isset( $this->tools['global_class'] ) ) {
+			$this->tools['global_class']['outputSchema'] = array( 'type' => 'object', 'description' => 'Global class operation result with class name, id, and styles' );
+		}
+		if ( isset( $this->tools['get_site_info'] ) ) {
+			$this->tools['get_site_info']['outputSchema'] = array(
+				'type'       => 'object',
+				'properties' => array(
+					'name'     => array( 'type' => 'string' ),
+					'url'      => array( 'type' => 'string' ),
+					'version'  => array( 'type' => 'string' ),
+					'language' => array( 'type' => 'string' ),
+					'timezone' => array( 'type' => 'string' ),
+				),
+			);
+		}
+	}
+
+	/**
 	 * Register Bricks Builder-specific tools.
 	 *
 	 * Only registers tools if Bricks Builder is active (STNG-05 gate).
 	 * Non-Bricks tools continue working regardless of Bricks status.
+	 * Called via add_action( 'after_setup_theme' ) from the constructor.
+	 *
+	 * Issue 5b: private — only invoked from the constructor / action hook.
+	 * Issue 5d: apply_filters( 'bricks_mcp_tools' ) fires HERE, after ALL
+	 *           tools are registered, so third-party code sees the full list.
 	 *
 	 * @return void
 	 */
-	public function register_bricks_tools(): void {
+	private function register_bricks_tools(): void {
 		// Gate: skip registration when Bricks is not installed.
 		if ( ! $this->bricks_service->is_bricks_active() ) {
 			return;
@@ -1165,7 +797,7 @@ final class Router {
 		// Tool: get_builder_guide.
 		$this->register_tool(
 			'get_builder_guide',
-			__( 'Get the Bricks MCP builder guide with patterns, element settings reference, CSS gotchas, animation format, and workflow tips. Call this FIRST before building or modifying pages — it teaches you how to use the other tools efficiently.', 'bricks-mcp' ),
+			__( 'Essential reference for building with Bricks via MCP. Call this FIRST in any new conversation before building or editing pages. Contains element settings format, CSS composite keys, animation patterns, workflow tips, and common gotchas. Use section= to fetch only what you need.', 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1176,13 +808,19 @@ final class Router {
 					),
 				),
 			),
-			array( $this, 'tool_get_builder_guide' )
+			array( $this, 'tool_get_builder_guide' ),
+		array(
+			'readOnlyHint'    => true,
+			'destructiveHint' => false,
+			'idempotentHint'  => true,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Bricks consolidated tool (replaces enable_bricks, disable_bricks, get_bricks_settings, get_breakpoints, get_element_schemas).
 		$this->register_tool(
 			'bricks',
-			__( "Manage Bricks Builder settings and schema.\n\nActions:\n- enable: Enable Bricks editor on a post (requires: post_id)\n- disable: Disable Bricks editor on a post (requires: post_id)\n- get_settings: Get Bricks global settings (optional: category)\n- get_breakpoints: Get responsive breakpoints (no required params)\n- get_element_schemas: Get element type schemas (optional: element, catalog_only)\n- get_dynamic_tags: List available dynamic data tags for embedding in element settings (optional: group)\n- get_query_types: Get query loop object types and their settings schema (no required params)\n- get_form_schema: Get form element field types, action settings keys, and example form patterns (no required params)\n- get_interaction_schema: Get element interaction/animation triggers, actions, animation types, and example patterns (no required params)\n- get_component_schema: Get component property types, slot mechanics, and instantiation patterns (no required params)\n- get_popup_schema: Get popup display settings keys, trigger patterns, and popup creation workflow (no required params)\n- get_filter_schema: Get Bricks query filter element types, required settings, and setup workflow (no required params)\n- get_condition_schema: Get element visibility condition types, groups, compare operators, value types, and examples (no required params)\n- get_global_queries: List all reusable global query definitions (no required params)\n- set_global_query: Create or update a reusable global query (requires: name, settings; optional: query_id for update, category)\n- delete_global_query: Delete a global query by ID (requires: query_id)", 'bricks-mcp' ),
+			__( "Manage Bricks Builder settings, schemas, and global queries. Use schema actions to learn element/form/interaction formats before building.\n\nWHEN: Call get_element_schemas(catalog_only=true) to browse available elements. Call get_breakpoints to understand responsive keys. Call get_interaction_schema before adding animations. Call get_condition_schema before setting element visibility.\n\nActions:\n- enable/disable: Toggle Bricks editor on a post (requires: post_id)\n- get_settings: Global Bricks settings (optional: category)\n- get_breakpoints: Responsive breakpoint keys and composite key format\n- get_element_schemas: Element schemas (optional: element=name for one; catalog_only=true for name list)\n- get_dynamic_tags: Available dynamic data tags (optional: group filter)\n- get_query_types: Query loop object types and settings keys\n- get_form_schema: Form field types, action keys, and examples\n- get_interaction_schema: Interaction triggers, actions, animation types\n- get_component_schema: Component property types and slot mechanics\n- get_popup_schema: Popup display settings and trigger patterns\n- get_filter_schema: Query filter element types and setup workflow\n- get_condition_schema: Element visibility condition types and operators\n- get_global_queries: List reusable global query definitions\n- set_global_query: Create/update global query (requires: name, settings)\n- delete_global_query: Delete global query (requires: query_id)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1227,13 +865,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_bricks' )
+			array( $this, 'tool_bricks' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => false,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Page consolidated tool (replaces list_pages, search_pages, get_bricks_content, create_bricks_page, update_bricks_content, update_page, delete_page, duplicate_page, get_page_settings, update_page_settings + SEO).
 		$this->register_tool(
 			'page',
-			__( "Manage pages and Bricks content.\n\nActions:\n- list: List pages/posts (optional: post_type, status, posts_per_page, paged, bricks_only)\n- search: Search Bricks pages (requires: search; optional: post_type, posts_per_page, paged)\n- get: Get page with Bricks element data (requires: post_id; optional: view)\n- create: Create page with Bricks content (requires: title; optional: post_type, status, elements)\n- update_content: Update Bricks elements (requires: post_id, elements)\n- update_meta: Update page title/status (requires: post_id; optional: title, status, slug)\n- delete: Delete page (requires: post_id)\n- duplicate: Duplicate page (requires: post_id)\n- get_settings: Get page settings (requires: post_id)\n- update_settings: Update page settings (requires: post_id, settings)\n- get_seo: Get SEO data from active plugin with audit (requires: post_id)\n- update_seo: Update SEO fields via active plugin (requires: post_id; optional: title, description, robots_noindex, robots_nofollow, canonical, og_title, og_description, og_image, twitter_title, twitter_description, twitter_image, focus_keyword)", 'bricks-mcp' ),
+			__( "Read and write Bricks pages, posts, and their element content. Use this for every page-level operation.\n\nWHEN: Use page:get view=visual FIRST before editing any existing page to see the full layout tree with element IDs. Use page:list to discover pages. Use page:update_content to replace all elements.\n\nActions:\n- list: List pages (optional: post_type, status, posts_per_page, bricks_only=true)\n- search: Search Bricks pages (requires: search)\n- get: Get page with elements (requires: post_id; optional: view=visual|summary|detail)\n- create: Create page (requires: title; optional: post_type, status, elements)\n- update_content: Replace all Bricks elements (requires: post_id, elements) — destructive\n- update_meta: Update title/slug/status (requires: post_id)\n- delete: Trash page (requires: post_id) — destructive\n- duplicate: Clone page (requires: post_id)\n- get_settings: Get page-level Bricks settings (requires: post_id)\n- update_settings: Update page-level settings (requires: post_id, settings)\n- get_seo: Get SEO data with audit (requires: post_id)\n- update_seo: Write SEO fields (requires: post_id; optional: title, description, og_title, og_image, focus_keyword)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1273,8 +917,8 @@ final class Router {
 					),
 					'view'                => array(
 						'type'        => 'string',
-						'enum'        => array( 'detail', 'summary' ),
-						'description' => __( 'Detail level (get: detail=full settings, summary=tree outline)', 'bricks-mcp' ),
+						'enum'        => array( 'detail', 'summary', 'visual' ),
+						'description' => __( 'Detail level for page:get. visual = human-readable nested tree with element IDs, labels, text previews, bg colors — USE THIS before editing existing pages. summary = element type counts + tree structure. detail = full raw settings (large).', 'bricks-mcp' ),
 					),
 					'title'               => array(
 						'type'        => 'string',
@@ -1339,13 +983,68 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_page' )
+			array( $this, 'tool_page' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
+
+		// page_diagnose: scan existing pages for known issues before editing.
+		$this->register_tool(
+			'page_diagnose',
+			__( 'Pre-edit health check for any Bricks page or template. Returns issues with severity, element ID, and actionable fix. Call this before editing existing pages to avoid building on a broken foundation. Read-only — never modifies data. Checks 10 common issues: missing script tags, %root% in CSS, wrong keys (_maxWidth), plain hex colors, invalid breakpoints, orphaned children, phantom content on headers/footers, missing global classes, integer border values, PHP without executeCode.', 'bricks-mcp' ),
+			array(
+				'type'       => 'object',
+				'properties' => array(
+					'post_id' => array(
+						'type'        => 'integer',
+						'description' => __( 'Post/page/template ID to diagnose (required)', 'bricks-mcp' ),
+					),
+				),
+				'required' => array( 'post_id' ),
+			),
+			array( $this, 'tool_page_diagnose' ),
+			array(
+				'readOnlyHint'    => true,
+				'destructiveHint' => false,
+				'idempotentHint'  => true,
+				'openWorldHint'   => false,
+			)
+		);
+
+		$this->register_tool(
+			'page_spacing_audit',
+			__( 'Audit padding/margin rhythm across all sections and containers on a page. Returns per-element spacing values, flags missing mobile overrides, and calculates vertical rhythm consistency score. Read-only.', 'bricks-mcp' ),
+			array(
+				'type'       => 'object',
+				'properties' => array(
+					'post_id' => array(
+						'type'        => 'integer',
+						'description' => __( 'Post/page ID to audit (required)', 'bricks-mcp' ),
+					),
+				),
+				'required' => array( 'post_id' ),
+			),
+			array( $this, 'tool_page_spacing_audit' ),
+			array(
+				'readOnlyHint'    => true,
+				'destructiveHint' => false,
+				'idempotentHint'  => true,
+				'openWorldHint'   => false,
+			)
+		);
+
+		$this->register_tool( 'page_screenshot', __( 'Screenshots a published page via Microlink API (free, 50/day, no key needed) with ApiFlash fallback (free key in MCP Settings). Returns base64 image and CDN URL. Use before page_visual_review or to visually verify changes. Read-only — calls external API.', 'bricks-mcp' ), array( 'type' => 'object', 'properties' => array( 'post_id' => array( 'type' => 'integer', 'description' => 'Post/page ID to screenshot (required)' ), 'viewport' => array( 'type' => 'string', 'enum' => array( 'desktop', 'tablet', 'mobile' ), 'description' => 'Viewport size (default: desktop)' ), 'fresh' => array( 'type' => 'boolean', 'description' => 'Bypass CDN cache for a fresh capture (default: false)' ) ), 'required' => array( 'post_id' ) ), array( $this, 'tool_page_screenshot' ), array( 'readOnlyHint' => true, 'destructiveHint' => false, 'idempotentHint' => false, 'openWorldHint' => true ) );
+
+		$this->register_tool( 'page_visual_review', __( 'Screenshots a page and sends the image to Claude Vision (Anthropic API) for structured visual review. Returns a natural language critique, issues list with severity, and positive observations. Requires Anthropic API key in MCP Settings. Depends on page_screenshot working correctly.', 'bricks-mcp' ), array( 'type' => 'object', 'properties' => array( 'post_id' => array( 'type' => 'integer', 'description' => 'Post/page ID to review (required)' ), 'viewport' => array( 'type' => 'string', 'enum' => array( 'desktop', 'tablet', 'mobile' ), 'description' => 'Viewport size (default: desktop)' ), 'focus' => array( 'type' => 'string', 'enum' => array( 'spacing', 'alignment', 'colors', 'all' ), 'description' => 'Review focus area (default: all)' ) ), 'required' => array( 'post_id' ) ), array( $this, 'tool_page_visual_review' ), array( 'readOnlyHint' => true, 'destructiveHint' => false, 'idempotentHint' => false, 'openWorldHint' => true ) );
 
 		// Element consolidated tool (replaces add_element, update_element, remove_element).
 		$this->register_tool(
 			'element',
-			__( "Manage individual Bricks elements on a page.\n\nActions:\n- add: Add element to page (requires: post_id, name; optional: parent_id, position, settings)\n- update: Update element settings (requires: post_id, element_id, settings)\n- remove: Remove element from page (requires: post_id, element_id)\n- get_conditions: Get element visibility conditions (requires: post_id, element_id)\n- set_conditions: Set element visibility conditions (requires: post_id, element_id, conditions)\n- move: Move/reorder element within page (requires: post_id, element_id; optional: target_parent_id, position)\n- bulk_update: Update settings on multiple elements (requires: post_id, updates)", 'bricks-mcp' ),
+			__( "Add, update, move, or remove individual elements on a Bricks page. Use page:get view=visual first to get element IDs before calling this.\n\nWHEN: Use element:add to insert new elements. Use element:update to change settings on a specific element. Use element:bulk_update to change multiple elements in one call (more efficient). Use element:remove to delete an element and all its children.\n\nActions:\n- add: Insert element (requires: post_id, name; optional: parent_id=0, position, settings)\n- update: Update element settings — merges with existing (requires: post_id, element_id, settings)\n- remove: Delete element + children (requires: post_id, element_id) — destructive\n- get_conditions: Get visibility conditions (requires: post_id, element_id)\n- set_conditions: Set visibility conditions (requires: post_id, element_id, conditions)\n- move: Reorder element (requires: post_id, element_id; optional: target_parent_id, position)\n- bulk_update: Update many elements at once (requires: post_id, updates array; max 50)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1410,19 +1109,25 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_element' )
+			array( $this, 'tool_element' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => false,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Template consolidated tool (replaces list_templates, get_template_content, create_template, update_template, delete_template, duplicate_template).
 		$this->register_tool(
 			'template',
-			__( 'Manage Bricks templates and targeting rules for a given site; requires an action and validates template-specific inputs.', 'bricks-mcp' ),
+			__( "Create, read, update, and delete Bricks templates (headers, footers, popups, sections). Use template_condition to control which pages each template appears on.\n\nWHEN: Use template:create then template_condition:set to deploy a header or footer. Use template:get to inspect element structure. Use template:export/import to move templates between sites.\n\nActions:\n- list: List templates (optional: type, status, tag, bundle)\n- get: Get full element content (requires: template_id)\n- create: Create template (requires: title, type; optional: elements, status)\n- update: Update title/status/type (requires: template_id)\n- delete: Trash template (requires: template_id) — destructive\n- duplicate: Clone template (requires: template_id)\n- get_popup_settings / set_popup_settings: Manage popup display rules (requires: template_id)\n- export: Export as JSON (requires: template_id)\n- import: Import from JSON data (requires: template_data)\n- import_url: Import from remote URL (requires: url)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
 					'action'      => array(
 						'type'        => 'string',
-						'enum'        => array( 'list', 'get', 'create', 'update', 'delete', 'duplicate', 'get_popup_settings', 'set_popup_settings', 'export', 'import', 'import_url', 'get_types', 'set', 'resolve', 'list_tags', 'list_bundles', 'create_tag', 'create_bundle', 'delete_tag', 'delete_bundle' ),
+						'enum'        => array( 'list', 'get', 'create', 'update', 'delete', 'duplicate', 'get_popup_settings', 'set_popup_settings', 'export', 'import', 'import_url' ),
 						'description' => __( 'Action to perform', 'bricks-mcp' ),
 					),
 					'template_id' => array(
@@ -1473,14 +1178,6 @@ final class Router {
 						'type'        => 'array',
 						'description' => __( 'Array of Bricks condition objects (create: optional)', 'bricks-mcp' ),
 					),
-					'post_id'     => array(
-						'type'        => 'integer',
-						'description' => __( 'Post ID for resolve action.', 'bricks-mcp' ),
-					),
-					'term_id'     => array(
-						'type'        => 'integer',
-						'description' => __( 'Template taxonomy term ID for delete_tag/delete_bundle.', 'bricks-mcp' ),
-					),
 					'settings'    => array(
 						'type'        => 'object',
 						'description' => __( 'Popup settings key-value pairs (set_popup_settings: required). Null value deletes key. Use bricks:get_popup_schema for valid keys.', 'bricks-mcp' ),
@@ -1500,13 +1197,14 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_template' )
+			array( $this, 'tool_template' ),
+		array('readOnlyHint'=>false,'destructiveHint'=>true,'idempotentHint'=>false,'openWorldHint'=>false)
 		);
 
 		// Template condition consolidated tool (replaces get_condition_types, set_template_conditions, resolve_templates).
 		$this->register_tool(
 			'template_condition',
-			__( "Manage Bricks template conditions (which templates apply where).\n\nActions:\n- get_types: List available condition types (no required params)\n- set: Set template conditions (requires: template_id, conditions)\n- resolve: Find which templates apply to a post (optional: post_id, post_type)", 'bricks-mcp' ),
+			__( "Control which pages each Bricks template targets. Higher score conditions win when multiple templates compete. Essential after creating headers, footers, and WooCommerce templates.\n\nWHEN: After creating any template with template:create, call template_condition:set to activate it. Use get_types to see all condition formats. Use resolve to debug which templates are loading on a specific page.\n\nActions:\n- get_types: All condition types with scoring explanation (no params)\n- set: Activate template on pages (requires: template_id, conditions array; empty array deactivates)\n- resolve: Which templates win for a post (optional: post_id, post_type)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1534,13 +1232,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_template_condition' )
+			array( $this, 'tool_template_condition' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => false,
+			'idempotentHint'  => true,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Template taxonomy consolidated tool (replaces list_template_tags, list_template_bundles, create_template_tag, create_template_bundle, delete_template_tag, delete_template_bundle).
 		$this->register_tool(
 			'template_taxonomy',
-			__( "Manage Bricks template tags and bundles.\n\nActions:\n- list_tags: List all template tags (no required params)\n- list_bundles: List all template bundles (no required params)\n- create_tag: Create template tag (requires: name)\n- create_bundle: Create template bundle (requires: name)\n- delete_tag: Delete template tag (requires: term_id)\n- delete_bundle: Delete template bundle (requires: term_id)", 'bricks-mcp' ),
+			__( "Manage template tags and bundles for organising and filtering Bricks templates. Tags and bundles are taxonomy terms assigned to templates.\n\nWHEN: Create tags/bundles first, then assign to templates via template:create or template:update. Use list_tags to see existing terms before creating duplicates.\n\nActions:\n- list_tags / list_bundles: List all terms\n- create_tag / create_bundle: New term (requires: name)\n- delete_tag / delete_bundle: Remove term (requires: term_id) — unassigned from all templates", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1560,20 +1264,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_template_taxonomy' )
-		);
-
-		$this->register_tool(
-			'design',
-			__( 'Manage Bricks design tokens and style systems for a given site; requires a design domain and an action.', 'bricks-mcp' ),
-			$this->get_design_tool_schema(),
-			array( $this, 'tool_design' )
+			array( $this, 'tool_template_taxonomy' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Global class consolidated tool (replaces get_global_classes, create_global_class, update_global_class, delete_global_class, apply_global_class, remove_global_class, batch_create_global_classes, batch_delete_global_classes, import_classes_from_css, list_global_class_categories, create_global_class_category, delete_global_class_category).
 		$this->register_tool(
 			'global_class',
-			__( "Manage Bricks global CSS classes.\n\nActions:\n- list: List global classes (optional: category, search)\n- create: Create class (requires: name; optional: styles, color, category)\n- update: Update class styles (requires: class_name; optional: styles, color, category, replace_styles)\n- delete: Delete/trash class (requires: class_name)\n- apply: Apply class to elements (requires: post_id, element_ids, class_name)\n- remove: Remove class from elements (requires: post_id, element_ids, class_name)\n- batch_create: Create multiple classes (requires: classes)\n- batch_delete: Delete multiple classes (requires: classes)\n- import_css: Import CSS as global classes (requires: css)\n- list_categories: List class categories (no required params)\n- create_category: Create category (requires: category_name)\n- delete_category: Delete category (requires: category_id)\n- export: Export global classes as JSON (optional: category)\n- import_json: Import global classes from JSON data (requires: classes_data)", 'bricks-mcp' ),
+			__( "Manage reusable Bricks CSS classes that apply styles across multiple elements. Changes here affect every element using the class sitewide.\n\nWHEN: Create classes for repeated styles (buttons, cards, spacing). Use apply/remove to assign classes to elements instead of duplicating inline styles. Use import_css to bulk-create from existing stylesheets.\n\nActions:\n- list: List classes (optional: search, category)\n- create: Create class (requires: name; optional: styles, color, category)\n- update: Merge styles into class (requires: class_name; optional: styles, replace_styles=false)\n- delete: Trash class (requires: class_name) — destructive\n- apply: Add class to elements (requires: post_id, element_ids, class_name)\n- remove: Remove class from elements (requires: post_id, element_ids, class_name)\n- batch_create: Create multiple classes at once (requires: classes array)\n- batch_delete: Delete multiple classes (requires: classes array)\n- import_css: Parse raw CSS into global classes (requires: css)\n- list_categories / create_category / delete_category: Manage class groupings\n- export: Export as JSON (optional: category)\n- import_json: Import from JSON (requires: classes_data)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1637,18 +1340,19 @@ final class Router {
 					),
 					'classes_data'   => array(
 						'type'        => 'object',
-						'description' => __( 'Global classes JSON data to import (import_json: required). Array of class objects with "name" key, or {classes: [...], categories: [...]}.', 'bricks-mcp' ),
+						'description' => __( 'Global classes JSON data to import (import_json: required). Array of class objects with "name" key, or {classes: array(...), categories: array(...)}.', 'bricks-mcp' ),
 					),
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_global_class' )
+			array( $this, 'tool_global_class' ),
+		array('readOnlyHint'=>false,'destructiveHint'=>true,'idempotentHint'=>false,'openWorldHint'=>false)
 		);
 
 		// Theme style consolidated tool (replaces list_theme_styles, get_theme_style, create_theme_style, update_theme_style, delete_theme_style).
 		$this->register_tool(
 			'theme_style',
-			__( "Manage Bricks theme styles (site-wide typography, colors, spacing).\n\nActions:\n- list: List all theme styles (no required params)\n- get: Get theme style details (requires: style_id)\n- create: Create theme style (requires: name; optional: styles, conditions)\n- update: Update theme style (requires: style_id; optional: name, styles, conditions, active)\n- delete: Delete theme style (requires: style_id)", 'bricks-mcp' ),
+			__( "Manage site-wide Bricks theme styles — typography, colors, spacing, and button defaults. Styles apply conditionally based on template conditions. Changes affect every page the style targets.\n\nWHEN: Create a style with conditions to apply different typography per page type. Use update(replace_section=true) to completely swap a settings group. Use list to check active styles before creating new ones to avoid conflicts.\n\nActions:\n- list: All theme styles with condition_types reference\n- get: Full style details (requires: style_id)\n- create: New style (requires: name; optional: styles object, conditions)\n- update: Modify style (requires: style_id; optional: name, styles, conditions, active, replace_section)\n- delete: Remove/deactivate style (requires: style_id; optional: hard_delete=false)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1689,13 +1393,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_theme_style' )
+			array( $this, 'tool_theme_style' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Typography scale consolidated tool (replaces get_typography_scales, create_typography_scale, update_typography_scale, delete_typography_scale).
 		$this->register_tool(
 			'typography_scale',
-			__( "Manage Bricks typography scales.\n\nActions:\n- list: List typography scales (no required params)\n- create: Create typography scale (requires: name, settings)\n- update: Update typography scale (requires: scale_id; optional: name, settings)\n- delete: Delete typography scale (requires: scale_id)", 'bricks-mcp' ),
+			__( "Manage Bricks typography scales — CSS custom property steps (--text-sm, --text-md, etc.) that generate utility classes. Use var(--prefix-step) in typography settings to reference scales.\n\nWHEN: Create a scale to establish a consistent type system across the site. Use list to check existing scales before creating. Scales generate both CSS variables and utility classes automatically.\n\nActions:\n- list: All scales with prefix and steps\n- create: New scale (requires: name, prefix=--text-, steps=array({name,value}))\n- update: Modify scale (requires: scale_id)\n- delete: Remove scale (requires: scale_id) — CSS variables removed after Bricks regenerates", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1731,13 +1441,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_typography_scale' )
+			array( $this, 'tool_typography_scale' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Color palette consolidated tool (replaces list_color_palettes, create_color_palette, update_color_palette, delete_color_palette, add_color_to_palette, update_color_in_palette, delete_color_from_palette).
 		$this->register_tool(
 			'color_palette',
-			__( "Manage Bricks color palettes and colors.\n\nActions:\n- list: List all color palettes (no required params)\n- create: Create palette (requires: name; optional: colors)\n- update: Update palette (requires: palette_id; optional: name)\n- delete: Delete palette (requires: palette_id)\n- add_color: Add color to palette (requires: palette_id, color {light, name; optional: raw, parent, utility_classes}). 'hex' accepted as alias for 'light'\n- update_color: Update color in palette (requires: palette_id, color_id; optional fields in color: light, name, raw, parent_color_id, utility_classes). 'hex' accepted as alias for 'light'\n- delete_color: Remove color from palette (requires: palette_id, color_id)", 'bricks-mcp' ),
+			__( "Manage Bricks color palettes shown in the color picker. Colors can have CSS variable aliases (raw) and utility classes.\n\nWHEN: Use list to see existing palettes before adding colors. Use add_color with raw=var(--my-color) to link palette colors to CSS variables. Use hex as alias for light field.\n\nActions:\n- list: All palettes with colors\n- create: New palette (requires: name; optional: initial colors array)\n- update: Rename palette (requires: palette_id, name)\n- delete: Remove palette (requires: palette_id) — destructive\n- add_color: Add color (requires: palette_id, name, light/hex; optional: raw=CSS var, parent)\n- update_color: Modify color (requires: palette_id, color_id)\n- delete_color: Remove color (requires: palette_id, color_id)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1773,13 +1489,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_color_palette' )
+			array( $this, 'tool_color_palette' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Global variable consolidated tool (replaces list_global_variables, create_variable_category, update_variable_category, delete_variable_category, create_global_variable, update_global_variable, delete_global_variable, batch_create_global_variables).
 		$this->register_tool(
 			'global_variable',
-			__( "Manage Bricks global CSS variables.\n\nActions:\n- list: List all global variables (no required params)\n- create_category: Create variable category (requires: category_name)\n- update_category: Rename variable category (requires: category_id, category_name)\n- delete_category: Delete variable category (requires: category_id)\n- create: Create variable (requires: name, value; optional: category)\n- update: Update variable (requires: variable_id; optional: name, value, category)\n- delete: Delete variable (requires: variable_id)\n- batch_create: Create multiple variables (requires: variables)\n- batch_delete: Delete multiple variables (requires: variable_ids; max 50)\n- search: Search variables by name/value (optional: query, value_query, category_id)", 'bricks-mcp' ),
+			__( "Manage Bricks CSS custom properties (--variables) used in theme styles and element settings. Changes propagate sitewide instantly.\n\nWHEN: Use to define design tokens like spacing, font sizes, and brand colors. Use search to find variables before creating duplicates. Use batch_create to import a full design token set at once.\n\nActions:\n- list: List all variables with categories\n- search: Search by name or value (optional: query, value_query, category_id)\n- create: Create variable (requires: name, value; optional: category)\n- update: Update variable (requires: variable_id)\n- delete: Delete variable (requires: variable_id) — destructive\n- batch_create: Create many at once (requires: variables array)\n- batch_delete: Delete many at once (requires: variable_ids; max 50) — destructive\n- create_category / update_category / delete_category: Manage groupings", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1832,13 +1554,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_global_variable' )
+			array( $this, 'tool_global_variable' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Media consolidated tool (replaces search_unsplash, sideload_image, get_media_library, set_featured_image, remove_featured_image, get_image_element_settings).
 		$this->register_tool(
 			'media',
-			__( "Manage images and media library.\n\nActions:\n- search_unsplash: Search Unsplash photos (requires: query; optional: per_page)\n- sideload: Download image from URL to media library (requires: url; optional: filename, alt_text)\n- list: Browse media library (optional: per_page, page, mime_type)\n- set_featured: Set featured image on post (requires: post_id, attachment_id)\n- remove_featured: Remove featured image from post (requires: post_id)\n- get_image_settings: Get Bricks image element settings format (optional: target)", 'bricks-mcp' ),
+			__( "Search, upload, and assign images. Connects to Unsplash for free stock photos and WordPress media library.\n\nWHEN: Use search_unsplash then sideload to add stock photos to the media library. Use get_image_settings to get the correct Bricks format for image/background/gallery settings. Use set_featured to assign a post thumbnail.\n\nActions:\n- search_unsplash: Find stock photos (requires: query) — calls external API\n- sideload: Download URL into media library (requires: url; optional: filename, alt_text)\n- list: Browse media library (optional: per_page, mime_type)\n- set_featured: Set post thumbnail (requires: post_id, attachment_id)\n- remove_featured: Remove post thumbnail (requires: post_id)\n- get_image_settings: Get Bricks-format image object (requires: attachment_id, target=image|background|gallery)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1895,13 +1623,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_media' )
+			array( $this, 'tool_media' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => false,
+			'idempotentHint'  => false,
+			'openWorldHint'   => true,
+		)
 		);
 
 		// Menu consolidated tool (replaces create_menu, update_menu, delete_menu, get_menu, list_menus, set_menu_items, assign_menu, unassign_menu, list_menu_locations).
 		$this->register_tool(
 			'menu',
-			__( "Manage WordPress navigation menus.\n\nActions:\n- list: List all menus (no required params)\n- get: Get menu with item tree (requires: menu_id)\n- create: Create menu (requires: name)\n- update: Rename menu (requires: menu_id, name)\n- delete: Delete menu permanently (requires: menu_id)\n- set_items: Replace all menu items (requires: menu_id, items)\n- assign: Assign menu to theme location (requires: menu_id, location)\n- unassign: Remove menu from location (requires: location)\n- list_locations: List available theme locations (no required params)", 'bricks-mcp' ),
+			__( "Create and manage WordPress navigation menus and assign them to theme locations. Use set_items to replace an entire menu tree in one call.\n\nWHEN: Use list then list_locations to see current assignments. Use set_items with a nested array to define the full menu structure at once. Use assign after creating a menu to make it appear in the header/footer nav element.\n\nActions:\n- list: All menus with item counts\n- get: Full menu with nested item tree (requires: menu_id)\n- create: New menu (requires: name)\n- update: Rename menu (requires: menu_id, name)\n- delete: Permanently delete menu (requires: menu_id) — destructive\n- set_items: Replace all items with new tree (requires: menu_id, items)\n- assign: Assign to theme location (requires: menu_id, location)\n- unassign: Remove from location (requires: location)\n- list_locations: Available theme locations with current assignments", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1929,13 +1663,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_menu' )
+			array( $this, 'tool_menu' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Component consolidated tool (component definition CRUD + instance operations).
 		$this->register_tool(
 			'component',
-			__( "Manage Bricks Components (reusable element trees with properties and slots).\n\nActions:\n- list: List all component definitions (optional: category) [read]\n- get: Get full component definition (requires: component_id) [read]\n- create: Create component from element tree (requires: label, elements; optional: category, description, properties)\n- update: Update component definition (requires: component_id; optional: label, category, description, elements, properties)\n- delete: Delete component definition (requires: component_id)\n- instantiate: Place component instance on a page (requires: component_id, post_id; optional: parent_id, position, properties)\n- update_properties: Update instance property values (requires: post_id, instance_id, properties)\n- fill_slot: Fill a slot on a component instance with element content (requires: post_id, instance_id, slot_id, slot_elements)", 'bricks-mcp' ),
+			__( "Create and manage reusable Bricks components — element trees with configurable properties and content slots. Changes to a component definition propagate to all instances automatically.\n\nWHEN: Build a card, hero, or testimonial once as a component, then instantiate it on multiple pages. Use fill_slot to inject custom content into component placeholders. Use update_properties to change text/image per instance.\n\nActions:\n- list: List all components (optional: category)\n- get: Get full component definition (requires: component_id)\n- create: Build component from element tree (requires: label, elements)\n- update: Update definition — affects all instances (requires: component_id)\n- delete: Delete definition (requires: component_id) — instances render empty\n- instantiate: Place instance on a page (requires: component_id, post_id)\n- update_properties: Set per-instance property values (requires: post_id, instance_id, properties)\n- fill_slot: Inject content into a slot (requires: post_id, instance_id, slot_id, slot_elements)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -1995,13 +1735,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_component' )
+			array( $this, 'tool_component' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// WooCommerce consolidated tool (status, elements, dynamic tags, template scaffolding).
 		$this->register_tool(
 			'woocommerce',
-			__( "WooCommerce builder tools. Requires WooCommerce plugin active.\n\nActions:\n- status: Get WooCommerce status (version, page IDs, Bricks WooCommerce settings, available template types)\n- get_elements: List WooCommerce-specific Bricks elements (optional: category — product, cart, checkout, account, archive, utility)\n- get_dynamic_tags: Get WooCommerce dynamic data tags reference (optional: category — product_price, product_display, product_info, cart, order, post_compatible)\n- scaffold_template: Create a pre-populated WooCommerce template with standard elements (requires: template_type; optional: title, status)\n- scaffold_store: Create all essential WooCommerce templates at once (optional: types, skip_existing)", 'bricks-mcp' ),
+			__( "Build WooCommerce pages using Bricks. Requires WooCommerce active. Use scaffold_store to create all 8 required templates in one call.\n\nWHEN: Run woocommerce:status first to confirm WooCommerce is active. Use scaffold_store(skip_existing=true) to generate all templates without overwriting existing ones. Use get_elements to discover WooCommerce-specific Bricks elements. Use get_dynamic_tags for product data tag reference.\n\nActions:\n- status: WooCommerce version, page IDs, and Bricks WooCommerce settings\n- get_elements: WooCommerce-specific Bricks elements (optional: category=product|cart|checkout|account|archive)\n- get_dynamic_tags: Dynamic data tag reference (optional: category=product_price|product_display|cart|order)\n- scaffold_template: Create one pre-populated template (requires: template_type)\n- scaffold_store: Create all 8 WooCommerce templates at once (optional: types, skip_existing=true)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -2039,13 +1785,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_woocommerce' )
+			array( $this, 'tool_woocommerce' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => false,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Font management consolidated tool.
 		$this->register_tool(
 			'font',
-			__( "Manage Bricks font settings.\n\nActions:\n- get_status: Get font configuration overview (Google Fonts, Adobe Fonts, webfont loading)\n- get_adobe_fonts: List cached Adobe Fonts from your project\n- update_settings: Update font settings (optional: disable_google_fonts, webfont_loading, custom_fonts_preload)", 'bricks-mcp' ),
+			__( "Read and update Bricks font configuration including Google Fonts, Adobe Fonts, and webfont loading strategy.\n\nWHEN: Use get_status to audit current font setup. Use update_settings to disable Google Fonts for performance or set font-display strategy (swap is recommended for CLS). Use get_adobe_fonts to see Adobe Fonts project fonts.\n\nActions:\n- get_status: Font config overview (Google Fonts enabled, webfont loading, custom preload)\n- get_adobe_fonts: List cached Adobe Fonts\n- update_settings: Update font config (optional: disable_google_fonts, webfont_loading=swap|block|optional, custom_fonts_preload)", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -2070,13 +1822,19 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_font' )
+			array( $this, 'tool_font' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => false,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
 
 		// Custom code consolidated tool.
 		$this->register_tool(
 			'code',
-			__( "Manage page-level custom CSS and JavaScript.\n\nActions:\n- get_page_css: Get page custom CSS and scripts (requires: post_id)\n- set_page_css: Set page custom CSS (requires: post_id, css)\n- get_page_scripts: Get page custom scripts only (requires: post_id)\n- set_page_scripts: Set page custom scripts (requires: post_id; optional: header, body_header, body_footer) [dangerous_actions required]", 'bricks-mcp' ),
+			__( "Read and write page-level custom CSS and JavaScript. Scripts require Dangerous Actions enabled in MCP settings.\n\nWHEN: Use set_page_css for page-specific overrides. Use set_page_scripts to inject GSAP, analytics, or other scripts into head/body. Always get first before setting to avoid overwriting existing code. Use code:get_page_css to check what CSS is already on a page.\n\nActions:\n- get_page_css: Read current custom CSS + scripts (requires: post_id)\n- set_page_css: Write/replace custom CSS (requires: post_id, css; empty string clears)\n- get_page_scripts: Read custom scripts only (requires: post_id)\n- set_page_scripts: Write scripts to head/body (requires: post_id; optional: header, body_header, body_footer) — requires Dangerous Actions enabled", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
@@ -2108,8 +1866,180 @@ final class Router {
 				),
 				'required'   => array( 'action' ),
 			),
-			array( $this, 'tool_code' )
+			array( $this, 'tool_code' ),
+		array(
+			'readOnlyHint'    => false,
+			'destructiveHint' => true,
+			'idempotentHint'  => false,
+			'openWorldHint'   => false,
+		)
 		);
+
+		/**
+		 * Filter the registered MCP tools.
+		 *
+		 * Fires after ALL default and Bricks-specific tools have been registered,
+		 * so third-party plugins see the complete tool list. (Issue 5d fix)
+		 *
+		 * @param array $tools Registered tools.
+		 */
+		$this->tools = apply_filters( 'bricks_mcp_tools', $this->tools );
+	}
+
+	/**
+	 * Apply minimal response format to strip verbose/redundant fields.
+	 *
+	 * When response_format=minimal is passed, removes large nested fields
+	 * that are rarely needed, reducing token usage by 40-60%.
+	 *
+	 * @param array<string, mixed> $result Full result array.
+	 * @return array<string, mixed> Slimmed result.
+	 */
+	private function apply_minimal_format( array $result ): array {
+		// Strip known verbose fields from common responses.
+		$strip_keys = [
+			'inputSchema',   // Tool schema definitions — large
+			'schemas',       // Element schemas — very large
+			'catalog',       // Full element catalog
+			'guide',         // Builder guide text
+			'content'        // Raw element arrays on list responses
+		];
+
+		foreach ( $strip_keys as $key ) {
+			if ( isset( $result[ $key ] ) && ( is_array( $result[ $key ] ) || strlen( (string) $result[ $key ] ) > 500 ) ) {
+				$result[ $key ] = '[omitted — use response_format=full to include]';
+			}
+		}
+
+		// For element arrays, return only IDs and names.
+		if ( isset( $result['elements'] ) && is_array( $result['elements'] ) ) {
+			$result['elements'] = array_map(
+				function( $el ) {
+					return [
+						'id'   => $el['id'] ?? null,
+						'name' => $el['name'] ?? null,
+					];
+				},
+				$result['elements']
+			);
+		}
+
+		// For templates list, strip element content.
+		if ( isset( $result['templates'] ) && is_array( $result['templates'] ) ) {
+			$result['templates'] = array_map(
+				function( $t ) {
+					unset( $t['elements'] );
+					return $t;
+				},
+				$result['templates']
+			);
+		}
+
+		$result['_format'] = 'minimal';
+		return $result;
+	}
+
+	/**
+	 * Apply smart defaults to tool arguments to reduce required parameters.
+	 *
+	 * Injects sensible defaults so AI clients can call tools with fewer params.
+	 *
+	 * @param string               $tool_name Tool name.
+	 * @param array<string, mixed> $args      Raw arguments.
+	 * @return array<string, mixed> Arguments with defaults applied.
+	 */
+	private function apply_smart_defaults( string $tool_name, array $args ): array {
+		switch ( $tool_name ) {
+			case 'page':
+				// Default action to 'list' when omitted.
+				if ( ! isset( $args['action'] ) ) {
+					$args['action'] = 'list';
+				}
+				// Default view to 'visual' for get action (best for editing).
+				if ( isset( $args['action'] ) && 'get' === $args['action'] && ! isset( $args['view'] ) ) {
+					$args['view'] = 'summary';
+				}
+				// Default posts_per_page to 20 for list.
+				if ( isset( $args['action'] ) && 'list' === $args['action'] && ! isset( $args['posts_per_page'] ) ) {
+					$args['posts_per_page'] = 20;
+				}
+				// Default status to 'any' for list so drafts are included.
+				if ( isset( $args['action'] ) && 'list' === $args['action'] && ! isset( $args['status'] ) ) {
+					$args['status'] = 'any';
+				}
+				break;
+
+			case 'bricks':
+				// Default action to 'get_settings'.
+				if ( ! isset( $args['action'] ) ) {
+					$args['action'] = 'get_settings';
+				}
+				// Default get_element_schemas to catalog_only=true to reduce response size.
+				if ( isset( $args['action'] ) && 'get_element_schemas' === $args['action'] && ! isset( $args['catalog_only'] ) && ! isset( $args['element'] ) ) {
+					$args['catalog_only'] = true;
+				}
+				break;
+
+			case 'element':
+				// Default parent_id to '0' (root) for add action.
+				if ( isset( $args['action'] ) && 'add' === $args['action'] && ! isset( $args['parent_id'] ) ) {
+					$args['parent_id'] = '0';
+				}
+				break;
+
+			case 'template':
+				// Default status to 'publish' for create.
+				if ( isset( $args['action'] ) && 'create' === $args['action'] && ! isset( $args['status'] ) ) {
+					$args['status'] = 'publish';
+				}
+				// Default list to show all statuses.
+				if ( isset( $args['action'] ) && 'list' === $args['action'] && ! isset( $args['status'] ) ) {
+					$args['status'] = 'publish';
+				}
+				break;
+
+			case 'wordpress':
+				// Default posts_per_page to 20.
+				if ( isset( $args['action'] ) && 'get_posts' === $args['action'] && ! isset( $args['posts_per_page'] ) ) {
+					$args['posts_per_page'] = 20;
+				}
+				break;
+
+			case 'global_class':
+				// Default replace_styles to false (merge, not replace).
+				if ( isset( $args['action'] ) && 'update' === $args['action'] && ! isset( $args['replace_styles'] ) ) {
+					$args['replace_styles'] = false;
+				}
+				break;
+		}
+
+		return $args;
+	}
+
+	/**
+	 * Enrich a WP_Error with structured next-step guidance.
+	 *
+	 * Wraps the raw error in a structured array so AI clients get
+	 * actionable guidance alongside the error message.
+	 *
+	 * @param \WP_Error $error The original error.
+	 * @param string    $hint  What the AI should do next.
+	 * @param string    $tool  Suggested tool to call next (optional).
+	 * @return \WP_Error The same error with enriched message.
+	 */
+	private function enrich_error( \WP_Error $error, string $hint = '', string $tool = '' ): \WP_Error {
+		$data = array(
+			'error'      => $error->get_error_code(),
+			'message'    => $error->get_error_message(),
+		);
+		if ( ! empty( $hint ) ) {
+			$data['next_step'] = $hint;
+		}
+		if ( ! empty( $tool ) ) {
+			$data['suggested_tool'] = $tool;
+		}
+		$error->add_data( $data );
+		return $error;
 	}
 
 	/**
@@ -2123,7 +2053,8 @@ final class Router {
 		if ( ! $this->bricks_service->is_bricks_active() ) {
 			return new \WP_Error(
 				'bricks_required',
-				__( 'Bricks Builder must be installed and active to use this tool. Install and activate Bricks Builder, then retry.', 'bricks-mcp' )
+				__( 'Bricks Builder must be installed and active. Install and activate it, then retry.', 'bricks-mcp' ),
+				[ 'next_step' => 'Install Bricks Builder from Plugins > Add New, activate it, then retry this tool.', 'suggested_tool' => 'get_site_info' ]
 			);
 		}
 		return null;
@@ -2171,51 +2102,6 @@ final class Router {
 				)
 			),
 		};
-	}
-
-	/**
-	 * Tool: Content dispatcher — routes to WordPress, page, and element operations.
-	 *
-	 * @param array<string, mixed> $args Tool arguments including action.
-	 * @return array<string, mixed>|\WP_Error
-	 */
-	public function tool_content( array $args ): array|\WP_Error {
-		$action = $args['action'] ?? '';
-
-		$read_actions = array( 'get_posts', 'get_post', 'get_users', 'get_plugins' );
-		$required_cap = in_array( $action, $read_actions, true ) ? null : 'manage_options';
-
-		if ( null !== $required_cap && ! current_user_can( $required_cap ) ) {
-			return new \WP_Error(
-				'bricks_mcp_forbidden',
-				sprintf(
-					/* translators: %s: Capability name */
-					__( 'You do not have the required capability (%s) to use this action.', 'bricks-mcp' ),
-					$required_cap
-				)
-			);
-		}
-
-		if ( in_array( $action, array( 'get_posts', 'get_post', 'get_users', 'get_plugins' ), true ) ) {
-			return $this->tool_wordpress( $args );
-		}
-
-		if ( in_array( $action, array( 'list', 'search', 'get', 'create', 'update_content', 'update_meta', 'delete', 'duplicate', 'get_settings', 'update_settings', 'get_seo', 'update_seo' ), true ) ) {
-			return $this->tool_page( $args );
-		}
-
-		if ( in_array( $action, array( 'add', 'update', 'remove', 'get_conditions', 'set_conditions', 'move', 'bulk_update' ), true ) ) {
-			return $this->tool_element( $args );
-		}
-
-		return new \WP_Error(
-			'invalid_action',
-			sprintf(
-				/* translators: %s: Action name */
-				__( 'Invalid action "%s" for content tool.', 'bricks-mcp' ),
-				$action
-			)
-		);
 	}
 
 	/**
@@ -3859,7 +3745,7 @@ final class Router {
 		}
 
 		if ( empty( $args['post_id'] ) ) {
-			return new \WP_Error( 'missing_post_id', __( 'post_id is required. Use list_pages to find valid post IDs.', 'bricks-mcp' ) );
+			return new \WP_Error( 'missing_post_id', __( 'post_id is required.', 'bricks-mcp' ), [ 'next_step' => 'Call page:list to find valid post IDs.', 'suggested_tool' => 'page' ] );
 		}
 
 		$post_id = (int) $args['post_id'];
@@ -3868,19 +3754,16 @@ final class Router {
 		if ( ! $post ) {
 			return new \WP_Error(
 				'post_not_found',
-				/* translators: %d: Post ID */
-				sprintf( __( 'Post %d not found. Use list_pages to find valid post IDs.', 'bricks-mcp' ), $post_id )
+				sprintf( __( 'Post %d not found.', 'bricks-mcp' ), $post_id ),
+				[ 'next_step' => 'Call page:list to find valid post IDs.', 'suggested_tool' => 'page' ]
 			);
 		}
 
 		if ( ! $this->bricks_service->is_bricks_page( $post_id ) ) {
 			return new \WP_Error(
 				'not_bricks_page',
-				sprintf(
-					/* translators: %d: Post ID */
-					__( 'Post %d is not using the Bricks editor. Use the enable_bricks tool to enable Bricks on this post first.', 'bricks-mcp' ),
-					$post_id
-				)
+				sprintf( __( 'Post %d is not using the Bricks editor.', 'bricks-mcp' ), $post_id ),
+				[ 'next_step' => 'Call bricks:enable(post_id=' . $post_id . ') to enable Bricks on this post first.', 'suggested_tool' => 'bricks' ]
 			);
 		}
 
@@ -3891,6 +3774,13 @@ final class Router {
 			return array(
 				'metadata' => $metadata,
 				'summary'  => $this->bricks_service->get_page_summary( $post_id ),
+			);
+		}
+
+		if ( 'visual' === $view ) {
+			return array(
+				'metadata' => $metadata,
+				'visual'   => $this->bricks_service->get_visual_layout( $post_id ),
 			);
 		}
 
@@ -4606,20 +4496,11 @@ final class Router {
 			'export'              => $this->tool_export_template( $args ),
 			'import'              => $this->tool_import_template( $args ),
 			'import_url'          => $this->tool_import_template_url( $args ),
-			'get_types'           => $this->tool_get_condition_types( $args ),
-			'set'                 => $this->tool_set_template_conditions( $args ),
-			'resolve'             => $this->tool_resolve_templates( $args ),
-			'list_tags'           => $this->tool_list_template_tags( $args ),
-			'list_bundles'        => $this->tool_list_template_bundles( $args ),
-			'create_tag'          => $this->tool_create_template_tag( $args ),
-			'create_bundle'       => $this->tool_create_template_bundle( $args ),
-			'delete_tag'          => $this->tool_delete_template_tag( $args ),
-			'delete_bundle'       => $this->tool_delete_template_bundle( $args ),
 			default               => new \WP_Error(
 				'invalid_action',
 				sprintf(
 					/* translators: %s: Action name */
-					__( 'Invalid action "%s". Valid actions: list, get, create, update, delete, duplicate, get_popup_settings, set_popup_settings, export, import, import_url, get_types, set, resolve, list_tags, list_bundles, create_tag, create_bundle, delete_tag, delete_bundle', 'bricks-mcp' ),
+					__( 'Invalid action "%s". Valid actions: list, get, create, update, delete, duplicate, get_popup_settings, set_popup_settings, export, import, import_url', 'bricks-mcp' ),
 					$action
 				)
 			),
@@ -4789,33 +4670,6 @@ final class Router {
 					/* translators: %s: Action name */
 					__( 'Invalid action "%s". Valid actions: list_tags, list_bundles, create_tag, create_bundle, delete_tag, delete_bundle', 'bricks-mcp' ),
 					$action
-				)
-			),
-		};
-	}
-
-	/**
-	 * Tool: Design dispatcher — routes to the appropriate Bricks design subsystem.
-	 *
-	 * @param array<string, mixed> $args Tool arguments including action and domain.
-	 * @return array<string, mixed>|\WP_Error Result data or error.
-	 */
-	public function tool_design( array $args ): array|\WP_Error {
-		$domain = $args['domain'] ?? '';
-
-		return match ( $domain ) {
-			'global_class'     => $this->tool_global_class( $args ),
-			'theme_style'      => $this->tool_theme_style( $args ),
-			'typography_scale' => $this->tool_typography_scale( $args ),
-			'color_palette'    => $this->tool_color_palette( $args ),
-			'global_variable'  => $this->tool_global_variable( $args ),
-			'font'             => $this->tool_font( $args ),
-			default            => new \WP_Error(
-				'invalid_domain',
-				sprintf(
-					/* translators: %s: Domain name */
-					__( 'Invalid design domain "%s". Valid domains: global_class, theme_style, typography_scale, color_palette, global_variable, font', 'bricks-mcp' ),
-					(string) $domain
 				)
 			),
 		};
@@ -10035,5 +9889,85 @@ final class Router {
 			'total_failed'  => count( $failed ),
 			'next_steps'    => 'Use template:get to view and customize individual templates. Use page:update_content or element:add/update to modify elements. Use get_builder_guide(section="woocommerce") for patterns.',
 		);
+	}
+	
+	/**
+	 * Tool handler: page_diagnose — pre-edit health check.
+	 *
+	 * @param array<string, mixed> $args Tool arguments.
+	 * @return array<string, mixed>|\WP_Error Diagnostics report or error.
+	 */
+	private function tool_page_diagnose( array $args ): array|\WP_Error {
+		$bricks_error = $this->require_bricks();
+		if ( null !== $bricks_error ) {
+			return $bricks_error;
+		}
+
+		if ( empty( $args['post_id'] ) ) {
+			return new \WP_Error(
+				'missing_post_id',
+				__( 'post_id is required.', 'bricks-mcp' ),
+				array( 'next_step' => 'Call page:list to find valid post IDs.', 'suggested_tool' => 'page' )
+			);
+		}
+
+		$post_id = (int) $args['post_id'];
+		$post    = get_post( $post_id );
+
+		if ( ! $post ) {
+			return new \WP_Error(
+				'post_not_found',
+				sprintf( __( 'Post %d not found.', 'bricks-mcp' ), $post_id ),
+				array( 'next_step' => 'Call page:list to find valid post IDs.', 'suggested_tool' => 'page' )
+			);
+		}
+
+		return $this->bricks_service->diagnose_page( $post_id );
+	}
+
+	/**
+	 * Tool handler: page_spacing_audit — spacing rhythm audit.
+	 *
+	 * @param array<string, mixed> $args Tool arguments.
+	 * @return array<string, mixed>|\WP_Error Audit result or error.
+	 */
+	private function tool_page_spacing_audit( array $args ): array|\WP_Error {
+		$post_id = absint( $args['post_id'] ?? 0 );
+		if ( $post_id <= 0 ) {
+			return new \WP_Error( 'missing_param', __( 'post_id is required.', 'bricks-mcp' ) );
+		}
+		return $this->bricks_service->get_spacing_audit( $post_id );
+	}
+
+	/**
+	 * Tool handler: page_screenshot — capture page via external API.
+	 *
+	 * @param array<string, mixed> $args Tool arguments.
+	 * @return array<string, mixed>|\WP_Error Screenshot data or error.
+	 */
+	private function tool_page_screenshot( array $args ): array|\WP_Error {
+		$post_id  = absint( $args['post_id'] ?? 0 );
+		$viewport = in_array( $args['viewport'] ?? '', array( 'desktop', 'tablet', 'mobile' ), true ) ? (string) $args['viewport'] : 'desktop';
+		$fresh    = (bool) ( $args['fresh'] ?? false );
+		if ( $post_id <= 0 ) {
+			return new \WP_Error( 'missing_param', __( 'post_id is required.', 'bricks-mcp' ) );
+		}
+		return $this->bricks_service->take_screenshot( $post_id, $viewport, $fresh );
+	}
+
+	/**
+	 * Tool handler: page_visual_review — screenshot + Claude Vision critique.
+	 *
+	 * @param array<string, mixed> $args Tool arguments.
+	 * @return array<string, mixed>|\WP_Error Review data or error.
+	 */
+	private function tool_page_visual_review( array $args ): array|\WP_Error {
+		$post_id  = absint( $args['post_id'] ?? 0 );
+		$viewport = in_array( $args['viewport'] ?? '', array( 'desktop', 'tablet', 'mobile' ), true ) ? (string) $args['viewport'] : 'desktop';
+		$focus    = in_array( $args['focus'] ?? '', array( 'spacing', 'alignment', 'colors', 'all' ), true ) ? (string) $args['focus'] : 'all';
+		if ( $post_id <= 0 ) {
+			return new \WP_Error( 'missing_param', __( 'post_id is required.', 'bricks-mcp' ) );
+		}
+		return $this->bricks_service->get_visual_review( $post_id, $viewport, $focus );
 	}
 }

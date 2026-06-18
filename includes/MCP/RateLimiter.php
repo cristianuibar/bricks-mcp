@@ -58,7 +58,7 @@ final class RateLimiter {
 	 * @param string $identifier The rate limit identifier (e.g. 'user_42' or 'ip_1.2.3.4').
 	 * @return true|\WP_Error True if within limit, WP_Error with status 429 if exceeded.
 	 */
-	public static function check( string $identifier ): true|\WP_Error {
+	public static function check( string $identifier ): bool|\WP_Error {
 		$settings = get_option( 'bricks_mcp_settings', [] );
 		$limit    = (int) ( $settings['rate_limit_rpm'] ?? 120 );
 

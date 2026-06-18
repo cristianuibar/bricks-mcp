@@ -317,6 +317,7 @@
 		var commandEl = document.getElementById('bricks-mcp-generated-command');
 		var claudeConfigEl = document.getElementById('bricks-mcp-generated-claude-config');
 		var geminiConfigEl = document.getElementById('bricks-mcp-generated-gemini-config');
+		var desktopConfigEl = document.getElementById('bricks-mcp-generated-desktop-config');
 
 		if (!btn) {
 			return;
@@ -354,6 +355,9 @@
 					}
 					if (geminiConfigEl) {
 						geminiConfigEl.textContent = data.data.gemini_config;
+					}
+					if (desktopConfigEl) {
+						desktopConfigEl.textContent = data.data.desktop_config;
 					}
 
 					// Show the result container.
@@ -468,3 +472,37 @@
 		init();
 	}
 })();
+
+( function ( $ ) {
+    'use strict';
+    $( document ).on( 'click', '#bricks-mcp-test-apiflash', function () {
+        var $btn    = $( this );
+        var $result = $( '#bricks-mcp-test-apiflash-result' );
+        var apiKey  = $( '#bricks_mcp_apiflash_key' ).val().trim();
+        if ( ! apiKey ) {
+            $result.css( 'color', '#cc0000' ).text( 'Enter an API key first.' );
+            return;
+        }
+        $btn.prop( 'disabled', true ).text( 'Testing\u2026' );
+        $result.css( 'color', '' ).text( '' );
+        $.post(
+            window.ajaxurl || '/wp-admin/admin-ajax.php',
+            {
+                action:  'bricks_mcp_test_screenshot',
+                nonce:   ( window.bricksMcpUpdates || {} ).nonce || '',
+                api_key: apiKey,
+            },
+            function ( r ) {
+                if ( r && r.success ) {
+                    $result.css( 'color', '#46b450' ).text( '\u2713 Key valid \u2014 ApiFlash OK.' );
+                } else {
+                    $result.css( 'color', '#cc0000' ).text( '\u2717 ' + ( ( r && r.data && r.data.message ) || 'Test failed.' ) );
+                }
+            }
+        ).fail( function () {
+            $result.css( 'color', '#cc0000' ).text( '\u2717 Request failed.' );
+        } ).always( function () {
+            $btn.prop( 'disabled', false ).text( 'Test Key' );
+        } );
+    } );
+} )( jQuery );

@@ -31,6 +31,16 @@ final class StreamableHttpHandler {
 	public const PROTOCOL_VERSION = '2025-03-26';
 
 	/**
+	 * Accepted client protocol versions (for compatibility).
+	 *
+	 * @var string[]
+	 */
+	private const ACCEPTED_PROTOCOL_VERSIONS = [
+		'2025-03-26',
+		'2025-11-25',
+	];
+
+	/**
 	 * JSON-RPC parse error code.
 	 *
 	 * @var int
@@ -87,18 +97,12 @@ final class StreamableHttpHandler {
 	private Router $router;
 
 	/**
-	 * Resource registry.
+	 * MCP protocol version negotiated with the client during initialize.
+	 * Used to gate 2025-11-25-only features like outputSchema from tools/list.
 	 *
-	 * @var ResourceRegistry
+	 * @var string
 	 */
-	private ResourceRegistry $resource_registry;
-
-	/**
-	 * Prompt registry.
-	 *
-	 * @var PromptRegistry
-	 */
-	private PromptRegistry $prompt_registry;
+	private string $negotiated_protocol = self::PROTOCOL_VERSION;
 
 	/**
 	 * Constructor.
@@ -106,9 +110,7 @@ final class StreamableHttpHandler {
 	 * @param Router $router The MCP router instance.
 	 */
 	public function __construct( Router $router ) {
-		$this->router            = $router;
-		$this->resource_registry = new ResourceRegistry( $router->get_bricks_service() );
-		$this->prompt_registry   = new PromptRegistry();
+		$this->router = $router;
 	}
 
 	/**
@@ -296,10 +298,10 @@ final class StreamableHttpHandler {
 			'notifications/initialized' => null,
 			'tools/list'              => $this->handle_tools_list( $id, is_array( $params ) ? $params : [] ),
 			'tools/call'              => $this->handle_tools_call( $id, is_array( $params ) ? $params : [] ),
-			'resources/list'          => $this->handle_resources_list( $id, is_array( $params ) ? $params : [] ),
-			'resources/read'          => $this->handle_resources_read( $id, is_array( $params ) ? $params : [] ),
-			'prompts/list'            => $this->handle_prompts_list( $id, is_array( $params ) ? $params : [] ),
+			'prompts/list'            => $this->handle_prompts_list( $id ),
 			'prompts/get'             => $this->handle_prompts_get( $id, is_array( $params ) ? $params : [] ),
+			'resources/list'          => $this->handle_resources_list( $id ),
+			'resources/read'          => $this->handle_resources_read( $id, is_array( $params ) ? $params : [] ),
 			'ping'                    => $this->jsonrpc_success( $id, [] ),
 			default                   => $this->jsonrpc_error( $id, self::METHOD_NOT_FOUND, 'Method not found' ),
 		};
@@ -328,13 +330,21 @@ final class StreamableHttpHandler {
 	 * @param array<string, mixed> $params The request params (unused but required by spec).
 	 * @return array<string, mixed> JSON-RPC success response.
 	 */
-	private function handle_initialize( int|string $id, array $params ): array { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found
+	private function handle_initialize( int|string $id, array $params ): array {
+		// Echo back the client's requested protocol version if it is in our accepted list.
+		// This prevents mcp-remote from closing the SSE stream on a version mismatch.
+		$client_version   = $params['protocolVersion'] ?? self::PROTOCOL_VERSION;
+		$protocol_version = in_array( $client_version, self::ACCEPTED_PROTOCOL_VERSIONS, true )
+			? $client_version
+			: self::PROTOCOL_VERSION;
+
+		// Store the negotiated version so tools/list can gate 2025-11-25 features.
+		$this->negotiated_protocol = $protocol_version;
+
 		$capabilities = [
 			'tools' => [
 				'listChanged' => true,
 			],
-			'resources' => new \stdClass(),
-			'prompts'   => new \stdClass(),
 		];
 
 		$server_info = [
@@ -350,7 +360,7 @@ final class StreamableHttpHandler {
 		return $this->jsonrpc_success(
 			$id,
 			[
-				'protocolVersion' => self::PROTOCOL_VERSION,
+				'protocolVersion' => $protocol_version,
 				'capabilities'    => $capabilities,
 				'serverInfo'      => $server_info,
 				'instructions'    => $instructions,
@@ -368,7 +378,8 @@ final class StreamableHttpHandler {
 	 * @return array<string, mixed> JSON-RPC success response with tools array.
 	 */
 	private function handle_tools_list( int|string $id, array $params ): array { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found
-		$tools = $this->router->get_available_tools();
+		// Pass negotiated protocol so outputSchema is only included for 2025-11-25 clients.
+		$tools = $this->router->get_available_tools( $this->negotiated_protocol );
 
 		return $this->jsonrpc_success( $id, [ 'tools' => $tools ] );
 	}
@@ -413,85 +424,6 @@ final class StreamableHttpHandler {
 	}
 
 	/**
-	 * Handle the resources/list JSON-RPC method.
-	 *
-	 * @param int|string           $id     The JSON-RPC request id.
-	 * @param array<string, mixed> $params The request params (unused).
-	 * @return array<string, mixed>
-	 */
-	private function handle_resources_list( int|string $id, array $params ): array { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found
-		return $this->jsonrpc_success(
-			$id,
-			[
-				'resources' => $this->resource_registry->list_resources(),
-			]
-		);
-	}
-
-	/**
-	 * Handle the resources/read JSON-RPC method.
-	 *
-	 * @param int|string           $id     The JSON-RPC request id.
-	 * @param array<string, mixed> $params The request params.
-	 * @return array<string, mixed>
-	 */
-	private function handle_resources_read( int|string $id, array $params ): array {
-		$uri = isset( $params['uri'] ) ? (string) $params['uri'] : '';
-
-		if ( '' === $uri ) {
-			return $this->jsonrpc_error( $id, self::INVALID_PARAMS, 'Missing required parameter: uri' );
-		}
-
-		$result = $this->resource_registry->read_resource( $uri );
-
-		if ( is_wp_error( $result ) ) {
-			return $this->jsonrpc_error( $id, self::INVALID_PARAMS, $result->get_error_message() );
-		}
-
-		return $this->jsonrpc_success( $id, $result );
-	}
-
-	/**
-	 * Handle the prompts/list JSON-RPC method.
-	 *
-	 * @param int|string           $id     The JSON-RPC request id.
-	 * @param array<string, mixed> $params The request params (unused).
-	 * @return array<string, mixed>
-	 */
-	private function handle_prompts_list( int|string $id, array $params ): array { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found
-		return $this->jsonrpc_success(
-			$id,
-			[
-				'prompts' => $this->prompt_registry->list_prompts(),
-			]
-		);
-	}
-
-	/**
-	 * Handle the prompts/get JSON-RPC method.
-	 *
-	 * @param int|string           $id     The JSON-RPC request id.
-	 * @param array<string, mixed> $params The request params.
-	 * @return array<string, mixed>
-	 */
-	private function handle_prompts_get( int|string $id, array $params ): array {
-		$name      = isset( $params['name'] ) ? (string) $params['name'] : '';
-		$arguments = isset( $params['arguments'] ) && is_array( $params['arguments'] ) ? $params['arguments'] : array();
-
-		if ( '' === $name ) {
-			return $this->jsonrpc_error( $id, self::INVALID_PARAMS, 'Missing required parameter: name' );
-		}
-
-		$result = $this->prompt_registry->get_prompt( $name, $arguments );
-
-		if ( is_wp_error( $result ) ) {
-			return $this->jsonrpc_error( $id, self::INVALID_PARAMS, $result->get_error_message() );
-		}
-
-		return $this->jsonrpc_success( $id, $result );
-	}
-
-	/**
 	 * Emit SSE response headers.
 	 *
 	 * Flushes output buffers, extends PHP execution time via the filterable
@@ -515,16 +447,24 @@ final class StreamableHttpHandler {
 		header( 'Cache-Control: no-cache' );
 		header( 'Connection: keep-alive' );
 		header( 'X-Accel-Buffering: no' );
+		// Strip Retry-After injected by LiteSpeed on Hostinger.
+		// mcp-remote interprets Retry-After on 200 responses as a rate-limit
+		// signal and backs off, breaking Claude Desktop connections.
+		header_remove( 'Retry-After' );
+		// Mcp-Session-Id: required by MCP Streamable HTTP spec (2025-03-26).
+		// Echo the client-supplied session ID back, or generate a new one.
+		// mcp-remote 0.1.17+ uses this to correlate POST tool responses with
+		// the persistent GET SSE stream, preventing spurious stream reconnects
+		// that trigger TypeError: terminated in mcp-remote 0.1.37+.
+		$session_id = isset( $_SERVER['HTTP_MCP_SESSION_ID'] )
+			? sanitize_text_field( wp_unslash( $_SERVER['HTTP_MCP_SESSION_ID'] ) )
+			: wp_generate_uuid4();
+		header( 'Mcp-Session-Id: ' . $session_id );
+		header( 'Access-Control-Expose-Headers: Mcp-Session-Id' );
 
-		register_shutdown_function(
-			function () {
-				echo ": stream-end\n\n";
-				if ( ob_get_level() > 0 ) {
-					ob_flush();
-				}
-				flush();
-			}
-		);
+		// NOTE: No shutdown function emitting stream-end comment.
+		// mcp-remote 0.1.37+ treats any SSE data after the JSON response
+		// as a stream error (TypeError: terminated). Clean exit only.
 	}
 
 	/**
@@ -534,13 +474,15 @@ final class StreamableHttpHandler {
 	 * @return void
 	 */
 	private function emit_sse_event( array $payload ): void {
-		echo "event: message\n";
-		echo 'data: ' . wp_json_encode( $payload ) . "\n\n";
+		// SSE spec: each event ends with exactly two newlines (\n\n).
+		// Extra newlines after the double-newline cause mcp-remote 0.1.37+
+		// to fire TypeError: terminated, treating the empty frame as a fatal.
+		$event = 'event: message' . "\n" . 'data: ' . wp_json_encode( $payload ) . "\n\n";
+		echo $event;
 
 		if ( ob_get_level() > 0 ) {
 			ob_flush();
 		}
-
 		flush();
 	}
 
@@ -576,5 +518,79 @@ final class StreamableHttpHandler {
 				'message' => $message,
 			],
 		];
+	}
+
+	private function handle_prompts_list( int|string $id ): array {
+		return $this->jsonrpc_success( $id, [
+			'prompts' => [
+				['name'=>'build-page','description'=>'Guided workflow to create a new Bricks page from scratch','arguments'=>[['name'=>'page_type','description'=>'Type of page (landing, blog, contact, about)','required'=>false]]],
+				['name'=>'edit-page','description'=>'Guided workflow to safely edit an existing Bricks page','arguments'=>[['name'=>'post_id','description'=>'Post ID of the page to edit','required'=>true]]],
+				['name'=>'build-woocommerce','description'=>'Guided workflow to scaffold all WooCommerce templates','arguments'=>[]],
+				['name'=>'debug-page','description'=>'Diagnose and fix issues on an existing Bricks page','arguments'=>[['name'=>'post_id','description'=>'Post ID to diagnose','required'=>true]]],
+			],
+		] );
+	}
+
+	private function handle_prompts_get( int|string $id, array $params ): array {
+		$name = $params['name'] ?? '';
+		$args = $params['arguments'] ?? [];
+		switch ( $name ) {
+			case 'build-page':
+				$type = $args['page_type'] ?? 'landing';
+				$msg  = "Follow this workflow to create a new {$type} page:\n1. Call get_builder_guide(section='settings') to load element reference.\n2. Call page:create with title and post_type=page.\n3. Use element:add to build the layout section by section.\n4. Call page:get view=visual to review the result."; break;
+			case 'edit-page':
+				$pid  = $args['post_id'] ?? '[post_id]';
+				$msg  = "Follow this workflow to edit page {$pid}:\n1. Call page_diagnose(post_id={$pid}) to check for issues.\n2. Call page:get(post_id={$pid}, view=visual) to see the current layout.\n3. Make targeted edits with element:update or element:add.\n4. Verify with page:get view=visual again."; break;
+			case 'build-woocommerce':
+				$msg  = "Follow this workflow to scaffold WooCommerce templates:\n1. Call woocommerce:status to check WooCommerce is active.\n2. Call woocommerce:scaffold_store to create all 8 templates at once.\n3. Use template:get on each to review structure.\n4. Use element:update to customise individual elements."; break;
+			case 'debug-page':
+				$pid  = $args['post_id'] ?? '[post_id]';
+				$msg  = "Follow this workflow to debug page {$pid}:\n1. Call page_diagnose(post_id={$pid}) — review all errors and warnings.\n2. For each error: use element:update with the suggested fix.\n3. Re-run page_diagnose to confirm issues are resolved.\n4. Use page:get view=visual to verify the final layout."; break;
+			default:
+				return $this->jsonrpc_error( $id, self::INVALID_PARAMS, "Unknown prompt: {$name}. Use prompts/list to see available prompts." );
+		}
+		return $this->jsonrpc_success( $id, [
+			'description' => $name,
+			'messages'    => [['role'=>'user','content'=>['type'=>'text','text'=>$msg]]],
+		] );
+	}
+
+	private function handle_resources_list( int|string $id ): array {
+		$site_url = get_site_url();
+		return $this->jsonrpc_success( $id, [
+			'resources' => [
+				['uri'=>'bricks://design-system','name'=>'Design System','description'=>'Active color palettes, global variables, typography scales, and global classes','mimeType'=>'application/json'],
+				['uri'=>'bricks://site-structure','name'=>'Site Structure','description'=>'All Bricks pages, templates, and their element counts','mimeType'=>'application/json'],
+				['uri'=>'bricks://global-classes','name'=>'Global Classes','description'=>'All global CSS classes with their styles','mimeType'=>'application/json'],
+			],
+		] );
+	}
+
+	private function handle_resources_read( int|string $id, array $params ): array {
+		$uri = $params['uri'] ?? '';
+		switch ( $uri ) {
+			case 'bricks://design-system':
+				$data = [
+					'color_palettes'   => get_option( 'bricks_color_palette', [] ),
+					'global_variables' => get_option( 'bricks_global_variables', [] ),
+					'typography_scales'=> get_option( 'bricks_typography_scales', [] ),
+					'global_classes'  => array_map(fn($c)=>['name'=>$c['name']??''  ,'id'=>$c['id']??''], get_option('bricks_global_classes',[]) ),
+				]; break;
+			case 'bricks://site-structure':
+				$pages = get_posts(['post_type'=>'page','posts_per_page'=>-1,'post_status'=>'any','fields'=>'ids']);
+				$templates = get_posts(['post_type'=>'bricks_template','posts_per_page'=>-1,'post_status'=>'any','fields'=>'ids']);
+				$data = [
+					'pages'     => array_map(fn($id)=>['id'=>$id,'title'=>get_the_title($id),'slug'=>get_post_field('post_name',$id)],$pages),
+					'templates' => array_map(fn($id)=>['id'=>$id,'title'=>get_the_title($id),'type'=>get_post_meta($id,'_bricks_template_type',true)],$templates),
+				]; break;
+			case 'bricks://global-classes':
+				$data = get_option('bricks_global_classes',[]);
+				break;
+			default:
+				return $this->jsonrpc_error( $id, self::INVALID_PARAMS, "Unknown resource URI: {$uri}. Use resources/list to see available resources." );
+		}
+		return $this->jsonrpc_success( $id, [
+			'contents' => [['uri'=>$uri,'mimeType'=>'application/json','text'=>wp_json_encode($data,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES)]],
+		] );
 	}
 }
