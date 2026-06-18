@@ -30,7 +30,7 @@ The MCP server exposes 11 canonical tools (call `tools/list` for schemas). Legac
 * **content** — Pages and posts: list, search, CRUD, Bricks element trees, SEO (view: visual supported)
 * **template** — Template library import, export, and management
 * **design** — Global classes, color palettes, and typography
-* **media** — Media library operations and Unsplash image search (API key optional)
+* **media** — Media library operations; Unsplash image search requires an API key in plugin settings
 * **menu** — WordPress navigation menus
 * **component** — Reusable Bricks components
 * **woocommerce** — WooCommerce Bricks page scaffolds

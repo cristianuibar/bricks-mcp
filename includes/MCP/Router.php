@@ -466,7 +466,7 @@ final class Router {
 			'menu'               => 'Manage WordPress navigation menus for the current site; requires an action and a menu target when writing.',
 			'component'          => 'Manage Bricks components for the current site; requires an action and component-specific identifiers when writing.',
 			'woocommerce'        => 'Manage WooCommerce builder data for the current site; requires WooCommerce to be active and an action.',
-			'code'               => 'Manage page-level custom CSS and scripts for a given post; requires an action and a post ID.',
+			'code'               => 'Manage page-level custom CSS and scripts for a given post; set_page_css and set_page_scripts require dangerous_actions enabled.',
 			'wordpress'          => 'Read WordPress core data for the current site; requires a read-only action scoped to posts, users, or plugins.',
 			'page'               => 'Manage Bricks pages for the current site; requires an action and a page target when writing.',
 			'element'            => 'Manage Bricks elements for a given page; requires an action and explicit element identifiers when writing.',
