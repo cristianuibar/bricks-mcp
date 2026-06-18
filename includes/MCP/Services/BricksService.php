@@ -2480,8 +2480,12 @@ class BricksService {
 		$text_preview = null;
 		foreach ( [ 'text', 'content', 'heading', 'label' ] as $tk ) {
 			if ( ! empty( $settings[ $tk ] ) && is_string( $settings[ $tk ] ) ) {
-				$raw          = wp_strip_all_tags( $settings[ $tk ] );
-				$text_preview = mb_strlen( $raw ) > 80 ? mb_substr( $raw, 0, 77 ) . '...' : $raw;
+				$raw = wp_strip_all_tags( $settings[ $tk ] );
+				if ( function_exists( 'mb_strlen' ) && function_exists( 'mb_substr' ) ) {
+					$text_preview = mb_strlen( $raw ) > 80 ? mb_substr( $raw, 0, 77 ) . '...' : $raw;
+				} else {
+					$text_preview = strlen( $raw ) > 80 ? substr( $raw, 0, 77 ) . '...' : $raw;
+				}
 				break;
 			}
 		}
@@ -7416,8 +7420,9 @@ class BricksService {
 		$response = wp_safe_remote_get(
 			$url,
 			array(
-				'timeout' => 30,
-				'headers' => array( 'Accept' => 'application/json' ),
+				'timeout'      => 30,
+				'redirection'  => 0,
+				'headers'      => array( 'Accept' => 'application/json' ),
 			)
 		);
 
@@ -7613,7 +7618,11 @@ class BricksService {
 					$issues[] = array( 'element_id' => $el_id, 'severity' => 'error', 'type' => 'script_missing_tags', 'message' => "Element {$el_id} ({$el_name}): {$sf} has JS without <script> tags.", 'fix' => 'Wrap in <script>...</script>.' );
 				}
 			}
-			if ( 'code' === $el_name && ! empty( $settings['code'] ) && strpos( $settings['code'], '<?php' ) !== false && empty( $settings['executeCode'] ) ) {
+			$code_setting = $settings['code'] ?? '';
+			if ( is_array( $code_setting ) ) {
+				$code_setting = $code_setting['code'] ?? '';
+			}
+			if ( 'code' === $el_name && is_string( $code_setting ) && '' !== $code_setting && strpos( $code_setting, '<?php' ) !== false && empty( $settings['executeCode'] ) ) {
 				$issues[] = array( 'element_id' => $el_id, 'severity' => 'warning', 'type' => 'php_execute_disabled', 'message' => "Element {$el_id}: code element has PHP but executeCode is not enabled.", 'fix' => 'Set settings.executeCode = true.' );
 			}
 			if ( ! empty( $settings['_cssCustom'] ) && strpos( $settings['_cssCustom'], '%root%' ) !== false ) {
@@ -7688,7 +7697,19 @@ class BricksService {
 				$has_mobile_landscape = ! empty( $settings['_padding:mobile_landscape'] );
 				$has_mobile_legacy    = ! empty( $settings['_padding:mobile'] );
 				if ( $has_desktop_padding && ! $has_mobile_portrait && ! $has_mobile_landscape && ! $has_mobile_legacy ) {
-					$issues[] = array( 'element_id' => $el_id, 'severity' => 'warning', 'type' => 'missing_mobile_padding', 'message' => "Element {$el_id} ({$el_name}): has desktop _padding but no mobile override.", 'fix' => 'Add _padding:mobile_portrait to preserve spacing rhythm on small screens.' );
+					$mobile_bp = 'mobile_portrait';
+					if ( in_array( 'mobile', $bps, true ) && ! in_array( 'mobile_portrait', $bps, true ) ) {
+						$mobile_bp = 'mobile';
+					} elseif ( in_array( 'mobile_landscape', $bps, true ) && ! in_array( 'mobile_portrait', $bps, true ) ) {
+						$mobile_bp = 'mobile_landscape';
+					}
+					$issues[] = array(
+						'element_id' => $el_id,
+						'severity'   => 'warning',
+						'type'       => 'missing_mobile_padding',
+						'message'    => "Element {$el_id} ({$el_name}): has desktop _padding but no mobile override.",
+						'fix'        => "Add _padding:{$mobile_bp} to preserve spacing rhythm on small screens.",
+					);
 				}
 			}
 		}
