@@ -131,6 +131,10 @@ class ValidationService {
 		if ( null !== $settings_schema && class_exists( Validator::class ) ) {
 			$opis_errors = $this->validate_with_opis( $settings, $settings_schema, $element_type );
 
+			if ( is_wp_error( $opis_errors ) ) {
+				return $opis_errors;
+			}
+
 			if ( ! empty( $opis_errors ) ) {
 				return new \WP_Error(
 					'validation_failed',
@@ -346,9 +350,9 @@ class ValidationService {
 	 * @param array<string, mixed> $settings        Element settings to validate.
 	 * @param array<string, mixed> $settings_schema JSON Schema for the settings.
 	 * @param string               $element_type    Element type name for suggestions.
-	 * @return array<int, array<string, string>> Array of errors with path, message, suggestion.
+	 * @return array<int, array<string, string>>|\WP_Error Array of errors with path, message, suggestion, or WP_Error on validator failure.
 	 */
-	private function validate_with_opis( array $settings, array $settings_schema, string $element_type ): array {
+	private function validate_with_opis( array $settings, array $settings_schema, string $element_type ): array|\WP_Error {
 		try {
 			$validator = new Validator();
 
@@ -379,8 +383,18 @@ class ValidationService {
 
 			return $errors;
 		} catch ( \Throwable $e ) {
-			// If Opis validation itself throws, log and skip — don't block saves.
-			return [];
+			return new \WP_Error(
+				'validation_internal_error',
+				sprintf(
+					/* translators: 1: Element type name, 2: Exception message */
+					__( 'Element "%1$s" settings could not be validated: %2$s', 'bricks-mcp' ),
+					$element_type,
+					$e->getMessage()
+				),
+				[
+					'element_type' => $element_type,
+				]
+			);
 		}
 	}
 

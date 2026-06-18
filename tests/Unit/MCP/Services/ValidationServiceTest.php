@@ -161,4 +161,25 @@ final class ValidationServiceTest extends TestCase {
 			'Throwable catch must NOT return true (fail-open)'
 		);
 	}
+
+	/**
+	 * validate_with_opis must fail closed on exceptions (DATA-04).
+	 */
+	public function test_validate_with_opis_fails_closed_on_exception(): void {
+		$source = file_get_contents(
+			BRICKS_MCP_PLUGIN_DIR . 'includes/MCP/Services/ValidationService.php'
+		);
+		$this->assertIsString( $source );
+
+		$method_start = strpos( $source, 'private function validate_with_opis(' );
+		$this->assertNotFalse( $method_start );
+
+		$catch_pos = strpos( $source, 'catch ( \\Throwable', $method_start );
+		$this->assertNotFalse( $catch_pos );
+
+		$after_catch = substr( $source, $catch_pos, 300 );
+		$this->assertStringContainsString( 'validation_internal_error', $after_catch );
+		$this->assertStringContainsString( 'WP_Error', $after_catch );
+		$this->assertStringNotContainsString( 'return []', $after_catch );
+	}
 }

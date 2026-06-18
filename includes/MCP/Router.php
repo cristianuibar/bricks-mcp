@@ -596,7 +596,7 @@ final class Router {
 				'include_pii'    => array( 'type' => 'boolean' ),
 				'bricks_only'    => array( 'type' => 'boolean' ),
 				'search'         => array( 'type' => 'string' ),
-				'view'           => array( 'type' => 'string', 'enum' => array( 'detail', 'summary' ) ),
+				'view'           => array( 'type' => 'string', 'enum' => array( 'detail', 'summary', 'visual' ) ),
 				'title'          => array( 'type' => 'string' ),
 				'elements'       => array( 'type' => 'array' ),
 				'slug'           => array( 'type' => 'string' ),
@@ -1180,6 +1180,29 @@ final class Router {
 			array( $this, 'tool_get_builder_guide' )
 		);
 
+		// page_diagnose: hidden diagnostic tool (callable but not in tools/list).
+		$this->register_tool(
+			'page_diagnose',
+			__( 'Pre-edit health check for any Bricks page or template. Returns issues with severity, element ID, and actionable fix. Read-only — never modifies data.', 'bricks-mcp' ),
+			array(
+				'type'       => 'object',
+				'properties' => array(
+					'post_id' => array(
+						'type'        => 'integer',
+						'description' => __( 'Post/page/template ID to diagnose (required)', 'bricks-mcp' ),
+					),
+				),
+				'required'   => array( 'post_id' ),
+			),
+			array( $this, 'tool_page_diagnose' ),
+			array(
+				'readOnlyHint'    => true,
+				'destructiveHint' => false,
+				'idempotentHint'  => true,
+				'openWorldHint'   => false,
+			)
+		);
+
 		// Bricks consolidated tool (replaces enable_bricks, disable_bricks, get_bricks_settings, get_breakpoints, get_element_schemas).
 		$this->register_tool(
 			'bricks',
@@ -1274,8 +1297,8 @@ final class Router {
 					),
 					'view'                => array(
 						'type'        => 'string',
-						'enum'        => array( 'detail', 'summary' ),
-						'description' => __( 'Detail level (get: detail=full settings, summary=tree outline)', 'bricks-mcp' ),
+						'enum'        => array( 'detail', 'summary', 'visual' ),
+						'description' => __( 'Detail level (get: visual=layout tree for editing, summary=type counts, detail=full settings)', 'bricks-mcp' ),
 					),
 					'title'               => array(
 						'type'        => 'string',
@@ -3895,10 +3918,61 @@ final class Router {
 			);
 		}
 
+		if ( 'visual' === $view ) {
+			return array(
+				'metadata' => $metadata,
+				'visual'   => $this->bricks_service->get_visual_layout( $post_id ),
+			);
+		}
+
 		return array(
 			'metadata' => $metadata,
 			'elements' => $this->bricks_service->get_elements( $post_id ),
 		);
+	}
+
+	/**
+	 * Tool handler: page_diagnose — pre-edit health check (hidden from tools/list).
+	 *
+	 * @param array<string, mixed> $args Tool arguments.
+	 * @return array<string, mixed>|\WP_Error Diagnostics report or error.
+	 */
+	private function tool_page_diagnose( array $args ): array|\WP_Error {
+		$bricks_error = $this->require_bricks();
+		if ( null !== $bricks_error ) {
+			return $bricks_error;
+		}
+
+		if ( empty( $args['post_id'] ) ) {
+			return new \WP_Error(
+				'missing_post_id',
+				__( 'post_id is required.', 'bricks-mcp' ),
+				array(
+					'next_step'      => 'Call content with action=list to find valid post IDs.',
+					'suggested_tool' => 'content',
+				)
+			);
+		}
+
+		$post_id = (int) $args['post_id'];
+		$post    = get_post( $post_id );
+
+		if ( ! $post ) {
+			return new \WP_Error(
+				'post_not_found',
+				sprintf(
+					/* translators: %d: Post ID */
+					__( 'Post %d not found.', 'bricks-mcp' ),
+					$post_id
+				),
+				array(
+					'next_step'      => 'Call content with action=list to find valid post IDs.',
+					'suggested_tool' => 'content',
+				)
+			);
+		}
+
+		return $this->bricks_service->diagnose_page( $post_id );
 	}
 
 	/**

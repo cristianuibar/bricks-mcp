@@ -397,4 +397,41 @@ final class RouterTest extends TestCase {
 		$this->assertSame( 'content', $page_list['name'] );
 		$this->assertSame( 'list', $page_list['arguments']['action'] );
 	}
+
+	/**
+	 * Hidden page_diagnose is registered when Bricks tools load but excluded from tools/list.
+	 *
+	 * @return void
+	 */
+	public function test_page_diagnose_is_hidden_from_tools_list(): void {
+		$visible = array_column( $this->router->get_available_tools(), 'name' );
+		$this->assertNotContains( 'page_diagnose', $visible );
+
+		$ref   = new \ReflectionClass( Router::class );
+		$names = $ref->getConstant( 'VISIBLE_TOOL_NAMES' );
+		$this->assertNotContains( 'page_diagnose', $names );
+
+		$source = file_get_contents(
+			dirname( __DIR__, 3 ) . '/includes/MCP/Router.php'
+		);
+		$this->assertIsString( $source );
+		$this->assertStringContainsString( "'page_diagnose'", $source );
+		$this->assertStringContainsString( 'tool_page_diagnose', $source );
+	}
+
+	/**
+	 * Content tool view enum includes visual for DIAG-04.
+	 *
+	 * @return void
+	 */
+	public function test_content_tool_view_enum_includes_visual(): void {
+		$schema_method = new \ReflectionMethod( $this->router, 'get_content_tool_schema' );
+		$schema_method->setAccessible( true );
+		$schema = $schema_method->invoke( $this->router );
+		$enum   = $schema['properties']['view']['enum'] ?? array();
+
+		$this->assertContains( 'visual', $enum );
+		$this->assertContains( 'detail', $enum );
+		$this->assertContains( 'summary', $enum );
+	}
 }

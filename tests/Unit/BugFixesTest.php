@@ -126,6 +126,25 @@ final class BugFixesTest extends TestCase {
 		);
 	}
 
+	/**
+	 * Test that save_elements() writes via resolve_elements_meta_key() for header/footer templates.
+	 *
+	 * @return void
+	 */
+	public function test_save_elements_uses_resolve_meta_key(): void {
+		$body = $this->extract_method_body( 'save_elements', 2500 );
+		$this->assertStringContainsString(
+			'resolve_elements_meta_key',
+			$body,
+			'save_elements() must resolve meta key before update_post_meta()'
+		);
+		$this->assertStringContainsString(
+			'unhook_bricks_meta_filters( $post_id )',
+			$body,
+			'save_elements() must pass post_id to unhook_bricks_meta_filters()'
+		);
+	}
+
 	// -------------------------------------------------------------------------
 	// BUG-02: Read-back verification for global class write methods
 	// -------------------------------------------------------------------------
@@ -229,7 +248,7 @@ final class BugFixesTest extends TestCase {
 	 */
 	public function test_all_unhook_sites_have_try_finally(): void {
 		$count = preg_match_all(
-			'/unhook_bricks_meta_filters\(\);\s*\n\s*try\s*\{/',
+			'/unhook_bricks_meta_filters(?:\([^)]*\))?;\s*\n\s*try\s*\{/',
 			$this->source,
 			$matches
 		);
@@ -249,7 +268,7 @@ final class BugFixesTest extends TestCase {
 	 */
 	public function test_all_finally_blocks_call_rehook(): void {
 		$count = preg_match_all(
-			'/finally\s*\{\s*\n\s*\$this->rehook_bricks_meta_filters/',
+			'/finally\s*\{\s*\n\s*\$this->rehook_bricks_meta_filters(?:\([^)]*\))?/',
 			$this->source,
 			$matches
 		);
