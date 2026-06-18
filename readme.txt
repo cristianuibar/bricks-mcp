@@ -91,7 +91,7 @@ MCP is an open protocol created by Anthropic that gives AI assistants a standard
 
 = Does this plugin work without Bricks Builder? =
 
-Yes, partially. The `get_site_info` and `get_builder_guide` tools work on any WordPress site. The `content` tool supports read-only WordPress post listing on non-Bricks sites. Bricks-specific actions (`bricks`, `template`, `design`, `component`, `woocommerce`, `code`) require Bricks Builder to be installed and active.
+Yes, partially. The `get_site_info` tool works on any WordPress site. The `content` tool supports read-only WordPress post listing on non-Bricks sites. All Bricks-specific tools (`get_builder_guide`, `bricks`, `template`, `design`, `component`, `woocommerce`, `code`, and Bricks write actions on `content`) require Bricks Builder to be installed and active.
 
 = Which AI tools and clients are supported? =
 

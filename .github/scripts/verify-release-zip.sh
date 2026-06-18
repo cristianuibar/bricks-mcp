@@ -14,6 +14,16 @@ else
 	exit 1
 fi
 
+BUILD_DIR=""
+cleanup() {
+	if [[ -n "${BUILD_DIR}" && -d "${BUILD_DIR}" ]]; then
+		rm -rf "${BUILD_DIR}"
+	fi
+	# Restore dev vendor if production install ran.
+	("${COMPOSER[@]}" install --no-interaction --quiet --ignore-platform-reqs) 2>/dev/null || true
+}
+trap cleanup EXIT
+
 echo "==> Installing dev dependencies for boot smoke"
 "${COMPOSER[@]}" install --no-interaction --quiet --ignore-platform-reqs 2>/dev/null \
 	|| "${COMPOSER[@]}" install --no-interaction --quiet
@@ -35,13 +45,6 @@ echo "==> Production dependencies (mirrors release.yml)"
 BUILD_DIR="$(mktemp -d)"
 STAGE="${BUILD_DIR}/bricks-mcp"
 ZIP="${BUILD_DIR}/bricks-mcp.zip"
-
-cleanup() {
-	rm -rf "$BUILD_DIR"
-	# Restore dev vendor for local development after script exits.
-	("${COMPOSER[@]}" install --no-interaction --quiet --ignore-platform-reqs) 2>/dev/null || true
-}
-trap cleanup EXIT
 
 echo "==> Staging production tree at ${STAGE}"
 mkdir -p "$STAGE"

@@ -59,8 +59,8 @@ When **disabled** (default):
 When **enabled**:
 
 - AI tools can write custom CSS via `set_page_css` (with pattern sanitization and 100 KB size cap)
-- AI tools can write JavaScript to page header and body script fields
-- CSS and script content is still sanitized; dangerous patterns in CSS are rejected
+- AI tools can write JavaScript to page header and body script fields (stored as supplied — no script sanitization; enable only on trusted dev sites)
+- Dangerous patterns in CSS are rejected; JavaScript is not filtered beyond the dangerous-actions toggle
 
 API keys and secrets stored in Bricks settings are always masked as `****configured****` regardless of this setting.
 
