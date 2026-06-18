@@ -136,7 +136,7 @@ final class BugFixesTest extends TestCase {
 	 * @return void
 	 */
 	public function test_create_global_class_has_readback(): void {
-		$body = $this->extract_method_body( 'create_global_class' );
+		$body = $this->extract_method_body( 'create_global_class', 3000 );
 		$this->assertStringContainsString(
 			'wp_cache_delete',
 			$body,

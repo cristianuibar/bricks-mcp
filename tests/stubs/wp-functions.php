@@ -51,7 +51,7 @@ if ( ! class_exists( 'WP_Error' ) ) {
 		 * @param string $message Error message.
 		 * @param mixed  $data    Additional data.
 		 */
-		public function __construct( string $code = '', string $message = '', mixed $data = '' ) {
+		public function __construct( string $code = '', string $message = '', mixed $data = null ) {
 			$this->code    = $code;
 			$this->message = $message;
 			$this->data    = $data;
