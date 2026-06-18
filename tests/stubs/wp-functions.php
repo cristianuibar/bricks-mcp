@@ -370,6 +370,23 @@ if ( ! function_exists( 'wp_remote_retrieve_body' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_remote_retrieve_header' ) ) {
+	function wp_remote_retrieve_header( array|\WP_Error $response, string $name ): string {
+		if ( is_wp_error( $response ) ) {
+			return '';
+		}
+		$headers = $response['headers'] ?? array();
+		if ( is_array( $headers ) ) {
+			foreach ( $headers as $key => $value ) {
+				if ( strtolower( (string) $key ) === strtolower( $name ) ) {
+					return is_array( $value ) ? (string) ( $value[0] ?? '' ) : (string) $value;
+				}
+			}
+		}
+		return $GLOBALS['_bricks_mcp_test_wp_remote_retrieve_header_return'] ?? 'application/json';
+	}
+}
+
 if ( ! function_exists( 'current_user_can' ) ) {
 	function current_user_can( string $capability ): bool {
 		return $GLOBALS['_bricks_mcp_test_current_user_can'] ?? true;

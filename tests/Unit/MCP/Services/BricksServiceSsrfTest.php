@@ -22,7 +22,8 @@ class BricksServiceSsrfTest extends TestCase {
 		unset(
 			$GLOBALS['_bricks_mcp_test_wp_http_validate_url_return'],
 			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'],
-			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return']
+			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'],
+			$GLOBALS['_bricks_mcp_test_wp_remote_retrieve_header_return']
 		);
 	}
 
@@ -31,6 +32,7 @@ class BricksServiceSsrfTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls']    = [];
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return']   = [
 			'response' => [ 'code' => 200 ],
+			'headers'  => [ 'content-type' => 'application/json' ],
 			'body'     => json_encode( [ 'content' => [] ] ),
 		];
 
@@ -40,6 +42,18 @@ class BricksServiceSsrfTest extends TestCase {
 		$calls = $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'];
 		$this->assertCount( 1, $calls, 'wp_safe_remote_get should be called exactly once' );
 		$this->assertSame( 'https://example.com/template.json', $calls[0]['url'] );
+	}
+
+	public function test_import_template_from_url_rejects_non_https(): void {
+		$GLOBALS['_bricks_mcp_test_wp_http_validate_url_return'] = 'http://example.com/template.json';
+		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls']    = [];
+
+		$service = new BricksService();
+		$result  = $service->import_template_from_url( 'http://example.com/template.json' );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'https_required', $result->get_error_code() );
+		$this->assertCount( 0, $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] );
 	}
 
 	public function test_import_template_from_url_rejects_invalid_url(): void {
