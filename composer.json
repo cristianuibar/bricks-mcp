@@ -17,5 +17,13 @@
         "allow-plugins": {
             "dealerdirect/phpcodesniffer-composer-installer": true
         }
+    },
+    "scripts": {
+        "lint": "php -d memory_limit=512M vendor/bin/phpcs",
+        "test:unit": "php vendor/bin/phpunit -c phpunit-unit.xml",
+        "test": [
+            "@lint",
+            "@test:unit"
+        ]
     }
 }

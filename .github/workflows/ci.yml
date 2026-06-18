@@ -22,10 +22,14 @@ jobs:
         with:
           php-version: '8.2'
           coverage: none
+          extensions: dom, mbstring, simplexml, tokenizer, xml, xmlwriter
           tools: composer:v2
 
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run PHPCS
+        run: php -d memory_limit=512M vendor/bin/phpcs
 
       - name: Run unit tests
         run: php vendor/bin/phpunit -c phpunit-unit.xml
