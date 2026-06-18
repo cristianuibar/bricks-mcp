@@ -51,8 +51,9 @@ Some operations are gated behind a separate **Dangerous Actions** toggle in addi
 
 When **disabled** (default):
 
-- `code` tool `set_page_css` is rejected — custom CSS writes require dangerous actions mode
-- `code` tool `set_page_scripts` is rejected — custom JavaScript writes require dangerous actions mode
+- `code:set_page_css` is rejected (dedicated CSS write path with pattern checks when enabled)
+- `code:set_page_scripts` is rejected — custom JavaScript writes require dangerous actions mode
+- Note: `content` → `update_settings` may still accept a `customCss` page setting without the `code` tool gate; prefer `code:set_page_css` for explicit CSS writes
 - Page settings keys `customScriptsHeader`, `customScriptsBodyHeader`, and `customScriptsBodyFooter` are rejected on update
 - JS-capable keys are stripped from template import operations
 
