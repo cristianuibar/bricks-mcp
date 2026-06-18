@@ -10,8 +10,11 @@ declare(strict_types=1);
 
 namespace BricksMCP\Tests\Unit\MCP;
 
-use PHPUnit\Framework\TestCase;
+use BricksMCP\MCP\PromptRegistry;
+use BricksMCP\MCP\ResourceRegistry;
+use BricksMCP\MCP\Router;
 use BricksMCP\MCP\StreamableHttpHandler;
+use PHPUnit\Framework\TestCase;
 
 /**
  * Tests for the StreamableHttpHandler class.
@@ -250,5 +253,167 @@ final class StreamableHttpHandlerTest extends TestCase {
 		$source = $this->get_method_source( 'handle_initialize' );
 		$this->assertStringContainsString( "'resources' => new \\stdClass()", $source );
 		$this->assertStringContainsString( "'prompts'   => new \\stdClass()", $source );
+	}
+
+	/**
+	 * Helper: invoke private dispatch_single on a handler instance.
+	 *
+	 * @param StreamableHttpHandler       $handler Handler instance.
+	 * @param array<string, mixed>        $message JSON-RPC message.
+	 * @return array<string, mixed>|null
+	 */
+	private function invoke_dispatch_single( StreamableHttpHandler $handler, array $message ): ?array {
+		$method = new \ReflectionMethod( $handler, 'dispatch_single' );
+		$method->setAccessible( true );
+		return $method->invoke( $handler, $message );
+	}
+
+	/**
+	 * Helper: read a private property via reflection.
+	 *
+	 * @param object $object   Object instance.
+	 * @param string $property Property name.
+	 * @return mixed
+	 */
+	private function get_private_property( object $object, string $property ): mixed {
+		$ref = new \ReflectionProperty( $object, $property );
+		$ref->setAccessible( true );
+		return $ref->getValue( $object );
+	}
+
+	/**
+	 * Test: real Router construction wires registry dependencies.
+	 *
+	 * @return void
+	 */
+	public function test_construct_with_real_router_instantiates_registries(): void {
+		$router  = new Router();
+		$handler = new StreamableHttpHandler( $router );
+
+		$this->assertInstanceOf( StreamableHttpHandler::class, $handler );
+		$this->assertInstanceOf(
+			ResourceRegistry::class,
+			$this->get_private_property( $handler, 'resource_registry' )
+		);
+		$this->assertInstanceOf(
+			PromptRegistry::class,
+			$this->get_private_property( $handler, 'prompt_registry' )
+		);
+	}
+
+	/**
+	 * Test: initialize dispatch advertises MCP capabilities.
+	 *
+	 * @return void
+	 */
+	public function test_dispatch_initialize_advertises_capabilities(): void {
+		$handler  = new StreamableHttpHandler( new Router() );
+		$response = $this->invoke_dispatch_single(
+			$handler,
+			array(
+				'jsonrpc' => '2.0',
+				'id'      => 1,
+				'method'  => 'initialize',
+				'params'  => array(),
+			)
+		);
+
+		$this->assertIsArray( $response );
+		$this->assertSame( '2.0', $response['jsonrpc'] );
+		$this->assertSame( 1, $response['id'] );
+		$this->assertArrayHasKey( 'protocolVersion', $response['result'] );
+		$this->assertArrayHasKey( 'resources', $response['result']['capabilities'] );
+		$this->assertArrayHasKey( 'prompts', $response['result']['capabilities'] );
+		$this->assertTrue( $response['result']['capabilities']['tools']['listChanged'] );
+	}
+
+	/**
+	 * Test: resources/list dispatch returns builder guide resource.
+	 *
+	 * @return void
+	 */
+	public function test_dispatch_resources_list_returns_builder_guide(): void {
+		$handler  = new StreamableHttpHandler( new Router() );
+		$response = $this->invoke_dispatch_single(
+			$handler,
+			array(
+				'jsonrpc' => '2.0',
+				'id'      => 2,
+				'method'  => 'resources/list',
+				'params'  => array(),
+			)
+		);
+
+		$this->assertIsArray( $response );
+		$uris = array_column( $response['result']['resources'], 'uri' );
+		$this->assertContains( 'bricks://builder-guide', $uris );
+	}
+
+	/**
+	 * Test: prompts/list dispatch returns audit prompt.
+	 *
+	 * @return void
+	 */
+	public function test_dispatch_prompts_list_returns_audit_prompt(): void {
+		$handler  = new StreamableHttpHandler( new Router() );
+		$response = $this->invoke_dispatch_single(
+			$handler,
+			array(
+				'jsonrpc' => '2.0',
+				'id'      => 3,
+				'method'  => 'prompts/list',
+				'params'  => array(),
+			)
+		);
+
+		$this->assertIsArray( $response );
+		$names = array_column( $response['result']['prompts'], 'name' );
+		$this->assertContains( 'bricks-audit-page', $names );
+	}
+
+	/**
+	 * Test: resources/read error path for unknown URI.
+	 *
+	 * @return void
+	 */
+	public function test_dispatch_resources_read_unknown_uri_returns_invalid_params(): void {
+		$handler  = new StreamableHttpHandler( new Router() );
+		$response = $this->invoke_dispatch_single(
+			$handler,
+			array(
+				'jsonrpc' => '2.0',
+				'id'      => 4,
+				'method'  => 'resources/read',
+				'params'  => array( 'uri' => 'bricks://unknown' ),
+			)
+		);
+
+		$this->assertIsArray( $response );
+		$this->assertArrayHasKey( 'error', $response );
+		$this->assertSame( StreamableHttpHandler::INVALID_PARAMS, $response['error']['code'] );
+		$this->assertNotEmpty( $response['error']['message'] );
+	}
+
+	/**
+	 * Test: prompts/get error path for unknown prompt.
+	 *
+	 * @return void
+	 */
+	public function test_dispatch_prompts_get_unknown_name_returns_invalid_params(): void {
+		$handler  = new StreamableHttpHandler( new Router() );
+		$response = $this->invoke_dispatch_single(
+			$handler,
+			array(
+				'jsonrpc' => '2.0',
+				'id'      => 5,
+				'method'  => 'prompts/get',
+				'params'  => array( 'name' => 'nonexistent' ),
+			)
+		);
+
+		$this->assertIsArray( $response );
+		$this->assertArrayHasKey( 'error', $response );
+		$this->assertSame( StreamableHttpHandler::INVALID_PARAMS, $response['error']['code'] );
+		$this->assertNotEmpty( $response['error']['message'] );
 	}
 }
