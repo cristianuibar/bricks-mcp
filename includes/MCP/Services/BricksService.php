@@ -7369,7 +7369,7 @@ class BricksService {
 			);
 		}
 
-		// GitHub #9: enforce HTTPS-only to prevent plaintext interception.
+		// Enforce HTTPS-only to prevent plaintext interception (GitHub #9).
 		if ( 0 !== strpos( strtolower( $url ), 'https://' ) ) {
 			return new \WP_Error(
 				'https_required',
@@ -7377,9 +7377,8 @@ class BricksService {
 			);
 		}
 
-		// GitHub #9: DNS-rebinding guard — resolve the hostname and reject private/reserved IP ranges
-		// before making the request. wp_http_validate_url() blocks obvious 127.0.0.1 literals but
-		// does NOT protect against DNS rebinding where a public domain resolves to a private IP.
+		// DNS-rebinding guard: resolve hostname and reject private IP ranges (GitHub #9).
+		// wp_http_validate_url() blocks obvious 127.0.0.1 literals but not DNS rebinding.
 		$parsed_url = wp_parse_url( $url );
 		$host       = $parsed_url['host'] ?? '';
 		if ( $host ) {
@@ -7438,7 +7437,7 @@ class BricksService {
 			);
 		}
 
-		// GitHub #9: enforce application/json content-type to prevent importing arbitrary binary content.
+		// Enforce application/json content-type to prevent importing binary content (GitHub #9).
 		$content_type = wp_remote_retrieve_header( $response, 'content-type' );
 		if ( $content_type && false === strpos( strtolower( $content_type ), 'application/json' ) ) {
 			return new \WP_Error(
@@ -7588,6 +7587,7 @@ class BricksService {
 	 * @return array<string, mixed> Diagnostic report.
 	 */
 	public function diagnose_page( int $post_id ): array {
+		// phpcs:disable WordPress.Arrays.ArrayDeclarationSpacing.AssociativeArrayFound,Generic.Formatting.DisallowMultipleStatements.SameLine,Squiz.ControlStructures.ControlSignature.NewlineAfterOpenBrace,Squiz.Commenting.InlineComment.InvalidEndChar,Generic.Formatting.MultipleStatementAlignment.NotSameWarning,WordPress.WhiteSpace.OperatorSpacing.SpacingBefore,WordPress.PHP.YodaConditions.NotYoda,Squiz.WhiteSpace.SuperfluousWhitespace.EndLine,Generic.WhiteSpace.DisallowSpaceIndent.SpacesUsed -- Ported diagnostic scanner from pr-29; refactor tracked in ARCH-01.
 		$post     = get_post( $post_id );
 		$elements = $this->get_elements( $post_id );
 		$issues   = array();
@@ -7643,7 +7643,7 @@ class BricksService {
 					$issues[] = array( 'element_id' => $el_id, 'severity' => 'warning', 'type' => 'invalid_breakpoint', 'message' => "Element {$el_id}: key '{$key}' has unknown segment '{$bad_seg}'.", 'fix' => 'Valid IDs: ' . implode( ', ', $bps ) . '. Pseudo-states and variant-* are valid.' );
 				}
 			}
-	    	foreach ( ( $el['children'] ?? array() ) as $child_id ) {
+			foreach ( ( $el['children'] ?? array() ) as $child_id ) {
 				if ( ! isset( $id_map[ $child_id ] ) ) {
 					$issues[] = array( 'element_id' => $el_id, 'severity' => 'error', 'type' => 'orphaned_child', 'message' => "Element {$el_id}: child '{$child_id}' does not exist.", 'fix' => "Remove '{$child_id}' from children." );
 				}
@@ -7663,8 +7663,8 @@ class BricksService {
 					$issues[] = array( 'element_id' => $el_id, 'severity' => 'warning', 'type' => 'integer_border', 'message' => "Element {$el_id}: _border.width is integer {$w}.", 'fix' => "Change to '{$w}px'." );
 				}
 			}
-			
-			// Check #11 — missing_wp_reset_postdata
+
+			// Check missing_wp_reset_postdata.
 			if ( in_array( $el_name, array( 'html', 'code' ), true ) && ! empty( $settings['executeCode'] ) ) {
 				$code_content = '';
 				if ( ! empty( $settings['content'] ) ) {
@@ -7681,7 +7681,7 @@ class BricksService {
 				}
 			}
 
-			// Check #12 — missing_mobile_padding
+			// Check missing_mobile_padding.
 			if ( in_array( $el_name, array( 'section', 'container', 'div', 'block' ), true ) ) {
 				$has_desktop_padding  = ! empty( $settings['_padding'] );
 				$has_mobile_portrait  = ! empty( $settings['_padding:mobile_portrait'] );
@@ -7692,7 +7692,7 @@ class BricksService {
 				}
 			}
 		}
-		// Check #13 — hardcoded_design_token
+		// Check hardcoded_design_token.
 		$global_vars = get_option( 'bricks_global_variables', array() );
 		if ( ! empty( $global_vars ) && is_array( $global_vars ) ) {
 			$hex_to_var = array();
@@ -7725,7 +7725,7 @@ class BricksService {
 				}
 			}
 		}
-		
+
 		$errors   = count( array_filter( $issues, fn( $i ) => 'error' === $i['severity'] ) );
 		$warnings = count( array_filter( $issues, fn( $i ) => 'warning' === $i['severity'] ) );
 		return array(
@@ -7738,6 +7738,7 @@ class BricksService {
 			'status'        => 0 === count( $issues ) ? 'clean' : ( $errors > 0 ? 'errors' : 'warnings' ),
 			'issues'        => $issues,
 		);
+		// phpcs:enable
 	}
 
 	/**
@@ -7990,8 +7991,8 @@ class BricksService {
 		if ( '' === $css ) {
 			unset( $settings['customCss'] );
 		} else {
-			// GitHub #11: sanitize CSS before storing.
-			// Enforce a 100 KB hard cap — no legitimate page CSS needs more.
+			// Sanitize CSS before storing (GitHub #11).
+			// Enforce a 100 KB hard cap; no legitimate page CSS needs more.
 			if ( strlen( $css ) > 102400 ) {
 				return new \WP_Error(
 					'css_too_large',
@@ -7999,13 +8000,7 @@ class BricksService {
 				);
 			}
 
-			// Strip patterns that enable code execution or data exfiltration:
-			// - javascript: scheme in url() values
-			// - IE expression() function
-			// - @import rules (can pull in remote stylesheets)
-			// - data: scheme in url() (can embed executable payloads)
-			// - Behaviour property (IE)
-			// - moz-binding (Firefox XBL injection, legacy)
+			// Strip patterns that enable code execution or data exfiltration.
 			$dangerous_patterns = array(
 				'/url\s*\(\s*["\']?\s*javascript:/i',
 				'/expression\s*\(/i',
