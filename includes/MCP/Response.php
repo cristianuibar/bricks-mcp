@@ -96,7 +96,7 @@ final class Response {
 		];
 
 		$data = $error->get_error_data();
-		if ( null !== $data && '' !== $data ) {
+		if ( null !== $data ) {
 			if ( is_scalar( $data ) ) {
 				$payload['data'] = $data;
 			} elseif ( is_array( $data ) ) {
