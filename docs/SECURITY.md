@@ -13,18 +13,20 @@ WordPress Application Passwords are the authentication mechanism. The `require_a
 When `require_auth` is enabled:
 
 - The user must be authenticated (logged in via Application Password over HTTP Basic Auth)
-- Tool-specific capability checks apply before handler dispatch (see table below)
-- Authentication is checked in `Server::check_permissions()` before any tool is executed
+- The user must have the `manage_options` capability (WordPress Administrator) — enforced in `Server::check_permissions()` before any tool runs
+- Additional per-tool capability checks may apply inside `Router::execute_tool()` after the server gate (see table below)
 
 Application Passwords are the standard WordPress mechanism for REST API authentication from external tools such as Claude Code and Gemini CLI. They can be generated from any user's profile page under **Users > Profile > Application Passwords**.
 
 Unauthenticated access is possible only if the site administrator explicitly disables the `require_auth` setting in **Bricks > MCP > Require Authentication**. This is not recommended for production sites.
 
-### Tool capability requirements
+### Tool capability requirements (Router layer)
 
-| Tool / pattern | Capability | Notes |
-|----------------|------------|-------|
-| `get_builder_guide` | None at router gate | Read-only reference; still requires auth when `require_auth` is on |
+All authenticated MCP access requires `manage_options` at the server gate (see above). The table below describes additional Router-level checks after that gate:
+
+| Tool / pattern | Router capability | Notes |
+|----------------|-------------------|-------|
+| `get_builder_guide` | None | Read-only reference |
 | `content` (dispatcher) | None at router gate | Per-action checks inside handler (read vs write) |
 | `get_site_info` | `read` | Site metadata and diagnostics |
 | All other canonical tools | `manage_options` | Writes and privileged reads (Bricks, templates, media, etc.) |
