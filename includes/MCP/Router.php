@@ -17,6 +17,7 @@ use BricksMCP\MCP\Services\MenuService;
 use BricksMCP\MCP\Services\SchemaGenerator;
 use BricksMCP\MCP\Services\ValidationService;
 use BricksMCP\Plugin;
+use BricksMCP\Support\BuilderGuideLocator;
 
 // Prevent direct access.
 if ( ! defined( 'ABSPATH' ) ) {
@@ -6405,9 +6406,9 @@ final class Router {
 	 * @return array{guide: string}|array{section: string, content: string} Guide content.
 	 */
 	public function tool_get_builder_guide( array $args ): array {
-		$guide_path = BRICKS_MCP_PLUGIN_DIR . 'docs/BUILDER_GUIDE.md';
+		$guide_path = BuilderGuideLocator::get_path();
 
-		if ( ! file_exists( $guide_path ) ) {
+		if ( null === $guide_path ) {
 			return array( 'guide' => 'Builder guide not found. Use get_element_schemas to discover available elements.' );
 		}
 

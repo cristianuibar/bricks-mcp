@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace BricksMCP\MCP;
 
 use BricksMCP\MCP\Services\BricksService;
+use BricksMCP\Support\BuilderGuideLocator;
 
 // Prevent direct access.
 if ( ! defined( 'ABSPATH' ) ) {
@@ -98,9 +99,9 @@ final class ResourceRegistry {
 			);
 		}
 
-		$guide_path = BRICKS_MCP_PLUGIN_DIR . 'docs/BUILDER_GUIDE.md';
+		$guide_path = BuilderGuideLocator::get_path();
 
-		if ( ! is_readable( $guide_path ) ) {
+		if ( null === $guide_path ) {
 			return new \WP_Error(
 				'resource_unavailable',
 				__( 'Builder guide not found.', 'bricks-mcp' )
