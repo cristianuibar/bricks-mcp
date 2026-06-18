@@ -13,12 +13,21 @@ WordPress Application Passwords are the authentication mechanism. The `require_a
 When `require_auth` is enabled:
 
 - The user must be authenticated (logged in via Application Password over HTTP Basic Auth)
-- The user must have the `manage_options` capability (WordPress Administrator role)
+- Tool-specific capability checks apply before handler dispatch (see table below)
 - Authentication is checked in `Server::check_permissions()` before any tool is executed
 
 Application Passwords are the standard WordPress mechanism for REST API authentication from external tools such as Claude Code and Gemini CLI. They can be generated from any user's profile page under **Users > Profile > Application Passwords**.
 
 Unauthenticated access is possible only if the site administrator explicitly disables the `require_auth` setting in **Bricks > MCP > Require Authentication**. This is not recommended for production sites.
+
+### Tool capability requirements
+
+| Tool / pattern | Capability | Notes |
+|----------------|------------|-------|
+| `get_builder_guide` | None at router gate | Read-only reference; still requires auth when `require_auth` is on |
+| `content` (dispatcher) | None at router gate | Per-action checks inside handler (read vs write) |
+| `get_site_info` | `read` | Site metadata and diagnostics |
+| All other canonical tools | `manage_options` | Writes and privileged reads (Bricks, templates, media, etc.) |
 
 ## Rate Limiting
 
@@ -36,13 +45,22 @@ For intensive AI building sessions (for example, "build me a landing page" workf
 
 ## Dangerous Actions Toggle
 
-Some operations — specifically writing JavaScript to page scripts — are gated behind a separate **Dangerous Actions** toggle in addition to normal authentication.
+Some operations are gated behind a separate **Dangerous Actions** toggle in addition to normal authentication. This toggle is off by default, with a prominent red warning in the admin settings.
 
-- Off by default, with a prominent red warning in the admin settings
-- When enabled, AI tools can write JavaScript to page header and body script fields, and modify code execution settings
-- When disabled (default), these operations return an error regardless of user capability
-- CSS writes are not dangerous-actions-gated — CSS cannot execute code
-- API keys and secrets stored in Bricks settings are always masked as `****configured****` regardless of this setting
+When **disabled** (default):
+
+- `code` tool `set_page_css` is rejected — custom CSS writes require dangerous actions mode
+- `code` tool `set_page_scripts` is rejected — custom JavaScript writes require dangerous actions mode
+- Page settings keys `customScriptsHeader`, `customScriptsBodyHeader`, and `customScriptsBodyFooter` are rejected on update
+- JS-capable keys are stripped from template import operations
+
+When **enabled**:
+
+- AI tools can write custom CSS via `set_page_css` (with pattern sanitization and 100 KB size cap)
+- AI tools can write JavaScript to page header and body script fields
+- CSS and script content is still sanitized; dangerous patterns in CSS are rejected
+
+API keys and secrets stored in Bricks settings are always masked as `****configured****` regardless of this setting.
 
 Recommendation: only enable on development sites or when working with a trusted AI agent team.
 
@@ -54,7 +72,7 @@ Recommendation: only enable on development sites or when working with a trusted 
 - No shell commands (`exec`, `shell_exec`, `system`, `passthru`)
 - No `unserialize()` on user-controlled data
 - No direct file includes with user-supplied paths
-- No unauthenticated write operations — all mutations require the `manage_options` capability
+- No unauthenticated write operations — all mutations require appropriate capabilities
 - No stdio or WebSocket transport — HTTP REST only, through WordPress's built-in REST infrastructure
 - No cross-site data access — the plugin operates within the single WordPress installation it is installed on
 - No browser-facing CORS headers — CLI tools connect server-side; no `Access-Control-Allow-Origin` headers are emitted

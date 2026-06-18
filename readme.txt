@@ -3,7 +3,7 @@ Contributors: cristianuibar, optiwebopz
 Tags: ai, bricks builder, mcp, artificial intelligence, page builder
 Requires at least: 6.4
 Tested up to: 6.8
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 Requires PHP: 8.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -22,17 +22,19 @@ The plugin registers a REST API endpoint on your WordPress site that speaks the 
 
 = Available Tools =
 
-* **get_site_info** — Retrieve site name, description, URL, and active theme
-* **get_posts** — List posts and pages with filtering and pagination
-* **get_post** — Fetch the full content of any post or page
-* **get_users** — List WordPress users
-* **get_plugins** — List installed and active plugins
-* **get_bricks_page** — Read the full Bricks Builder element tree for any page
-* **get_builder_guide** — Fetch the built-in builder reference guide for AI context
-* **search_media** — Search for images via the Unsplash API (requires your own Unsplash API key)
-* **create_bricks_page** — Create a new page with a complete Bricks Builder layout
-* **update_bricks_page** — Modify the element tree of an existing Bricks Builder page
-* **delete_bricks_element** — Remove a specific element from a page
+The MCP server exposes 11 canonical tools (call `tools/list` for schemas). Legacy granular tool names resolve via aliases — use canonical names below.
+
+* **get_site_info** — Site metadata and connection diagnostics (action: diagnose)
+* **get_builder_guide** — Built-in Bricks builder reference for AI context
+* **bricks** — Bricks settings, element schemas, breakpoints, and global queries
+* **content** — Pages and posts: list, search, CRUD, Bricks element trees, SEO (view: visual supported)
+* **template** — Template library import, export, and management
+* **design** — Global classes, color palettes, and typography
+* **media** — Media library operations and Unsplash image search (API key optional)
+* **menu** — WordPress navigation menus
+* **component** — Reusable Bricks components
+* **woocommerce** — WooCommerce Bricks page scaffolds
+* **code** — Page custom CSS and scripts (dangerous_actions required for writes)
 
 All tools are free to use. The plugin is open source and hosted on [GitHub](https://github.com/cristianuibar/bricks-mcp).
 
@@ -61,7 +63,7 @@ Full setup documentation is available in the [GitHub repository](https://github.
 This plugin optionally connects to the Unsplash API to search for images.
 
 **Service:** Unsplash (api.unsplash.com)
-**When used:** Only when the `search_media` tool is called by an AI assistant, and only if you have configured an Unsplash API key in the plugin settings.
+**When used:** Only when the `media` tool image search action is called by an AI assistant, and only if you have configured an Unsplash API key in the plugin settings.
 **What is sent:** Your search query string and your Unsplash API key.
 **Unsplash Terms of Service:** https://unsplash.com/terms
 **Unsplash Privacy Policy:** https://unsplash.com/privacy
@@ -89,7 +91,7 @@ MCP is an open protocol created by Anthropic that gives AI assistants a standard
 
 = Does this plugin work without Bricks Builder? =
 
-Yes, partially. The core WordPress tools (get_site_info, get_posts, get_post, get_users, get_plugins) work on any WordPress site regardless of the active theme. The Bricks-specific tools (get_bricks_page, create_bricks_page, update_bricks_page) require Bricks Builder to be installed and active.
+Yes, partially. The `get_site_info` and `get_builder_guide` tools work on any WordPress site. The `content` tool supports read-only WordPress post listing on non-Bricks sites. Bricks-specific actions (`bricks`, `template`, `design`, `component`, `woocommerce`, `code`) require Bricks Builder to be installed and active.
 
 = Which AI tools and clients are supported? =
 
@@ -106,6 +108,14 @@ Yes, when configured correctly. The plugin enforces WordPress Application Passwo
 3. An AI assistant creating a Bricks Builder hero section from a plain-text prompt.
 
 == Changelog ==
+
+= 1.5.1 =
+* Fix: save_elements() uses resolve_elements_meta_key() for header/footer templates.
+* Fix: validate_with_opis() fails closed when Opis library throws.
+* New: Hidden page_diagnose tool for pre-edit health checks (callable, not in tools/list).
+* New: content tool view=visual returns condensed layout representation.
+* Security: SSRF hardening for template import and media sideload paths.
+* Docs: readme.txt and SECURITY.md aligned with 11 canonical MCP tools and dangerous-actions gating.
 
 = 1.5.0 =
 * Security: Fix SSRF in template import by enforcing wp_safe_remote_get (blocks internal network requests).
@@ -209,12 +219,15 @@ Yes, when configured correctly. The plugin enforces WordPress Application Passwo
 = 1.0.0 =
 * Initial release.
 * MCP server with REST API transport.
-* Tools: get_site_info, get_posts, get_post, get_users, get_plugins, get_bricks_page, get_builder_guide, search_media, create_bricks_page, update_bricks_page, delete_bricks_element.
+* Tools: 11 canonical MCP tools (get_site_info, get_builder_guide, bricks, content, template, design, media, menu, component, woocommerce, code).
 * WordPress Application Password authentication.
 * Admin settings page with enable/disable toggle, auth requirement, and rate limiting.
 * Unsplash API integration for image search.
 
 == Upgrade Notice ==
+
+= 1.5.1 =
+Data integrity and diagnostics release: safer Bricks writes, page diagnostics, visual layout view, and documentation aligned with canonical MCP tools. Recommended for all users.
 
 = 1.5.0 =
 Major security hardening release: fixes SSRF, XSS, parameter injection, and CSS injection vulnerabilities. CSS sanitization overhaul for visual builder compatibility. MCP auth discovery endpoints. Recommended for all users.

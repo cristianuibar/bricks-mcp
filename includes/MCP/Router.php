@@ -2100,7 +2100,7 @@ final class Router {
 		// Custom code consolidated tool.
 		$this->register_tool(
 			'code',
-			__( "Manage page-level custom CSS and JavaScript.\n\nActions:\n- get_page_css: Get page custom CSS and scripts (requires: post_id)\n- set_page_css: Set page custom CSS (requires: post_id, css)\n- get_page_scripts: Get page custom scripts only (requires: post_id)\n- set_page_scripts: Set page custom scripts (requires: post_id; optional: header, body_header, body_footer) [dangerous_actions required]", 'bricks-mcp' ),
+			__( "Manage page-level custom CSS and JavaScript.\n\nActions:\n- get_page_css: Get page custom CSS and scripts (requires: post_id)\n- set_page_css: Set page custom CSS (requires: post_id, css) [dangerous_actions required]\n- get_page_scripts: Get page custom scripts only (requires: post_id)\n- set_page_scripts: Set page custom scripts (requires: post_id; optional: header, body_header, body_footer) [dangerous_actions required]", 'bricks-mcp' ),
 			array(
 				'type'       => 'object',
 				'properties' => array(
