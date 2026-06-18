@@ -12,6 +12,9 @@
 	<exclude-pattern>/tests/*</exclude-pattern>
 	<exclude-pattern>/logs/*</exclude-pattern>
 	<exclude-pattern>/coverage/*</exclude-pattern>
+	<exclude-pattern>/assets/*</exclude-pattern>
+	<exclude-pattern>/docs/*</exclude-pattern>
+	<exclude-pattern>/languages/*</exclude-pattern>
 
 	<!-- Show progress and sniff codes -->
 	<arg value="ps"/>

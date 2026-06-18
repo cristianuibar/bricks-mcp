@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -29,7 +31,22 @@ jobs:
         run: composer install --prefer-dist --no-progress --no-interaction
 
       - name: Run PHPCS
-        run: php -d memory_limit=512M vendor/bin/phpcs
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${{ github.event.before }}"
+          else
+            BASE="$(git rev-parse HEAD~1)"
+          fi
+          mapfile -t FILES < <(git diff --name-only --diff-filter=ACMRTUXB "$BASE" "${{ github.sha }}" | grep '\.php$' | grep -vE '^(vendor|tests)/' || true)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No PHP files changed — PHPCS skipped"
+            exit 0
+          fi
+          printf 'PHPCS files:\n%s\n' "${FILES[@]}"
+          php -d memory_limit=512M vendor/bin/phpcs "${FILES[@]}"
 
       - name: Run unit tests
         run: php vendor/bin/phpunit -c phpunit-unit.xml
