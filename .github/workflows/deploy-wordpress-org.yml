@@ -22,8 +22,54 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+
+      - name: Install Composer dependencies (production)
+        if: hashFiles('composer.json') != ''
+        run: composer install --no-dev --optimize-autoloader --no-interaction
+
+      - name: Stamp version from tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "Stamping version: $VERSION"
+          sed -i "s/^ \* Version:.*/ * Version:           $VERSION/" bricks-mcp.php
+          sed -i "s/define( 'BRICKS_MCP_VERSION', '.*' );/define( 'BRICKS_MCP_VERSION', '$VERSION' );/" bricks-mcp.php
+          sed -i "s/^Stable tag:.*/Stable tag: $VERSION/" readme.txt
+
+      - name: Build production tree for SVN
+        run: |
+          mkdir -p build/bricks-mcp
+          rsync -a \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='tests' \
+            --exclude='.planning' \
+            --exclude='.wp-env.json' \
+            --exclude='package.json' \
+            --exclude='package-lock.json' \
+            --exclude='composer.json' \
+            --exclude='composer.lock' \
+            --exclude='phpunit.xml' \
+            --exclude='phpcs.xml' \
+            --exclude='.editorconfig' \
+            --exclude='.gitignore' \
+            --exclude='build' \
+            --exclude='.github' \
+            --exclude='update-server' \
+            --exclude='.claude' \
+            --exclude='README.md' \
+            --exclude='.wordpress-org' \
+            --exclude='.distignore' \
+            ./ build/bricks-mcp/
+          test -f build/bricks-mcp/vendor/autoload.php
+
       - name: Deploy to WordPress.org
         uses: 10up/action-wordpress-plugin-deploy@stable
         env:
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
           SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          BUILD_DIR: build/bricks-mcp

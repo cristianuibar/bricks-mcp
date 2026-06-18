@@ -396,6 +396,19 @@ final class RouterTest extends TestCase {
 		$this->assertSame( 'get_posts', $get_posts['arguments']['action'] );
 		$this->assertSame( 'content', $page_list['name'] );
 		$this->assertSame( 'list', $page_list['arguments']['action'] );
+
+		$readme_legacy = array(
+			'get_bricks_page'       => array( 'content', 'get' ),
+			'update_bricks_page'    => array( 'content', 'update_content' ),
+			'search_media'          => array( 'media', 'search_unsplash' ),
+			'delete_bricks_element' => array( 'content', 'remove' ),
+		);
+
+		foreach ( $readme_legacy as $legacy => $expected ) {
+			$resolved = $method->invoke( $this->router, $legacy, [] );
+			$this->assertSame( $expected[0], $resolved['name'], "Legacy alias {$legacy} name" );
+			$this->assertSame( $expected[1], $resolved['arguments']['action'], "Legacy alias {$legacy} action" );
+		}
 	}
 
 	/**

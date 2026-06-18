@@ -22,7 +22,7 @@ The plugin registers a REST API endpoint on your WordPress site that speaks the 
 
 = Available Tools =
 
-The MCP server exposes 11 canonical tools (call `tools/list` for schemas). Legacy granular tool names resolve via aliases — use canonical names below.
+The MCP server exposes 11 canonical tools (call `tools/list` for schemas). Legacy names such as `get_bricks_page`, `update_bricks_page`, `search_media`, and `delete_bricks_element` resolve via aliases — prefer canonical names below.
 
 * **get_site_info** — Site metadata and connection diagnostics (action: diagnose)
 * **get_builder_guide** — Built-in Bricks builder reference for AI context
@@ -91,7 +91,7 @@ MCP is an open protocol created by Anthropic that gives AI assistants a standard
 
 = Does this plugin work without Bricks Builder? =
 
-Yes, partially. The `get_site_info` tool works on any WordPress site. The `content` tool supports read-only WordPress post listing on non-Bricks sites. All Bricks-specific tools (`get_builder_guide`, `bricks`, `template`, `design`, `component`, `woocommerce`, `code`, and Bricks write actions on `content`) require Bricks Builder to be installed and active.
+Yes, partially. Without Bricks Builder, only `get_site_info` and read-only `content` actions (e.g. list/get posts) are available. All other canonical tools — including `get_builder_guide`, `bricks`, `content` Bricks writes, `template`, `design`, `media`, `menu`, `component`, `woocommerce`, and `code` — require Bricks Builder to be installed and active.
 
 = Which AI tools and clients are supported? =
 

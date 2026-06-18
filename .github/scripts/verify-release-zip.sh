@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Verify release ZIP includes vendor/ and BootTest passes (REL-04).
+# Verify production build includes vendor/ and BootTest passes (REL-04).
+# Mirrors build/bricks-mcp tree used by release.yml and deploy-wordpress-org.yml (BUILD_DIR).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
