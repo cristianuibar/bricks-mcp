@@ -46,7 +46,7 @@ jobs:
             exit 0
           fi
           printf 'PHPCS files:\n%s\n' "${FILES[@]}"
-          php -d memory_limit=512M vendor/bin/phpcs "${FILES[@]}"
+          bash .github/scripts/phpcs-changed-lines.sh "$BASE" "${{ github.sha }}" "${FILES[@]}"
 
       - name: Run unit tests
         run: php vendor/bin/phpunit -c phpunit-unit.xml
