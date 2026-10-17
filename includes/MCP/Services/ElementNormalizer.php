@@ -193,6 +193,13 @@ class ElementNormalizer {
 
 		foreach ( $settings as $key => $value ) {
 			if ( ! is_string( $key ) ) {
+				if ( is_array( $value ) ) {
+					$sanitized[ $key ] = $this->sanitize_settings( $value, $element_name );
+				} elseif ( is_string( $value ) ) {
+					$sanitized[ $key ] = sanitize_text_field( $value );
+				} else {
+					$sanitized[ $key ] = $value;
+				}
 				continue;
 			}
 
