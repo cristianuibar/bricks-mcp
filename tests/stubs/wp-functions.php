@@ -272,6 +272,12 @@ if ( ! function_exists( 'sanitize_text_field' ) ) {
 	}
 }
 
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( string $key ): string {
+		return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $key ) );
+	}
+}
+
 if ( ! function_exists( 'absint' ) ) {
 	function absint( mixed $maybeint ): int {
 		return abs( (int) $maybeint );

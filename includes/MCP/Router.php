@@ -39,6 +39,27 @@ final class Router {
 	private const COMPONENTS_OPTION = 'bricks_components';
 
 	/**
+	 * Templates per page when template:list gets no per_page.
+	 *
+	 * @var int
+	 */
+	private const TEMPLATE_LIST_PER_PAGE = 20;
+
+	/**
+	 * Global classes per page when global_class:list gets no per_page.
+	 *
+	 * @var int
+	 */
+	private const GLOBAL_CLASS_LIST_PER_PAGE = 50;
+
+	/**
+	 * Largest per_page a list tool accepts.
+	 *
+	 * @var int
+	 */
+	private const LIST_MAX_PER_PAGE = 100;
+
+	/**
 	 * Tool names exposed to MCP clients in tools/list.
 	 *
 	 * Hidden legacy tools remain callable through execute_tool() alias shims.
@@ -434,7 +455,15 @@ final class Router {
 			),
 			'template' => array(
 				'list' => array(
-					'status' => 'publish',
+					'status'   => 'publish',
+					'per_page' => self::TEMPLATE_LIST_PER_PAGE,
+					'page'     => 1,
+				),
+			),
+			'global_class' => array(
+				'list' => array(
+					'per_page' => self::GLOBAL_CLASS_LIST_PER_PAGE,
+					'page'     => 1,
 				),
 			),
 			'media' => array(
@@ -656,6 +685,8 @@ final class Router {
 				'category_name' => array( 'type' => 'string' ),
 				'category_id' => array( 'type' => 'string' ),
 				'search'      => array( 'type' => 'string' ),
+				'per_page'    => array( 'type' => 'integer' ),
+				'page'        => array( 'type' => 'integer' ),
 				'classes_data' => array( 'type' => 'object' ),
 				'style_id'    => array( 'type' => 'string' ),
 				'conditions'  => array( 'type' => 'array' ),
@@ -1493,6 +1524,14 @@ final class Router {
 						'type'        => 'string',
 						'description' => __( 'Filter by template_bundle taxonomy slug (list: optional)', 'bricks-mcp' ),
 					),
+					'per_page'    => array(
+						'type'        => 'integer',
+						'description' => __( 'Templates per page (list: optional, default 20, max 100)', 'bricks-mcp' ),
+					),
+					'page'        => array(
+						'type'        => 'integer',
+						'description' => __( 'Page of results, starting at 1 (list: optional, default 1)', 'bricks-mcp' ),
+					),
 					'post_type'   => array(
 						'type'        => 'string',
 						'description' => __( 'Post type for the template (create: optional)', 'bricks-mcp' ),
@@ -1662,6 +1701,14 @@ final class Router {
 					'search'         => array(
 						'type'        => 'string',
 						'description' => __( 'Filter classes by partial name match (list: optional)', 'bricks-mcp' ),
+					),
+					'per_page'       => array(
+						'type'        => 'integer',
+						'description' => __( 'Classes per page (list: optional, default 50, max 100)', 'bricks-mcp' ),
+					),
+					'page'           => array(
+						'type'        => 'integer',
+						'description' => __( 'Page of results, starting at 1 (list: optional, default 1)', 'bricks-mcp' ),
 					),
 					'classes_data'   => array(
 						'type'        => 'object',
@@ -2137,6 +2184,29 @@ final class Router {
 				'required'   => array( 'action' ),
 			),
 			array( $this, 'tool_code' )
+		);
+	}
+
+	/**
+	 * Cut a full result list down to one page.
+	 *
+	 * per_page is capped at LIST_MAX_PER_PAGE and page starts at 1; both fall back to their defaults when omitted.
+	 *
+	 * @param array<int|string, mixed> $items            All results, in order.
+	 * @param array<string, mixed>     $args             Tool arguments (per_page, page).
+	 * @param int                      $default_per_page Page size when per_page is omitted.
+	 * @return array{items: array<int, mixed>, page: int, per_page: int, has_more: bool}
+	 */
+	private function paginate_list( array $items, array $args, int $default_per_page ): array {
+		$per_page = isset( $args['per_page'] ) ? min( max( 1, absint( $args['per_page'] ) ), self::LIST_MAX_PER_PAGE ) : $default_per_page;
+		$page     = isset( $args['page'] ) ? max( 1, absint( $args['page'] ) ) : 1;
+		$offset   = ( $page - 1 ) * $per_page;
+
+		return array(
+			'items'    => array_slice( array_values( $items ), $offset, $per_page ),
+			'page'     => $page,
+			'per_page' => $per_page,
+			'has_more' => $offset + $per_page < count( $items ),
 		);
 	}
 
@@ -5275,10 +5345,14 @@ final class Router {
 		$tag       = sanitize_key( $args['tag'] ?? '' );
 		$bundle    = sanitize_key( $args['bundle'] ?? '' );
 		$templates = $this->bricks_service->get_templates( $type, $status, $tag, $bundle );
+		$paged     = $this->paginate_list( $templates, $args, self::TEMPLATE_LIST_PER_PAGE );
 
 		return array(
 			'total'     => count( $templates ),
-			'templates' => $templates,
+			'page'      => $paged['page'],
+			'per_page'  => $paged['per_page'],
+			'has_more'  => $paged['has_more'],
+			'templates' => $paged['items'],
 		);
 	}
 
@@ -5525,10 +5599,14 @@ final class Router {
 		$search   = isset( $args['search'] ) ? sanitize_text_field( $args['search'] ) : '';
 		$category = isset( $args['category'] ) ? sanitize_text_field( $args['category'] ) : '';
 		$classes  = $this->bricks_service->get_global_classes( $search, $category );
+		$paged    = $this->paginate_list( $classes, $args, self::GLOBAL_CLASS_LIST_PER_PAGE );
 
 		return array(
-			'total'   => count( $classes ),
-			'classes' => $classes,
+			'total'    => count( $classes ),
+			'page'     => $paged['page'],
+			'per_page' => $paged['per_page'],
+			'has_more' => $paged['has_more'],
+			'classes'  => $paged['items'],
 		);
 	}
 
