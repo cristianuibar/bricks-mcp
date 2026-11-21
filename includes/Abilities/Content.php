@@ -242,7 +242,7 @@ final class Content implements Module {
 	private function set_post_status_definition(): array {
 		return [
 			'label'               => __( 'Set post status', 'bricks-mcp' ),
-			'description'         => __( 'Change the status of a post, page or Bricks template: publish, draft, pending, private, or future (scheduled, needs `date`). Bricks creates templates as drafts and cannot publish them, so use this to publish a template. Publishing, scheduling and making private need the post type\'s publish capability. Refused while another user is editing the post. Returns the previous and new status.', 'bricks-mcp' ),
+			'description'         => __( 'Change the status of a post, page or Bricks template: publish, draft, pending, private, or future (scheduled, needs `date`). Bricks creates templates as drafts and cannot publish them, so use this to publish a template. Publishing, scheduling and making private need the post type\'s publish capability; templates also need Bricks builder access. Refused while another user is editing the post. Returns the previous and new status.', 'bricks-mcp' ),
 			'category'            => self::CATEGORY,
 			'input_schema'        => [
 				'type'                 => 'object',
@@ -277,7 +277,7 @@ final class Content implements Module {
 			'meta'                => [
 				'annotations' => [
 					'readonly'    => false,
-					'destructive' => false,
+					'destructive' => true,
 					'idempotent'  => true,
 				],
 			],
@@ -392,11 +392,14 @@ final class Content implements Module {
 	/**
 	 * Permission check for status changes, which may need the publish capability.
 	 *
+	 * Bricks templates also need builder access, since publishing or unpublishing one applies or removes it site-wide.
+	 *
 	 * @param mixed $input Ability input.
 	 * @return true|\WP_Error
 	 */
 	private function can_set_status( mixed $input ): bool|\WP_Error {
-		$allowed = $this->can_edit( $input );
+		$post_id = (int) ( is_array( $input ) ? ( $input['postId'] ?? 0 ) : 0 );
+		$allowed = $this->can_edit( $input, $post_id > 0 && 'bricks_template' === get_post_type( $post_id ) );
 
 		if ( true !== $allowed ) {
 			return $allowed;

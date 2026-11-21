@@ -24,7 +24,7 @@ Each ability has a `permission_callback`. Abilities that touch Bricks data mirro
 | Abilities | Required |
 |---|---|
 | `get-seo`, `update-seo`, `set-featured-image` | `edit_post` for the post. Without an SEO plugin, `update-seo` writes through `bricks/set-page-settings`, which also checks Bricks builder access. |
-| `set-post-status` | `edit_post` for the post. Publish, future and private also need the post type's publish capability. |
+| `set-post-status` | `edit_post` for the post. Publish, future and private also need the post type's publish capability. Bricks templates (`bricks_template`) also need Bricks builder access for that template, for every status. Annotated destructive, since it can take a live page or template offline. |
 | `set-editor-mode`, `move-element`, `resolve-templates`, `diagnose-page`, `audit-page` | `edit_post` for the post, and Bricks builder access for that post |
 | `create-global-class-category`, `delete-global-class-category` | `edit_posts` and the Bricks builder permission `edit_global_classes` (the check Bricks uses for global class edits) |
 | `list-adobe-fonts`, `update-font-settings` | `manage_options` |

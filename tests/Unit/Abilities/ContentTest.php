@@ -272,6 +272,70 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Publishing or unpublishing a Bricks template needs builder access on it; pages do not.
+	 *
+	 * @return void
+	 */
+	public function test_template_status_change_needs_builder_access(): void {
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 30,
+				'post_type'   => 'bricks_template',
+				'post_status' => 'draft',
+			]
+		);
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 31,
+				'post_type'   => 'bricks_template',
+				'post_status' => 'publish',
+			]
+		);
+		\Bricks\Capabilities::$can_use_builder = false;
+
+		$publish   = $this->call(
+			'bricks-mcp/set-post-status',
+			[
+				'postId' => 30,
+				'status' => 'publish',
+			]
+		);
+		$unpublish = $this->call(
+			'bricks-mcp/set-post-status',
+			[
+				'postId' => 31,
+				'status' => 'draft',
+			]
+		);
+		$page      = $this->call(
+			'bricks-mcp/set-post-status',
+			[
+				'postId' => self::POST_ID,
+				'status' => 'publish',
+			]
+		);
+
+		$this->assertSame( 'bricks_mcp_forbidden_builder', $publish->get_error_code() );
+		$this->assertSame( 'bricks_mcp_forbidden_builder', $unpublish->get_error_code() );
+		$this->assertSame( 'draft', get_post( 30 )->post_status );
+		$this->assertSame( 'publish', get_post( 31 )->post_status );
+		$this->assertSame( 'publish', $page['status'] );
+
+		\Bricks\Capabilities::$can_use_builder = true;
+
+		$allowed = $this->call(
+			'bricks-mcp/set-post-status',
+			[
+				'postId' => 30,
+				'status' => 'publish',
+			]
+		);
+
+		$this->assertSame( 'publish', $allowed['status'] );
+		$this->assertSame( 'publish', get_post( 30 )->post_status );
+	}
+
+	/**
 	 * A post locked by another user is not changed.
 	 *
 	 * @return void
