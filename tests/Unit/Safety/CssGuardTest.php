@@ -176,6 +176,16 @@ final class CssGuardTest extends TestCase {
 				'operations.0.value',
 				'moz_binding',
 			],
+			'closing style tag in a string'                    => [
+				[ 'settings' => [ 'customCss' => '.x::before { content: "</STYLE ><script>example()</script>"; }' ] ],
+				'settings.customCss',
+				'style_close',
+			],
+			'closing style tag in a comment'                   => [
+				[ 'elements' => [ [ 'settings' => [ '_cssCustom' => '.x { color: red; } /* </style><script>example()</script> */' ] ] ] ],
+				'elements.0.settings._cssCustom',
+				'style_close',
+			],
 			'oversized HTML with styles'                       => [
 				[ 'content' => '<p style="color: red">' . str_repeat( 'x', 1048576 ) . '</p>' ],
 				'content',
@@ -213,6 +223,7 @@ final class CssGuardTest extends TestCase {
 			'import'         => '@import',
 			'behaviour'      => 'behavior',
 			'moz_binding'    => '-moz-binding',
+			'style_close'    => '</style>',
 			'size'           => '100 KB',
 			'html_size'      => '1 MB',
 			'html_parse'     => 'could not be parsed',
@@ -299,7 +310,7 @@ final class CssGuardTest extends TestCase {
 
 	public function test_allows_normal_css_at_the_size_limit_and_ignores_non_css_fields(): void {
 		$input = [
-			'css'      => str_pad( '.x { background: url("https://example.com/image.png"); scroll-behavior: smooth; }', 102400 ),
+			'css'      => str_pad( '.x { background: url("https://example.com/image.png"); scroll-behavior: smooth; } .x > .y::before { content: "</p>"; }', 102400 ),
 			'html'     => '<style>.x { color: red; }</style><p style="color: blue">Example</p>' . str_repeat( ' ', 1048576 - 67 ),
 			'content'  => '<section><nav><p style="color: blue">Example</div></span>',
 			'settings' => [ '_cssClasses' => '@import example', 'label' => 'expression()' ],
