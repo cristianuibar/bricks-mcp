@@ -82,7 +82,7 @@ class HttpsCheck implements DiagnosticCheck {
 
 		$fix_steps = array(
 			__( 'Enable HTTPS/SSL on your site via your hosting provider.', 'bricks-mcp' ),
-			__( 'If behind a reverse proxy that terminates HTTPS, configure WordPress to trust it (e.g. set $_SERVER["HTTPS"] = "on" in wp-config.php only when the request comes from your proxy) so is_ssl() reports HTTPS.', 'bricks-mcp' ),
+			__( 'If behind a reverse proxy that terminates HTTPS, set $_SERVER["HTTPS"] = "on" in wp-config.php only when the request comes from your trusted proxy and that proxy reports the original request was HTTPS (X-Forwarded-Proto: https). Never mark every request from the proxy as secure: plain HTTP requests it forwards would then pass as HTTPS.', 'bricks-mcp' ),
 		);
 
 		$force_enable_step = self::force_enable_step();
