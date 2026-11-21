@@ -20,6 +20,7 @@ function bricks_mcp_test_reset_admin(): void {
 	$GLOBALS['_bricks_mcp_test_referer']             = false;
 	$GLOBALS['_bricks_mcp_test_wp_remote_get_calls'] = [];
 	$GLOBALS['_bricks_mcp_test_wp_remote_get_return'] = [ 'response' => [ 'code' => 200 ], 'body' => '' ];
+	$GLOBALS['_bricks_mcp_test_wp_remote_get_responses'] = [];
 	$GLOBALS['_bricks_mcp_test_registered_settings'] = [];
 	$GLOBALS['_bricks_mcp_test_json_response']       = null;
 }
@@ -236,6 +237,9 @@ if ( ! function_exists( 'wp_remote_get' ) ) {
 			'url'  => $url,
 			'args' => $args,
 		];
+		if ( isset( $GLOBALS['_bricks_mcp_test_wp_remote_get_responses'][ $url ] ) ) {
+			return $GLOBALS['_bricks_mcp_test_wp_remote_get_responses'][ $url ];
+		}
 		return $GLOBALS['_bricks_mcp_test_wp_remote_get_return'] ?? [
 			'response' => [ 'code' => 200 ],
 			'body'     => '',
