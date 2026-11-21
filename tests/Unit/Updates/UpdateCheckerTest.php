@@ -152,17 +152,85 @@ final class UpdateCheckerTest extends TestCase {
 		$this->assertFalse( $result );
 	}
 
-	public function test_verify_download_passthrough_when_already_handled(): void {
+	/**
+	 * Test: an error from an earlier filter (download already aborted) is passed through.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_passes_through_error_from_earlier_filter(): void {
 		$this->cache_release_hash( str_repeat( 'a', 64 ) );
+		$error = new \WP_Error( 'download_failed', 'Earlier filter aborted.' );
 
 		$result = $this->checker->verify_download(
-			'some-value',
-			'https://example.com/file.zip',
+			$error,
+			self::PACKAGE_URL,
 			new \stdClass(),
 			[ 'plugin' => 'bricks-mcp/bricks-mcp.php' ]
 		);
 
-		$this->assertSame( 'some-value', $result );
+		$this->assertSame( $error, $result );
+	}
+
+	/**
+	 * Test: a ZIP supplied by an earlier filter is refused when the release has no checksum.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_refuses_supplied_zip_when_release_has_no_checksum(): void {
+		$this->cache_release_hash( '' );
+		$supplied = $this->make_temp_file( 'zip supplied by another filter' );
+
+		$result = ( new UpdateChecker() )->verify_download(
+			$supplied,
+			self::PACKAGE_URL,
+			new \stdClass(),
+			[ 'plugin' => 'bricks-mcp/bricks-mcp.php' ]
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'checksum_missing', $result->get_error_code() );
+	}
+
+	/**
+	 * Test: a ZIP supplied by an earlier filter is checked against the release hash;
+	 * a mismatch is refused without deleting the supplied file, a match is accepted.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_checks_supplied_zip_against_release_hash(): void {
+		$content  = 'zip supplied by another filter';
+		$supplied = $this->make_temp_file( $content );
+
+		$this->cache_release_hash( str_repeat( '0', 64 ) );
+		$mismatch = ( new UpdateChecker() )->verify_download( $supplied, self::PACKAGE_URL, new \stdClass(), [ 'plugin' => 'bricks-mcp/bricks-mcp.php' ] );
+
+		$this->assertInstanceOf( \WP_Error::class, $mismatch );
+		$this->assertSame( 'checksum_mismatch', $mismatch->get_error_code() );
+		$this->assertFileExists( $supplied );
+		$this->assertSame( [], $GLOBALS['_bricks_mcp_test_deleted_files'] );
+
+		$this->cache_release_hash( hash( 'sha256', $content ) );
+		$match = ( new UpdateChecker() )->verify_download( $supplied, self::PACKAGE_URL, new \stdClass(), [ 'plugin' => 'bricks-mcp/bricks-mcp.php' ] );
+
+		$this->assertSame( $supplied, $match );
+	}
+
+	/**
+	 * Test: a reply from an earlier filter for another plugin is left untouched.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_passthrough_supplied_zip_for_other_plugin(): void {
+		$this->cache_release_hash( '' );
+
+		$result = $this->checker->verify_download(
+			'/tmp/other-plugin.zip',
+			'https://example.com/other-plugin.zip',
+			new \stdClass(),
+			[ 'plugin' => 'some-other-plugin/plugin.php' ]
+		);
+
+		$this->assertSame( '/tmp/other-plugin.zip', $result );
 	}
 
 	/**

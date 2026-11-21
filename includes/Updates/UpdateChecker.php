@@ -215,7 +215,8 @@ final class UpdateChecker {
 	 * Verify the downloaded plugin ZIP against the expected SHA-256 hash.
 	 *
 	 * Hooked to `upgrader_pre_download`. Returning a file path short-circuits
-	 * WordPress's own download and uses our already-verified temp file.
+	 * WordPress's own download and uses our already-verified temp file. A ZIP
+	 * that an earlier filter supplied for this plugin is verified the same way.
 	 * Returning WP_Error aborts the update with a clear error message, including
 	 * when the release has no valid checksum. Returning false (the default $reply
 	 * value) lets WordPress handle downloads for other plugins normally.
@@ -224,21 +225,21 @@ final class UpdateChecker {
 	 * is empty), because WordPress often installs from its own cached update data
 	 * without running check_update() in the same request.
 	 *
-	 * @param false|string|\WP_Error $reply      Current reply value (false = not handled yet).
+	 * @param false|string|\WP_Error $reply      Current reply value (false = not handled yet, string = ZIP path from an earlier filter).
 	 * @param string                 $package    URL of the package to download.
 	 * @param \WP_Upgrader           $upgrader   WP_Upgrader instance.
 	 * @param array<string,mixed>    $hook_extra Extra data about the update (includes 'plugin' key).
 	 * @return false|string|\WP_Error
 	 */
 	public function verify_download( $reply, string $package, $upgrader, array $hook_extra ) {
-		// If an earlier filter already handled the download, pass through.
-		if ( false !== $reply ) {
-			return $reply;
-		}
-
 		// Only verify our own plugin (same basename check_update() offers updates for) — leave other plugins untouched.
 		$plugin = $hook_extra['plugin'] ?? '';
 		if ( BRICKS_MCP_PLUGIN_BASENAME !== $plugin ) {
+			return $reply;
+		}
+
+		// An earlier filter already aborted the download.
+		if ( is_wp_error( $reply ) ) {
 			return $reply;
 		}
 
@@ -252,17 +253,26 @@ final class UpdateChecker {
 			);
 		}
 
-		// Download the ZIP ourselves so we can verify it before WordPress uses it.
-		$temp_file = download_url( $package );
+		if ( false === $reply ) {
+			// Download the ZIP ourselves so we can verify it before WordPress uses it.
+			$temp_file = download_url( $package );
 
-		if ( is_wp_error( $temp_file ) ) {
-			return $temp_file;
+			if ( is_wp_error( $temp_file ) ) {
+				return $temp_file;
+			}
+		} elseif ( is_string( $reply ) ) {
+			// Verify the ZIP an earlier filter supplied; it is not ours to delete.
+			$temp_file = $reply;
+		} else {
+			$temp_file = '';
 		}
 
-		$actual_hash = hash_file( 'sha256', $temp_file );
+		$actual_hash = ( '' !== $temp_file && is_file( $temp_file ) ) ? hash_file( 'sha256', $temp_file ) : false;
 
 		if ( $actual_hash !== $expected ) {
-			wp_delete_file( $temp_file );
+			if ( false === $reply ) {
+				wp_delete_file( $temp_file );
+			}
 			return new \WP_Error(
 				'checksum_mismatch',
 				__( 'Update integrity check failed: SHA-256 checksum does not match expected value.', 'bricks-mcp' )

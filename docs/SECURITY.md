@@ -74,7 +74,7 @@ The guard does not check JavaScript. Bricks decides which abilities may write sc
 
 ## Updates
 
-The plugin updates from GitHub Releases. The updater offers an update only for this plugin and checks the release ZIP against the SHA-256 checksum file published for it (`<zip name>.sha256`) before WordPress installs it, whether the update is manual or automatic. If the release has no such checksum file, or the checksum cannot be fetched, the update is refused. The checksum is published in the same release as the ZIP, so it detects a corrupted download, not a replaced release. The plugin does not turn on automatic updates; each site admin chooses that in WordPress.
+The plugin updates from GitHub Releases. The updater offers an update only for this plugin and checks the release ZIP against the SHA-256 checksum file published for it (`<zip name>.sha256`) before WordPress installs it, whether the update is manual or automatic. A ZIP that another plugin's download filter supplies for this plugin is checked the same way. If the release has no such checksum file, or the checksum cannot be fetched, the update is refused. The checksum is published in the same release as the ZIP, so it detects a corrupted download, not a replaced release. The plugin does not turn on automatic updates; each site admin chooses that in WordPress.
 
 ## What this plugin does not do
 
