@@ -171,7 +171,10 @@ final class CssGuard {
 	 * @return \WP_Error|null
 	 */
 	private function scan_html( string $html, string $path ): ?\WP_Error {
-		if ( ! str_contains( $html, '<' ) || false === stripos( $html, 'style' ) ) {
+		// A style element or attribute needs a start tag and a `style` name after it. libxml
+		// truncates names at 100 characters, so any character may come before that name.
+		$tag = preg_match( '~<[a-z_:.]~i', $html, $match, PREG_OFFSET_CAPTURE );
+		if ( 0 === $tag || ( 1 === $tag && 0 === preg_match( '~style(?![a-z0-9_:.-])~i', $html, $match, 0, $match[0][1] ) ) ) {
 			return null;
 		}
 

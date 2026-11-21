@@ -156,6 +156,11 @@ final class CssGuardTest extends TestCase {
 				'content.style.0',
 				'expression',
 			],
+			'stylesheet after plain text with a less-than sign' => [
+				[ 'content' => 'Sale < 10 days <style>@import "example.css";</style>' ],
+				'content.style.0',
+				'import',
+			],
 			'typed edit with a dotted setting path'            => [
 				[ 'operations' => [ [ 'settingPath' => 'settings._cssCustom:hover', 'value' => '@import "example.css";' ] ] ],
 				'operations.0.value',
@@ -240,6 +245,38 @@ final class CssGuardTest extends TestCase {
 		self::assertSame( [ 'status' => 500, 'path' => 'content', 'pattern' => 'html_parser' ], $result->get_error_data() );
 		self::assertStringContainsString( 'DOM extension', $result->get_error_message() );
 		self::assertSame( 'executed', $this->ability->execute( [ 'content' => '<p>Example</p>', 'title' => 'style' ] ) );
+	}
+
+	public function test_blocks_style_markup_libxml_accepts_when_the_dom_extension_is_missing(): void {
+		$GLOBALS['_bricks_mcp_test_missing_classes'] = [ \DOMDocument::class ];
+
+		foreach ( [
+			'<STYLE>.x { color: red; }</STYLE>',
+			'<p title="1"style="color: red">Example</p>',
+			'<p ' . str_repeat( 'a', 100 ) . 'style="color: red">Example</p>',
+			'<' . str_repeat( 'a', 100 ) . 'style="color: red">Example',
+			'Sale < 10 days <p style="color: red">Example</p>',
+		] as $html ) {
+			$result = $this->ability->execute( [ 'content' => $html ] );
+			self::assertInstanceOf( WP_Error::class, $result, $html );
+			self::assertSame( [ 'status' => 500, 'path' => 'content', 'pattern' => 'html_parser' ], $result->get_error_data(), $html );
+		}
+	}
+
+	public function test_allows_plain_text_with_style_and_less_than_signs(): void {
+		$ability = make_safety_ability( 'bricks-mcp/update-seo', [ 'execute_callback' => static fn() => 'executed' ] );
+		$inputs  = [
+			[ 'title' => 'Summer styles < $50', 'description' => 'Find your style in < 10 minutes' ],
+			[ 'title' => 'Find your style in < 10 minutes', 'description' => 'A lifestyle guide to styles that last.' ],
+			[ 'title' => 'Sale < 10 days left', 'description' => 'Prices <$20 & <b>bold</b> picks' ],
+		];
+
+		foreach ( [ false, true ] as $dom_missing ) {
+			$GLOBALS['_bricks_mcp_test_missing_classes'] = $dom_missing ? [ \DOMDocument::class ] : [];
+			foreach ( $inputs as $input ) {
+				self::assertSame( 'executed', $ability->execute( $input ), $input['title'] );
+			}
+		}
 	}
 
 	public function test_allows_inline_images_in_css(): void {
