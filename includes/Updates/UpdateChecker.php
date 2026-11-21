@@ -34,6 +34,13 @@ final class UpdateChecker {
 	private const GITHUB_API_URL = 'https://api.github.com/repos/cristianuibar/bricks-mcp/releases/latest';
 
 	/**
+	 * Pattern a release asset URL must match: this repository's release downloads on github.com.
+	 *
+	 * @var string
+	 */
+	private const RELEASE_ASSET_URL_PATTERN = '#^https://github\.com/cristianuibar/bricks-mcp/releases/download/(?!\.\.?/)[^/?\#\s]+/(?!\.\.?\z)[^/?\#\s]+\z#';
+
+	/**
 	 * Transient key for cached update data.
 	 *
 	 * @var string
@@ -170,36 +177,39 @@ final class UpdateChecker {
 
 		$release = json_decode( wp_remote_retrieve_body( $response ), true );
 
-		if ( ! is_array( $release ) || empty( $release['tag_name'] ) ) {
+		// Strip leading "v" from tag name (e.g. "v1.2.3" → "1.2.3").
+		$version = is_array( $release ) && is_string( $release['tag_name'] ?? null ) ? ltrim( $release['tag_name'], 'v' ) : '';
+
+		if ( '' === $version ) {
 			set_transient( self::TRANSIENT_KEY, [], 5 * MINUTE_IN_SECONDS );
 			return [];
 		}
-
-		// Strip leading "v" from tag name (e.g. "v1.2.3" → "1.2.3").
-		$version = ltrim( $release['tag_name'], 'v' );
 
 		// Scan assets for the plugin ZIP and a matching .sha256 checksum file.
 		$package = '';
 		$sha256  = '';
 		if ( ! empty( $release['assets'] ) && is_array( $release['assets'] ) ) {
 			foreach ( $release['assets'] as $asset ) {
-				$name = $asset['name'] ?? '';
+				if ( ! is_array( $asset ) || ! is_string( $asset['name'] ?? null ) || ! self::is_release_asset_url( $asset['browser_download_url'] ?? null ) ) {
+					continue;
+				}
+				$name = $asset['name'];
 				if ( str_ends_with( $name, '.zip' ) && empty( $package ) ) {
-					$package = $asset['browser_download_url'] ?? '';
+					$package = $asset['browser_download_url'];
 				} elseif ( str_ends_with( $name, '.sha256' ) ) {
-					$checksum_url = $asset['browser_download_url'] ?? '';
+					$checksum_url = $asset['browser_download_url'];
 					if ( ! empty( $checksum_url ) ) {
-						$checksum_response = wp_remote_get(
+						$checksum_response = wp_safe_remote_get(
 							$checksum_url,
 							[
 								'timeout'    => 10,
 								'User-Agent' => 'Bricks-MCP-UpdateChecker/1.0',
 							]
 						);
-						if ( ! is_wp_error( $checksum_response ) && 200 === wp_remote_retrieve_response_code( $checksum_response ) ) {
-							// sha256sum format: "hexhash  filename" — extract only the 64-char hex hash.
-							$raw    = trim( wp_remote_retrieve_body( $checksum_response ) );
-							$sha256 = substr( $raw, 0, 64 );
+						// sha256sum format: "hexhash  filename" — accept only a leading 64-char hex hash.
+						if ( ! is_wp_error( $checksum_response ) && 200 === wp_remote_retrieve_response_code( $checksum_response )
+							&& preg_match( '/^([a-f0-9]{64})(?:\s|\z)/i', trim( wp_remote_retrieve_body( $checksum_response ) ), $matches ) ) {
+							$sha256 = strtolower( $matches[1] );
 						}
 					}
 				}
@@ -209,7 +219,7 @@ final class UpdateChecker {
 		$data = [
 			'version' => $version,
 			'package' => $package,
-			'url'     => $release['html_url'] ?? '',
+			'url'     => is_string( $release['html_url'] ?? null ) ? $release['html_url'] : '',
 			'sha256'  => $sha256,
 		];
 
@@ -244,6 +254,14 @@ final class UpdateChecker {
 			return $reply;
 		}
 
+		// Refuse a package that is not one of this repository's release downloads.
+		if ( ! self::is_release_asset_url( $package ) ) {
+			return new \WP_Error(
+				'untrusted_package',
+				__( 'Update refused: the package URL is not a Bricks MCP release download on GitHub.', 'bricks-mcp' )
+			);
+		}
+
 		// If no expected hash is cached, degrade gracefully — allow the update to proceed.
 		if ( empty( $this->expected_sha256 ) ) {
 			return $reply;
@@ -258,7 +276,7 @@ final class UpdateChecker {
 
 		$actual_hash = hash_file( 'sha256', $temp_file );
 
-		if ( $actual_hash !== $this->expected_sha256 ) {
+		if ( ! is_string( $actual_hash ) || ! hash_equals( strtolower( $this->expected_sha256 ), $actual_hash ) ) {
 			wp_delete_file( $temp_file );
 			return new \WP_Error(
 				'checksum_mismatch',
@@ -268,6 +286,16 @@ final class UpdateChecker {
 
 		// Hash matches — return the verified temp file path so WordPress skips its redundant download.
 		return $temp_file;
+	}
+
+	/**
+	 * Whether a URL is a release asset download of this repository on github.com over https.
+	 *
+	 * @param mixed $url Candidate URL from the release JSON or the update transient.
+	 * @return bool
+	 */
+	private static function is_release_asset_url( $url ): bool {
+		return is_string( $url ) && 1 === preg_match( self::RELEASE_ASSET_URL_PATTERN, $url );
 	}
 
 	/**
