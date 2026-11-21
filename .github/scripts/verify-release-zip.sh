@@ -41,6 +41,7 @@ rsync -a \
 	--exclude='README.md' \
 	--exclude='.wordpress-org' \
 	--exclude='.distignore' \
+	--exclude='.phpunit.cache' \
 	./ "$STAGE/"
 
 echo "==> Building ZIP"

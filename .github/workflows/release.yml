@@ -13,22 +13,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate tag and stamp version
+        run: bash .github/scripts/stamp-release-version.sh "$GITHUB_REF_NAME"
+
+      - name: Check tag commit is on main
+        run: |
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "Refusing release tag '$GITHUB_REF_NAME': commit $(git rev-parse HEAD) is not on main" >&2
+            exit 1
+          fi
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
+          coverage: none
+          extensions: dom, mbstring, simplexml, tokenizer, xml, xmlwriter
+          tools: composer:v2
 
-      - name: Stamp version from tag
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          echo "Stamping version: $VERSION"
-          sed -i "s/^ \* Version:.*/ * Version:           $VERSION/" bricks-mcp.php
-          sed -i "s/define( 'BRICKS_MCP_VERSION', '.*' );/define( 'BRICKS_MCP_VERSION', '$VERSION' );/" bricks-mcp.php
-          sed -i "s/^Stable tag:.*/Stable tag: $VERSION/" readme.txt
-          grep 'Version:' bricks-mcp.php | head -1
-          grep 'BRICKS_MCP_VERSION' bricks-mcp.php | head -1
-          grep 'Stable tag:' readme.txt | head -1
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run unit tests
+        run: php vendor/bin/phpunit -c phpunit-unit.xml
+
+      - name: Verify release ZIP
+        run: bash .github/scripts/verify-release-zip.sh
 
       - name: Build plugin ZIP
         run: |
@@ -60,6 +74,7 @@ jobs:
             --exclude='README.md' \
             --exclude='.wordpress-org' \
             --exclude='.distignore' \
+            --exclude='.phpunit.cache' \
             ./ build/bricks-mcp/
           cd build && zip -r "bricks-mcp.zip" bricks-mcp/
 
