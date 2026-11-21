@@ -190,17 +190,18 @@ final class UpdateChecker {
 		$sha256  = '';
 		if ( ! empty( $release['assets'] ) && is_array( $release['assets'] ) ) {
 			foreach ( $release['assets'] as $asset ) {
-				if ( ! is_array( $asset ) || ! is_string( $asset['name'] ?? null ) || ! self::is_release_asset_url( $asset['browser_download_url'] ?? null ) ) {
+				if ( ! is_array( $asset ) || ! is_string( $asset['name'] ?? null ) ) {
 					continue;
 				}
 				$name = $asset['name'];
+				$url  = self::is_release_asset_url( $asset['browser_download_url'] ?? null ) ? $asset['browser_download_url'] : '';
 				if ( str_ends_with( $name, '.zip' ) && empty( $package ) ) {
-					$package = $asset['browser_download_url'];
+					$package = $url;
 				} elseif ( str_ends_with( $name, '.sha256' ) ) {
-					$checksum_url = $asset['browser_download_url'];
-					if ( ! empty( $checksum_url ) ) {
+					$sha256 = '';
+					if ( '' !== $url ) {
 						$checksum_response = wp_safe_remote_get(
-							$checksum_url,
+							$url,
 							[
 								'timeout'    => 10,
 								'User-Agent' => 'Bricks-MCP-UpdateChecker/1.0',
@@ -211,6 +212,12 @@ final class UpdateChecker {
 							&& preg_match( '/^([a-f0-9]{64})(?:\s|\z)/i', trim( wp_remote_retrieve_body( $checksum_response ) ), $matches ) ) {
 							$sha256 = strtolower( $matches[1] );
 						}
+					}
+
+					// A published checksum that cannot be fetched or parsed must not silently disable verification.
+					if ( '' === $sha256 ) {
+						set_transient( self::TRANSIENT_KEY, [], 5 * MINUTE_IN_SECONDS );
+						return [];
 					}
 				}
 			}

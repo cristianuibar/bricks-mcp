@@ -275,7 +275,7 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	/**
-	 * Test: package and checksum URLs outside the repository's release downloads are dropped and never fetched.
+	 * Test: an untrusted package URL is dropped; an untrusted checksum URL is never fetched and blocks the update.
 	 *
 	 * @return void
 	 */
@@ -292,9 +292,10 @@ final class UpdateCheckerTest extends TestCase {
 			'http://127.0.0.1/cristianuibar/bricks-mcp/releases/download/v2.1.0/',
 		];
 
+		$trusted = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/';
+
 		foreach ( $untrusted as $base ) {
-			$GLOBALS['_bricks_mcp_test_transients']           = [];
-			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] = [];
+			$GLOBALS['_bricks_mcp_test_transients'] = [];
 			$this->stub_release(
 				[
 					'tag_name' => 'v2.1.0',
@@ -302,10 +303,6 @@ final class UpdateCheckerTest extends TestCase {
 						[
 							'name'                 => 'bricks-mcp.zip',
 							'browser_download_url' => $base . 'bricks-mcp.zip',
-						],
-						[
-							'name'                 => 'bricks-mcp.zip.sha256',
-							'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
 						],
 					],
 				]
@@ -316,6 +313,26 @@ final class UpdateCheckerTest extends TestCase {
 			$this->assertIsArray( $result, $base );
 			$this->assertSame( '2.1.0', $result['version'], $base );
 			$this->assertSame( '', $result['package'], $base );
+
+			$GLOBALS['_bricks_mcp_test_transients']               = [];
+			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] = [];
+			$this->stub_release(
+				[
+					'tag_name' => 'v2.1.0',
+					'assets'   => [
+						[
+							'name'                 => 'bricks-mcp.zip',
+							'browser_download_url' => $trusted . 'bricks-mcp.zip',
+						],
+						[
+							'name'                 => 'bricks-mcp.zip.sha256',
+							'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
+						],
+					],
+				]
+			);
+
+			$this->assertFalse( $this->run_check_update(), $base );
 			$this->assertSame( [], $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'], $base );
 		}
 	}
@@ -364,31 +381,49 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	/**
-	 * Test: a checksum file that does not start with 64 hex characters is not stored as the hash.
+	 * Test: a published checksum that is malformed, truncated or unreachable blocks the update instead of skipping verification.
 	 *
 	 * @return void
 	 */
-	public function test_check_update_ignores_malformed_checksum(): void {
-		$base = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/';
-		$this->stub_release(
-			[
-				'tag_name' => 'v2.1.0',
-				'assets'   => [
-					[
-						'name'                 => 'bricks-mcp.zip.sha256',
-						'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
-					],
-				],
-			]
-		);
-		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
-			'response' => [ 'code' => 200 ],
-			'body'     => '<html>' . str_repeat( 'z', 80 ) . '</html>',
+	public function test_check_update_fails_closed_on_unusable_checksum(): void {
+		$base      = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/';
+		$responses = [
+			'truncated digest' => [
+				'response' => [ 'code' => 200 ],
+				'body'     => substr( hash( 'sha256', 'zip' ), 0, 63 ) . "  bricks-mcp.zip\n",
+			],
+			'html page'        => [
+				'response' => [ 'code' => 200 ],
+				'body'     => '<html>' . str_repeat( 'z', 80 ) . '</html>',
+			],
+			'not found'        => [
+				'response' => [ 'code' => 404 ],
+				'body'     => hash( 'sha256', 'zip' ),
+			],
 		];
 
-		$this->run_check_update();
+		foreach ( $responses as $label => $response ) {
+			$GLOBALS['_bricks_mcp_test_transients'] = [];
+			$this->stub_release(
+				[
+					'tag_name' => 'v2.1.0',
+					'assets'   => [
+						[
+							'name'                 => 'bricks-mcp.zip',
+							'browser_download_url' => $base . 'bricks-mcp.zip',
+						],
+						[
+							'name'                 => 'bricks-mcp.zip.sha256',
+							'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
+						],
+					],
+				]
+			);
+			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = $response;
 
-		$this->assertSame( '', $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data']['sha256'] ?? null );
+			$this->assertFalse( $this->run_check_update(), $label );
+			$this->assertSame( [], $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] ?? null, $label );
+		}
 	}
 
 	/**
