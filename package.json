@@ -25,10 +25,10 @@
 		"info": "wp-env run cli wp plugin list"
 	},
 	"devDependencies": {
-		"@wordpress/env": "^10.0.0"
+		"@wordpress/env": "^12.2.0"
 	},
 	"engines": {
-		"node": ">=18.0.0"
+		"node": ">=22.13.0"
 	},
 	"keywords": [
 		"wordpress",

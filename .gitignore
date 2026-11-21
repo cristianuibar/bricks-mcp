@@ -29,9 +29,6 @@ dist/
 build/
 
 
-# npm
-package-lock.json
-
 # Environment files
 .env
 .env.local
