@@ -19,6 +19,7 @@ php -d memory_limit=512M vendor/bin/phpcs --report=json --report-file="$TMP_REPO
 
 python3 - "$BASE_SHA" "$HEAD_SHA" "$TMP_REPORT" "${FILES[@]}" <<'PY'
 import json
+import os
 import re
 import subprocess
 import sys
@@ -48,16 +49,16 @@ with open(report_path, encoding="utf-8") as fh:
     data = json.load(fh)
 
 blocking = []
-for f in data.get("files", {}).values():
-    rel = f.get("name", "")
+# PHPCS JSON keys "files" by the (absolute) file path; values carry no name.
+for file_path, f in data.get("files", {}).items():
+    rel = os.path.relpath(file_path)
     for msg in f.get("messages", []):
         line = msg.get("line", 0)
         severity = msg.get("type", "")
         if severity != "ERROR":
             continue
-        # Match repo-relative paths from PHPCS JSON.
         for path, lines in changed.items():
-            if rel.endswith(path) and line in lines:
+            if rel == os.path.normpath(path) and line in lines:
                 blocking.append((path, line, msg.get("source", ""), msg.get("message", "")))
                 break
 

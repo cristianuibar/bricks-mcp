@@ -24,7 +24,7 @@ Each ability has a `permission_callback`. Abilities that touch Bricks data mirro
 | Abilities | Required |
 |---|---|
 | `get-seo`, `update-seo`, `set-featured-image` | `edit_post` for the post. Without an SEO plugin, `update-seo` writes through `bricks/set-page-settings`, which also checks Bricks builder access. |
-| `set-post-status` | `edit_post` for the post. Publish, future and private also need the post type's publish capability. |
+| `set-post-status` | `edit_post` for the post. Publish, future and private also need the post type's publish capability. Bricks templates (`bricks_template`) also need Bricks builder access for that template, for every status. Annotated destructive, since it can take a live page or template offline. |
 | `set-editor-mode`, `move-element`, `resolve-templates`, `diagnose-page`, `audit-page` | `edit_post` for the post, and Bricks builder access for that post |
 | `create-global-class-category`, `delete-global-class-category` | `edit_posts` and the Bricks builder permission `edit_global_classes` (the check Bricks uses for global class edits) |
 | `list-adobe-fonts`, `update-font-settings` | `manage_options` |
@@ -43,6 +43,7 @@ A filter on `wp_pre_execute_ability` limits executions per user.
 - It applies to every ability run over REST, including the Bricks abilities. It does not count abilities run from PHP, such as in WP-CLI or cron.
 - Default 120 requests per minute per user. Set it under Bricks > Bricks MCP Extensions. `0` turns it off, otherwise 10 to 1000.
 - Counting uses a 60-second window, kept in the object cache when one is configured, otherwise in one transient per user named `bricks_mcp_rl_{user_id}`.
+- The limit is exact only with a persistent object cache, which increments the counter atomically. Without one, the transient is read and written back in two steps, so parallel requests can read the same count and a user can go over the limit by about the number of requests sent at the same time. Treat it as approximate on those sites.
 - Requests without a logged-in user are not counted; the MCP Adapter rejects them before any ability runs.
 - If the object cache drops a counter mid-window, the call is allowed and counting starts again.
 - Calls that one ability makes to another count once.

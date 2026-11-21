@@ -10,19 +10,15 @@
 
 namespace Bricks;
 
-if ( ! class_exists( '\Bricks\Capabilities' ) ) {
-	/**
-	 * Capabilities stub; tests set $can_use_builder.
-	 */
-	class Capabilities {
-		/** @var bool */
-		public static bool $can_use_builder = true;
-
-		public static function current_user_can_use_builder( mixed $post_id = 0 ): bool {
-			return self::$can_use_builder;
+// Capabilities loads on first use, so a separate-process test can set
+// $GLOBALS['_bricks_mcp_test_without_bricks_capabilities'] to model a Bricks release without it.
+spl_autoload_register(
+	static function ( string $class_name ): void {
+		if ( 'Bricks\\Capabilities' === $class_name && empty( $GLOBALS['_bricks_mcp_test_without_bricks_capabilities'] ) ) {
+			require_once __DIR__ . '/lazy/bricks-capabilities.php';
 		}
 	}
-}
+);
 
 if ( ! class_exists( '\Bricks\Database' ) ) {
 	/**

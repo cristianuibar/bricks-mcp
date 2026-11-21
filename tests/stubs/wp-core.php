@@ -23,6 +23,7 @@ function bricks_mcp_test_reset(): void {
 	$GLOBALS['_bricks_mcp_test_transients']         = [];
 	$GLOBALS['_bricks_mcp_test_cache']              = [];
 	$GLOBALS['_bricks_mcp_test_caps']               = [];
+	$GLOBALS['_bricks_mcp_test_object_caps']        = [];
 	$GLOBALS['_bricks_mcp_test_current_user_can']   = true;
 	$GLOBALS['_bricks_mcp_test_current_user_id']    = 1;
 	$GLOBALS['_bricks_mcp_test_posts']              = [];
