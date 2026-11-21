@@ -157,7 +157,9 @@ final class UpdateChecker {
 	private function get_update_data(): array {
 		$cached = get_transient( self::TRANSIENT_KEY );
 
-		if ( false !== $cached ) {
+		// Use the cache only when it is empty (a cached failure) or binds its checksum to its package.
+		// Data cached by older versions paired the ZIP URL with whichever .sha256 asset came last, so it is refetched.
+		if ( is_array( $cached ) && ( [] === $cached || array_key_exists( 'sha256_package', $cached ) ) ) {
 			return $cached;
 		}
 
@@ -236,10 +238,12 @@ final class UpdateChecker {
 		}
 
 		$data = [
-			'version' => $version,
-			'package' => $package,
-			'url'     => is_string( $release['html_url'] ?? null ) ? $release['html_url'] : '',
-			'sha256'  => $sha256,
+			'version'        => $version,
+			'package'        => $package,
+			'url'            => is_string( $release['html_url'] ?? null ) ? $release['html_url'] : '',
+			'sha256'         => $sha256,
+			// The package URL this checksum was read for ("<zip name>.sha256" of that ZIP).
+			'sha256_package' => '' !== $sha256 ? $package : '',
 		];
 
 		set_transient( self::TRANSIENT_KEY, $data, self::CACHE_TTL );
@@ -258,7 +262,7 @@ final class UpdateChecker {
 	 * value) lets WordPress handle downloads for other plugins normally.
 	 *
 	 * The expected hash comes from the cached release data (refetched if the cache
-	 * is empty), because WordPress often installs from its own cached update data
+	 * is empty or does not bind the hash to its package), because WordPress often installs from its own cached update data
 	 * without running check_update() in the same request.
 	 *
 	 * @param false|string|\WP_Error $reply      Current reply value (false = not handled yet, string = ZIP path from an earlier filter).
@@ -341,15 +345,17 @@ final class UpdateChecker {
 	}
 
 	/**
-	 * The release's SHA-256 checksum, lowercased, or '' when it has no valid one.
+	 * The release's SHA-256 checksum, lowercased, or '' when it has no valid one
+	 * or it was not read for the release's package.
 	 *
 	 * @param array<string,mixed> $remote Release data from get_update_data().
 	 * @return string
 	 */
 	private static function release_sha256( array $remote ): string {
 		$sha256 = is_string( $remote['sha256'] ?? null ) ? strtolower( $remote['sha256'] ) : '';
+		$bound  = '' !== ( $remote['package'] ?? '' ) && ( $remote['sha256_package'] ?? null ) === $remote['package'];
 
-		return 1 === preg_match( '/^[0-9a-f]{64}\z/', $sha256 ) ? $sha256 : '';
+		return $bound && 1 === preg_match( '/^[0-9a-f]{64}\z/', $sha256 ) ? $sha256 : '';
 	}
 
 	/**

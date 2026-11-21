@@ -95,10 +95,11 @@ final class UpdateCheckerTest extends TestCase {
 	 */
 	private function cache_release_hash( string $hash ): void {
 		$GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = [
-			'version' => '99.0.0',
-			'package' => self::PACKAGE_URL,
-			'url'     => 'https://github.com/cristianuibar/bricks-mcp/releases/tag/v99.0.0',
-			'sha256'  => $hash,
+			'version'        => '99.0.0',
+			'package'        => self::PACKAGE_URL,
+			'url'            => 'https://github.com/cristianuibar/bricks-mcp/releases/tag/v99.0.0',
+			'sha256'         => $hash,
+			'sha256_package' => self::PACKAGE_URL,
 		];
 	}
 
@@ -553,6 +554,75 @@ final class UpdateCheckerTest extends TestCase {
 		$result = bricks_mcp_test_run_filter( 'upgrader_pre_download', false, $offer['package'], new \stdClass(), [ 'plugin' => 'bricks-mcp/bricks-mcp.php' ] );
 
 		$this->assertSame( $GLOBALS['_bricks_mcp_test_download_url_return'], $result );
+	}
+
+	/**
+	 * Test: release data cached by an older version, which paired the plugin ZIP URL
+	 * with the debug ZIP's digest, does not authenticate the debug ZIP. The cache is
+	 * refetched; when that fails the update is refused, and when it succeeds only the
+	 * plugin ZIP's own checksum is accepted.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_rejects_debug_zip_digest_from_legacy_cache(): void {
+		$plugin_zip = 'plugin zip';
+		$debug_zip  = 'debug zip';
+		$legacy     = [
+			'version' => '99.0.0',
+			'package' => self::PACKAGE_URL,
+			'url'     => 'https://github.com/cristianuibar/bricks-mcp/releases/tag/v99.0.0',
+			'sha256'  => hash( 'sha256', $debug_zip ),
+		];
+		$supplied_debug = $this->make_temp_file( $debug_zip );
+		$verify         = static fn( string $zip ) => ( new UpdateChecker() )->verify_download( $zip, self::PACKAGE_URL, new \stdClass(), [ 'plugin' => 'bricks-mcp/bricks-mcp.php' ] );
+
+		// Refetch fails (GitHub unreachable): fail closed.
+		$GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = $legacy;
+		$GLOBALS['_bricks_mcp_test_wp_remote_get_return']                 = new \WP_Error( 'http_request_failed', 'Connection refused' );
+
+		$result = $verify( $supplied_debug );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'checksum_missing', $result->get_error_code() );
+
+		// Refetch succeeds: the plugin ZIP's own checksum replaces the debug digest.
+		$GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = $legacy;
+		$base = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/';
+		$this->stub_release(
+			[
+				'tag_name' => 'v99.0.0',
+				'assets'   => [
+					[
+						'name'                 => 'bricks-mcp.zip',
+						'browser_download_url' => self::PACKAGE_URL,
+					],
+					[
+						'name'                 => 'bricks-mcp.zip.sha256',
+						'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
+					],
+					[
+						'name'                 => 'bricks-mcp-debug.zip.sha256',
+						'browser_download_url' => $base . 'bricks-mcp-debug.zip.sha256',
+					],
+				],
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'] = [
+			$base . 'bricks-mcp.zip.sha256'       => [
+				'response' => [ 'code' => 200 ],
+				'body'     => hash( 'sha256', $plugin_zip ) . "  bricks-mcp.zip\n",
+			],
+			$base . 'bricks-mcp-debug.zip.sha256' => [
+				'response' => [ 'code' => 200 ],
+				'body'     => hash( 'sha256', $debug_zip ) . "  bricks-mcp-debug.zip\n",
+			],
+		];
+
+		$result = $verify( $supplied_debug );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'checksum_mismatch', $result->get_error_code() );
+
+		$supplied_plugin = $this->make_temp_file( $plugin_zip );
+		$this->assertSame( $supplied_plugin, $verify( $supplied_plugin ) );
 	}
 
 	/**

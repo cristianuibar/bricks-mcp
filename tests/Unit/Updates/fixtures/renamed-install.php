@@ -18,9 +18,10 @@ require dirname( __DIR__, 3 ) . '/bootstrap-simple.php';
 
 // Cached release whose checksum does not match the downloaded ZIP: the update must be refused.
 $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = [
-	'version' => '99.0.0',
-	'package' => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/bricks-mcp.zip',
-	'sha256'  => str_repeat( '0', 64 ),
+	'version'        => '99.0.0',
+	'package'        => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/bricks-mcp.zip',
+	'sha256'         => str_repeat( '0', 64 ),
+	'sha256_package' => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/bricks-mcp.zip',
 ];
 $GLOBALS['_bricks_mcp_test_download_url_return'] = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
 
