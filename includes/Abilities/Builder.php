@@ -30,6 +30,8 @@ final class Builder implements Module {
 	private const CATEGORY_OPTION = 'bricks_global_classes_categories';
 	private const CLASSES_OPTION  = 'bricks_global_classes';
 
+	private const CATEGORY_NAME_MAX_LENGTH = 100;
+
 	/**
 	 * Set the template database.
 	 *
@@ -160,7 +162,13 @@ final class Builder implements Module {
 				'category'            => 'bricks-mcp-builder',
 				'input_schema'        => [
 					'type'                 => 'object',
-					'properties'           => [ 'name' => $id ],
+					'properties'           => [
+						'name' => [
+							'type'      => 'string',
+							'minLength' => 1,
+							'maxLength' => self::CATEGORY_NAME_MAX_LENGTH,
+						],
+					],
 					'required'             => [ 'name' ],
 					'additionalProperties' => false,
 				],
@@ -492,6 +500,9 @@ final class Builder implements Module {
 		if ( '' === $name ) {
 			return new WP_Error( 'bricks_mcp_empty_category_name', __( 'Category name is required.', 'bricks-mcp' ), [ 'status' => 400 ] );
 		}
+		if ( mb_strlen( $name ) > self::CATEGORY_NAME_MAX_LENGTH ) {
+			return new WP_Error( 'bricks_mcp_category_name_too_long', __( 'Category name is too long.', 'bricks-mcp' ), [ 'status' => 400 ] );
+		}
 
 		$authority = self::local_category_store( [ self::CATEGORY_OPTION ] );
 		if ( is_wp_error( $authority ) ) {
@@ -508,7 +519,14 @@ final class Builder implements Module {
 		$name_pattern = '/\A' . preg_quote( $name, '/' ) . '\z/iu';
 
 		foreach ( array_column( $categories, 'name' ) as $existing ) {
-			if ( preg_match( $name_pattern, $existing ) ) {
+			if ( ! is_string( $existing ) ) {
+				continue;
+			}
+			$match = preg_match( $name_pattern, $existing );
+			if ( false === $match ) {
+				return new WP_Error( 'bricks_mcp_category_compare_failed', __( 'The existing category names could not be checked for duplicates.', 'bricks-mcp' ), [ 'status' => 500 ] );
+			}
+			if ( 1 === $match ) {
 				return new WP_Error( 'bricks_mcp_duplicate_category', __( 'A category with this name already exists.', 'bricks-mcp' ), [ 'status' => 409 ] );
 			}
 		}
