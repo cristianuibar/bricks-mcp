@@ -697,6 +697,14 @@ final class UpdateCheckerTest extends TestCase {
 			'https://github.com/someone/bricks-mcp/releases/download/v2.1.0/',
 			'https://github.com/cristianuibar/bricks-mcp/releases/download/../../../../someone/x/releases/download/v2.1.0/',
 			'https://github.com/cristianuibar/bricks-mcp/releases/download/../',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/%2e%2e/',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/%2E%2E/',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/.%2e/',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/%2e./',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/%2e/',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/..%2f..%2f..%2f..%2fsomeone%2fx%2freleases%2fdownload%2fv2.1.0/',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/..\\..\\..\\..\\someone\\x\\releases\\download\\v2.1.0/',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/%2e%2e%2f',
 			'http://127.0.0.1/cristianuibar/bricks-mcp/releases/download/v2.1.0/',
 		];
 
@@ -888,14 +896,21 @@ final class UpdateCheckerTest extends TestCase {
 		$this->cache_release_hash( str_repeat( 'a', 64 ) );
 		$GLOBALS['_bricks_mcp_test_download_url_return'] = $this->make_temp_file( 'x' );
 
-		$result = $this->checker->verify_download(
-			false,
+		$untrusted = [
 			'https://evil.example/bricks-mcp.zip',
-			new \stdClass(),
-			[ 'plugin' => 'bricks-mcp/bricks-mcp.php' ]
-		);
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/%2e%2e/bricks-mcp.zip',
+		];
 
-		$this->assertInstanceOf( \WP_Error::class, $result );
-		$this->assertSame( 'untrusted_package', $result->get_error_code() );
+		foreach ( $untrusted as $package ) {
+			$result = $this->checker->verify_download(
+				false,
+				$package,
+				new \stdClass(),
+				[ 'plugin' => 'bricks-mcp/bricks-mcp.php' ]
+			);
+
+			$this->assertInstanceOf( \WP_Error::class, $result, $package );
+			$this->assertSame( 'untrusted_package', $result->get_error_code(), $package );
+		}
 	}
 }
