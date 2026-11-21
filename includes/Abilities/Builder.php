@@ -514,12 +514,19 @@ final class Builder implements Module {
 			return $snapshot;
 		}
 
-		$raw        = $snapshot['value'];
-		$categories = is_array( $raw ) ? $raw : [];
-		$folded     = mb_convert_case( $name, MB_CASE_FOLD_SIMPLE, 'UTF-8' );
+		$raw          = $snapshot['value'];
+		$categories   = is_array( $raw ) ? $raw : [];
+		$name_pattern = '/\A' . preg_quote( $name, '/' ) . '\z/iu';
 
 		foreach ( array_column( $categories, 'name' ) as $existing ) {
-			if ( is_string( $existing ) && mb_convert_case( $existing, MB_CASE_FOLD_SIMPLE, 'UTF-8' ) === $folded ) {
+			if ( ! is_string( $existing ) ) {
+				continue;
+			}
+			$match = preg_match( $name_pattern, $existing );
+			if ( false === $match ) {
+				return new WP_Error( 'bricks_mcp_category_compare_failed', __( 'The existing category names could not be checked for duplicates.', 'bricks-mcp' ), [ 'status' => 500 ] );
+			}
+			if ( 1 === $match ) {
 				return new WP_Error( 'bricks_mcp_duplicate_category', __( 'A category with this name already exists.', 'bricks-mcp' ), [ 'status' => 409 ] );
 			}
 		}

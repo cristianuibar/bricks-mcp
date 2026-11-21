@@ -270,6 +270,17 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ ...$stored, $category ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
+	public function test_category_creation_fails_closed_when_a_stored_name_cannot_be_compared(): void {
+		$stored = [ [ 'id' => 'broken', 'name' => "Lay\xC3out" ] ];
+		update_option( 'bricks_global_classes_categories', $stored );
+
+		$result = wp_get_ability( 'bricks-mcp/create-global-class-category' )->execute( [ 'name' => 'Layout' ] );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'bricks_mcp_category_compare_failed', $result->get_error_code() );
+		$this->assertSame( $stored, get_option( 'bricks_global_classes_categories' ) );
+	}
+
 	public function test_category_deletion_uncategorizes_its_classes(): void {
 		$remaining = [ 'id' => 'otherc', 'name' => 'Other' ];
 		$classes   = [
