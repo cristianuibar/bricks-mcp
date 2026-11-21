@@ -36,9 +36,12 @@ final class UpdateChecker {
 	/**
 	 * Pattern a release asset URL must match: this repository's release downloads on github.com.
 	 *
+	 * Tag and asset segments allow only RFC 3986 unreserved characters, so no
+	 * percent-encoded or backslash form of a dot segment or separator can pass.
+	 *
 	 * @var string
 	 */
-	private const RELEASE_ASSET_URL_PATTERN = '#^https://github\.com/cristianuibar/bricks-mcp/releases/download/(?!\.\.?/)[^/?\#\s]+/(?!\.\.?\z)[^/?\#\s]+\z#';
+	private const RELEASE_ASSET_URL_PATTERN = '#^https://github\.com/cristianuibar/bricks-mcp/releases/download/(?!\.\.?/)[A-Za-z0-9._~-]+/(?!\.\.?\z)[A-Za-z0-9._~-]+\z#';
 
 	/**
 	 * Prefix on the package URL offered to WordPress.
