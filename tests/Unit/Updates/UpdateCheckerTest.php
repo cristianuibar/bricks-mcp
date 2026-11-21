@@ -346,4 +346,27 @@ final class UpdateCheckerTest extends TestCase {
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'checksum_missing', $result->get_error_code() );
 	}
+
+	/**
+	 * Test: a plugin installed in a renamed folder is offered the update and its
+	 * download is still checked, so a release without a checksum is refused.
+	 *
+	 * Runs in a separate PHP process with a different BRICKS_MCP_PLUGIN_BASENAME.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_checks_renamed_install_that_is_offered_the_update(): void {
+		$output = [];
+		$status = 1;
+		exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/renamed-install.php' ) . ' 2>&1', $output, $status );
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertSame(
+			[
+				'offered' => true,
+				'result'  => 'checksum_missing',
+			],
+			json_decode( implode( "\n", $output ), true )
+		);
+	}
 }

@@ -236,9 +236,9 @@ final class UpdateChecker {
 			return $reply;
 		}
 
-		// Only verify our own plugin — leave other plugins untouched.
+		// Only verify our own plugin (same basename check_update() offers updates for) — leave other plugins untouched.
 		$plugin = $hook_extra['plugin'] ?? '';
-		if ( 'bricks-mcp/bricks-mcp.php' !== $plugin ) {
+		if ( BRICKS_MCP_PLUGIN_BASENAME !== $plugin ) {
 			return $reply;
 		}
 
