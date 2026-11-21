@@ -131,6 +131,11 @@ final class CssGuardTest extends TestCase {
 				'css',
 				'behaviour',
 			],
+			'comment opener in a string after a NUL in a name' => [
+				[ 'css' => ".x { background: x\0url(a \")/*\"); behavior: url(example.htc); } .y { content: \"*/\"; }" ],
+				'css',
+				'behaviour',
+			],
 			'style attribute in custom attributes'             => [
 				[ 'elements' => [ [ 'settings' => [ '_attributes' => [ [ 'id' => 'a1', 'name' => ' Style ', 'value' => 'background: url(javascript:example)' ] ] ] ] ] ],
 				'elements.0.settings._attributes.0.value',

@@ -36,7 +36,7 @@ final class CssGuard {
 	];
 
 	/**
-	 * Comments and the CSS tokens a comment cannot start inside: strings, unquoted url() (also with an escaped name), the <!-- token and identifiers with escapes.
+	 * Comments and the CSS tokens a comment cannot start inside: strings, unquoted url() (also with an escaped name), the <!-- token and identifiers with escapes (NUL counts as U+FFFD, an identifier character).
 	 *
 	 * @var string
 	 */
@@ -48,7 +48,7 @@ final class CssGuard {
 		. '(?:l|\\\\(?:0{0,4}[46]c(?:\r\n|[ \t\r\n\f]|(?![0-9a-f]))|l))'
 		. '\([ \t\r\n\f]*+(?![\'"])(?:[^)\\\\]|\\\\.)*+\)?'
 		. '|<!--'
-		. '|(?:[\w\x80-\xff-]|\\\\(?:[0-9a-f]{1,6}(?:\r\n|[ \t\r\n\f])?|[^\r\n\f0-9a-f]))++~is';
+		. '|(?:[\w\x00\x80-\xff-]|\\\\(?:[0-9a-f]{1,6}(?:\r\n|[ \t\r\n\f])?|[^\r\n\f0-9a-f]))++~is';
 
 	/**
 	 * Register the CSS guard filter.
