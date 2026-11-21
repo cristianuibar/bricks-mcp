@@ -27,6 +27,12 @@ namespace BricksMCP\Safety {
 		}
 	}
 
+	if ( ! function_exists( __NAMESPACE__ . '\class_exists' ) ) {
+		function class_exists( string $class_name, bool $autoload = true ): bool {
+			return ! in_array( $class_name, $GLOBALS['_bricks_mcp_test_missing_classes'] ?? [], true ) && \class_exists( $class_name, $autoload );
+		}
+	}
+
 	if ( ! function_exists( __NAMESPACE__ . '\time' ) ) {
 		function time(): int {
 			return $GLOBALS['_bricks_mcp_test_safety_time'] ?? \time();
