@@ -31,7 +31,7 @@ final class CssGuardTest extends TestCase {
 
 	protected function tearDown(): void {
 		bricks_mcp_test_reset();
-		unset( $GLOBALS['_bricks_mcp_test_safety_filters'] );
+		unset( $GLOBALS['_bricks_mcp_test_safety_filters'], $GLOBALS['_bricks_mcp_test_missing_classes'] );
 	}
 
 	public static function disallowed_inputs(): array {
@@ -136,6 +136,21 @@ final class CssGuardTest extends TestCase {
 				'operations.0.value',
 				'moz_binding',
 			],
+			'oversized HTML with styles'                       => [
+				[ 'content' => '<p style="color: red">' . str_repeat( 'x', 1048576 ) . '</p>' ],
+				'content',
+				'html_size',
+			],
+			'stylesheet after nesting deeper than libxml parses' => [
+				[ 'content' => str_repeat( '<div>', 300 ) . '<style>@import "example.css";</style>' ],
+				'content',
+				'html_parse',
+			],
+			'stylesheet after a NUL byte'                      => [
+				[ 'content' => "<p>\0</p><style>@import \"example.css\";</style>" ],
+				'content.style.0',
+				'import',
+			],
 			'typed edit of the custom attribute list'          => [
 				[ 'operations' => [ [ 'settingPath' => '/settings/_attributes', 'value' => [ [ 'name' => 'style', 'value' => 'background: url(data:text/html,example)' ] ] ] ] ],
 				'operations.0.value.0.value',
@@ -159,9 +174,22 @@ final class CssGuardTest extends TestCase {
 			'behaviour'      => 'behavior',
 			'moz_binding'    => '-moz-binding',
 			'size'           => '100 KB',
+			'html_size'      => '1 MB',
+			'html_parse'     => 'could not be parsed',
 		];
 		self::assertStringContainsString( $path, $result->get_error_message() );
 		self::assertStringContainsString( $detail[ $pattern ], $result->get_error_message() );
+	}
+
+	public function test_blocks_html_with_styles_when_the_dom_extension_is_missing(): void {
+		$GLOBALS['_bricks_mcp_test_missing_classes'] = [ \DOMDocument::class ];
+
+		$result = $this->ability->execute( [ 'content' => '<p style="color: red">Example</p>' ] );
+
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( [ 'status' => 500, 'path' => 'content', 'pattern' => 'html_parser' ], $result->get_error_data() );
+		self::assertStringContainsString( 'DOM extension', $result->get_error_message() );
+		self::assertSame( 'executed', $this->ability->execute( [ 'content' => '<p>Example</p>', 'title' => 'style' ] ) );
 	}
 
 	public function test_allows_inline_images_in_css(): void {
@@ -185,7 +213,8 @@ final class CssGuardTest extends TestCase {
 	public function test_allows_normal_css_at_the_size_limit_and_ignores_non_css_fields(): void {
 		$input = [
 			'css'      => str_pad( '.x { background: url("https://example.com/image.png"); scroll-behavior: smooth; }', 102400 ),
-			'html'     => '<style>.x { color: red; }</style><p style="color: blue">Example</p>',
+			'html'     => '<style>.x { color: red; }</style><p style="color: blue">Example</p>' . str_repeat( ' ', 1048576 - 67 ),
+			'content'  => '<section><nav><p style="color: blue">Example</div></span>',
 			'settings' => [ '_cssClasses' => '@import example', 'label' => 'expression()' ],
 		];
 		self::assertSame( 'executed', $this->ability->execute( $input ) );

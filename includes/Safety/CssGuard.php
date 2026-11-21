@@ -156,14 +156,27 @@ final class CssGuard {
 	 * @return \WP_Error|null
 	 */
 	private function scan_html( string $html, string $path ): ?\WP_Error {
-		if ( ! str_contains( $html, '<' ) || false === stripos( $html, 'style' ) || ! class_exists( \DOMDocument::class ) ) {
+		if ( ! str_contains( $html, '<' ) || false === stripos( $html, 'style' ) ) {
 			return null;
 		}
 
+		if ( strlen( $html ) > 1048576 ) {
+			return $this->html_error( $path, 'html_size', __( 'HTML exceeds the 1 MB limit.', 'bricks-mcp' ) );
+		}
+
+		if ( ! class_exists( \DOMDocument::class ) ) {
+			return $this->html_error( $path, 'html_parser', __( 'the PHP DOM extension is missing, so styles in HTML cannot be checked.', 'bricks-mcp' ), 500 );
+		}
+
+		// libxml stops reading at a NUL byte without an error, so replace NUL like browsers do.
 		$document = new \DOMDocument();
-		$wrapped  = '<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"></head><body>' . trim( $html ) . '</body></html>';
-		if ( ! $document->loadHTML( $wrapped, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING | LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD ) ) {
-			return null;
+		$wrapped  = '<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"></head><body>' . str_replace( "\0", "\u{FFFD}", trim( $html ) ) . '</body></html>';
+		libxml_clear_errors();
+		$loaded = $document->loadHTML( $wrapped, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING | LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
+		$error  = libxml_get_last_error();
+		// A fatal error, such as nesting deeper than libxml allows, halts parsing and drops the rest.
+		if ( ! $loaded || ( false !== $error && LIBXML_ERR_FATAL === $error->level ) ) {
+			return $this->html_error( $path, 'html_parse', __( 'the HTML could not be parsed completely.', 'bricks-mcp' ) );
 		}
 
 		$xpath = new \DOMXPath( $document );
@@ -181,6 +194,28 @@ final class CssGuard {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Build the error for HTML whose styles cannot be checked.
+	 *
+	 * @param string $path Input path.
+	 * @param string $pattern Error pattern.
+	 * @param string $reason Translated reason.
+	 * @param int    $status HTTP status.
+	 * @return \WP_Error
+	 */
+	private function html_error( string $path, string $pattern, string $reason, int $status = 400 ): \WP_Error {
+		return new \WP_Error(
+			'bricks_mcp_css_blocked',
+			/* translators: 1: Input path, 2: Reason. */
+			sprintf( __( 'Blocked unsafe CSS at %1$s: %2$s', 'bricks-mcp' ), $path, $reason ),
+			[
+				'status'  => $status,
+				'path'    => $path,
+				'pattern' => $pattern,
+			]
+		);
 	}
 
 	/**
