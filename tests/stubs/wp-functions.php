@@ -361,6 +361,9 @@ if ( ! function_exists( 'wp_http_validate_url' ) ) {
 if ( ! function_exists( 'wp_safe_remote_get' ) ) {
 	function wp_safe_remote_get( string $url, array $args = [] ): array|\WP_Error {
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'][] = [ 'url' => $url, 'args' => $args ];
+		if ( isset( $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'][ $url ] ) ) {
+			return $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'][ $url ];
+		}
 		return $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] ?? [];
 	}
 }
