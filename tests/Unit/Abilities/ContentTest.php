@@ -194,7 +194,7 @@ final class ContentTest extends TestCase {
 	 * @return void
 	 */
 	public function test_yoast_seo_round_trip_with_audit(): void {
-		class_alias( \stdClass::class, 'WPSEO_Options' );
+		eval( 'final class WPSEO_Options {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
 
 		$write = $this->call(
 			'bricks-mcp/update-seo',
@@ -569,7 +569,7 @@ final class ContentTest extends TestCase {
 	 * @return void
 	 */
 	public function test_rank_math_robots_swap_opposite_directives(): void {
-		class_alias( \stdClass::class, 'RankMath' );
+		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
 		update_post_meta( self::POST_ID, 'rank_math_robots', [ 'index', 'follow', 'noarchive' ] );
 
 		$this->call(
