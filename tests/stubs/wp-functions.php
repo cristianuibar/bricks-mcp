@@ -210,6 +210,28 @@ if ( ! function_exists( 'delete_transient' ) ) {
 // ---------------------------------------------------------------------------
 // Error / sanitization / i18n helpers.
 // ---------------------------------------------------------------------------
+$GLOBALS['_bricks_mcp_test_site_transients'] = [];
+
+if ( ! function_exists( 'get_site_transient' ) ) {
+	function get_site_transient( string $transient ): mixed {
+		return $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] ?? false;
+	}
+}
+
+if ( ! function_exists( 'set_site_transient' ) ) {
+	function set_site_transient( string $transient, mixed $value, int $expiration = 0 ): bool {
+		$GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] = $value;
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_site_transient' ) ) {
+	function delete_site_transient( string $transient ): bool {
+		unset( $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] );
+		return true;
+	}
+}
+
 if ( ! function_exists( 'is_wp_error' ) ) {
 	function is_wp_error( mixed $thing ): bool {
 		return $thing instanceof \WP_Error;
@@ -252,16 +274,41 @@ if ( ! function_exists( 'did_action' ) ) {
 	}
 }
 
+// Registered callbacks: $GLOBALS['_bricks_mcp_test_hooks'][ hook ][ priority ][] = [ callback, accepted_args ].
+$GLOBALS['_bricks_mcp_test_hooks'] = [];
+
 if ( ! function_exists( 'add_action' ) ) {
 	function add_action( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {
-		return true;
+		return add_filter( $hook_name, $callback, $priority, $accepted_args );
 	}
 }
 
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {
+		$GLOBALS['_bricks_mcp_test_hooks'][ $hook_name ][ $priority ][] = [ $callback, $accepted_args ];
 		return true;
 	}
+}
+
+/**
+ * Run the callbacks registered for a filter in priority order, as WP_Hook does.
+ *
+ * The apply_filters() stub stays a passthrough so other tests are unaffected.
+ *
+ * @param string $hook_name Filter name.
+ * @param mixed  $value     Value to filter.
+ * @param mixed  ...$args   Extra filter arguments.
+ * @return mixed
+ */
+function bricks_mcp_test_run_filter( string $hook_name, mixed $value, mixed ...$args ): mixed {
+	$callbacks = $GLOBALS['_bricks_mcp_test_hooks'][ $hook_name ] ?? [];
+	ksort( $callbacks );
+	foreach ( $callbacks as $registered ) {
+		foreach ( $registered as [ $callback, $accepted_args ] ) {
+			$value = $callback( ...array_slice( [ $value, ...$args ], 0, $accepted_args ) );
+		}
+	}
+	return $value;
 }
 
 if ( ! function_exists( 'wp_delete_file' ) ) {
@@ -361,6 +408,9 @@ if ( ! function_exists( 'wp_http_validate_url' ) ) {
 if ( ! function_exists( 'wp_safe_remote_get' ) ) {
 	function wp_safe_remote_get( string $url, array $args = [] ): array|\WP_Error {
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'][] = [ 'url' => $url, 'args' => $args ];
+		if ( isset( $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'][ $url ] ) ) {
+			return $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'][ $url ];
+		}
 		return $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] ?? [];
 	}
 }

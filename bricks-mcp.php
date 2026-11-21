@@ -170,6 +170,18 @@ function bricks_mcp_activate(): void {
 register_activation_hook( __FILE__, 'bricks_mcp_activate' );
 
 /**
+ * Run plugin deactivation routine.
+ *
+ * An inactive plugin loads no update verifier, so drop its cached update offer.
+ *
+ * @return void
+ */
+function bricks_mcp_deactivate(): void {
+	BricksMCP\Updates\UpdateChecker::forget_update_offer();
+}
+register_deactivation_hook( __FILE__, 'bricks_mcp_deactivate' );
+
+/**
  * Initialize the plugin after theme is loaded (Bricks version available).
  *
  * @return void
@@ -177,6 +189,8 @@ register_activation_hook( __FILE__, 'bricks_mcp_activate' );
 function bricks_mcp_init(): void {
 	if ( ! bricks_mcp_check_bricks_version() ) {
 		add_action( 'admin_notices', 'bricks_mcp_bricks_version_notice' );
+		// Keep the updater and its download verifier, so an update offer WordPress cached earlier is never installed unchecked.
+		( new BricksMCP\Updates\UpdateChecker() )->init();
 		return;
 	}
 	BricksMCP\Plugin::get_instance();
