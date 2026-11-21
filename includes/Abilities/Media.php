@@ -215,7 +215,7 @@ final class Media implements Module {
 		$post_id     = isset( $input['postId'] ) ? (int) $input['postId'] : 0;
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 		if ( null !== $existing_id ) {
-			if ( $post_id > 0 ) {
+			if ( $post_id > 0 && current_user_can( 'edit_post', $existing_id ) ) {
 				$existing_post = get_post( $existing_id );
 				if ( $existing_post && 0 === (int) ( $existing_post->post_parent ?? 0 ) ) {
 					$attached = $this->attach_to_post( $existing_id, $post_id );

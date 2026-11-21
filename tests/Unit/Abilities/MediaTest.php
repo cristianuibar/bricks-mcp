@@ -291,6 +291,50 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
+	 * Dedup never re-parents an existing attachment the user cannot edit, but still returns it.
+	 *
+	 * @return void
+	 */
+	public function test_import_unsplash_dedup_skips_attach_without_edit_rights_on_attachment(): void {
+		bricks_mcp_test_add_post(
+			[
+				'ID'        => 15,
+				'post_type' => 'page',
+			]
+		);
+		bricks_mcp_test_add_post(
+			[
+				'ID'             => 42,
+				'post_type'      => 'attachment',
+				'post_status'    => 'inherit',
+				'post_title'     => 'Someone Else Photo',
+				'post_mime_type' => 'image/jpeg',
+				'post_parent'    => 0,
+			],
+			[
+				'_unsplash_photo_id' => 'dup_foreign',
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_get_posts_return']            = [ 42 ];
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][15] = true;
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] = false;
+
+		$result = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute(
+			[
+				'photoId' => 'dup_foreign',
+				'postId'  => 15,
+			]
+		);
+
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['duplicate'] );
+		$this->assertSame( 42, $result['attachmentId'] );
+		$this->assertSame( 0, $result['postId'] );
+		$this->assertSame( 0, get_post( 42 )->post_parent );
+		$this->assertEmpty( $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] );
+	}
+
+	/**
 	 * Import downloads from images.unsplash.com, sends base64 + unsplash-<id>.jpg to bricks/upload-media, pings download_location, and sets meta/parent.
 	 *
 	 * @return void
