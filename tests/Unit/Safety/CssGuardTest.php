@@ -121,6 +121,16 @@ final class CssGuardTest extends TestCase {
 				'css',
 				'behaviour',
 			],
+			'comment opener after a newline ending an escape'  => [
+				[ 'css' => ".x { content: \"\\41\n/*\"; } @import 'example.css'; .y { content: '*/'; }" ],
+				'css',
+				'import',
+			],
+			'comment opener in a URL after a CDO token'        => [
+				[ 'css' => '.x { background: <!--url(/*); behavior: url(example.htc); } .y { background: url(*/); }' ],
+				'css',
+				'behaviour',
+			],
 			'style attribute in custom attributes'             => [
 				[ 'elements' => [ [ 'settings' => [ '_attributes' => [ [ 'id' => 'a1', 'name' => ' Style ', 'value' => 'background: url(javascript:example)' ] ] ] ] ] ],
 				'elements.0.settings._attributes.0.value',

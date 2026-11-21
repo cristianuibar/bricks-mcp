@@ -36,17 +36,18 @@ final class CssGuard {
 	];
 
 	/**
-	 * Comments and the CSS tokens a comment cannot start inside: strings, unquoted url() (also with an escaped name) and identifiers with escapes.
+	 * Comments and the CSS tokens a comment cannot start inside: strings, unquoted url() (also with an escaped name), the <!-- token and identifiers with escapes.
 	 *
 	 * @var string
 	 */
 	private const TOKEN_PATTERN = '~/\*.*?(?:\*/|\z)'
-		. '|"(?:[^"\\\\\r\n\f]|\\\\(?:\r\n|.))*+"?'
-		. '|\'(?:[^\'\\\\\r\n\f]|\\\\(?:\r\n|.))*+\'?'
+		. '|"(?:[^"\\\\\r\n\f]|\\\\(?:[0-9a-f]{1,6}(?:\r\n|[ \t\r\n\f])?|\r\n|.))*+"?'
+		. '|\'(?:[^\'\\\\\r\n\f]|\\\\(?:[0-9a-f]{1,6}(?:\r\n|[ \t\r\n\f])?|\r\n|.))*+\'?'
 		. '|(?<![#@])(?:u|\\\\(?:0{0,4}[57]5(?:\r\n|[ \t\r\n\f]|(?![0-9a-f]))|u))'
 		. '(?:r|\\\\(?:0{0,4}[57]2(?:\r\n|[ \t\r\n\f]|(?![0-9a-f]))|r))'
 		. '(?:l|\\\\(?:0{0,4}[46]c(?:\r\n|[ \t\r\n\f]|(?![0-9a-f]))|l))'
 		. '\([ \t\r\n\f]*+(?![\'"])(?:[^)\\\\]|\\\\.)*+\)?'
+		. '|<!--'
 		. '|(?:[\w\x80-\xff-]|\\\\(?:[0-9a-f]{1,6}(?:\r\n|[ \t\r\n\f])?|[^\r\n\f0-9a-f]))++~is';
 
 	/**
