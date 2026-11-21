@@ -85,7 +85,6 @@ final class UpdateCheckerTest extends TestCase {
 	 */
 	private function set_expected_hash( string $hash ): void {
 		$ref = new \ReflectionProperty( UpdateChecker::class, 'expected_sha256' );
-		$ref->setAccessible( true );
 		$ref->setValue( $this->checker, $hash );
 	}
 
