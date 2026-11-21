@@ -101,6 +101,41 @@ final class CssGuardTest extends TestCase {
 				'html.styleAttribute.0',
 				'data_url',
 			],
+			'comment opener inside a quoted string'            => [
+				[ 'css' => '.x { content: "/*"; background: url(javascript:example); } .y { content: "*/"; }' ],
+				'css',
+				'javascript_url',
+			],
+			'comment opener after an escaped quote'            => [
+				[ 'css' => ".x { content: '\\'/*'; } @import 'example.css'; .y { content: '*/'; }" ],
+				'css',
+				'import',
+			],
+			'comment opener inside an unquoted URL'            => [
+				[ 'css' => '.x { background: url(/*); background-image: url(data:text/html,example); } .y { background: url(*/); }' ],
+				'css',
+				'data_url',
+			],
+			'comment opener inside an escaped unquoted URL'    => [
+				[ 'css' => '.x { background: \\75 rl(/*); behavior: url(example.htc); } .y { background: url(*/); }' ],
+				'css',
+				'behaviour',
+			],
+			'comment opener after a newline ending an escape'  => [
+				[ 'css' => ".x { content: \"\\41\n/*\"; } @import 'example.css'; .y { content: '*/'; }" ],
+				'css',
+				'import',
+			],
+			'comment opener in a URL after a CDO token'        => [
+				[ 'css' => '.x { background: <!--url(/*); behavior: url(example.htc); } .y { background: url(*/); }' ],
+				'css',
+				'behaviour',
+			],
+			'comment opener in a string after a NUL in a name' => [
+				[ 'css' => ".x { background: x\0url(a \")/*\"); behavior: url(example.htc); } .y { content: \"*/\"; }" ],
+				'css',
+				'behaviour',
+			],
 			'style attribute in custom attributes'             => [
 				[ 'elements' => [ [ 'settings' => [ '_attributes' => [ [ 'id' => 'a1', 'name' => ' Style ', 'value' => 'background: url(javascript:example)' ] ] ] ] ] ],
 				'elements.0.settings._attributes.0.value',
@@ -179,6 +214,21 @@ final class CssGuardTest extends TestCase {
 		];
 		self::assertStringContainsString( $path, $result->get_error_message() );
 		self::assertStringContainsString( $detail[ $pattern ], $result->get_error_message() );
+	}
+
+	public function test_blocks_css_when_the_scan_hits_a_regex_limit(): void {
+		$limit = ini_get( 'pcre.backtrack_limit' );
+		ini_set( 'pcre.backtrack_limit', '1' );
+		try {
+			$result = $this->ability->execute( [ 'css' => '.x { content: "' . str_repeat( 'a', 5000 ) . '/*"; behavior: url(example.htc); } .y { content: "*/"; }' ] );
+		} finally {
+			ini_set( 'pcre.backtrack_limit', $limit );
+		}
+
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( 'bricks_mcp_css_blocked', $result->get_error_code() );
+		self::assertSame( [ 'status' => 400, 'path' => 'css', 'pattern' => 'scan_error' ], $result->get_error_data() );
+		self::assertStringContainsString( 'could not be checked', $result->get_error_message() );
 	}
 
 	public function test_blocks_html_with_styles_when_the_dom_extension_is_missing(): void {
