@@ -66,31 +66,31 @@ final class Autoloader {
 	/**
 	 * Load a class file.
 	 *
-	 * @param string $class The fully-qualified class name.
+	 * @param string $class_name The fully-qualified class name.
 	 * @return void
 	 */
-	public static function load_class( string $class ): void {
+	public static function load_class( string $class_name ): void {
 		// Check if class uses our namespace prefix.
 		$prefix_length = strlen( self::NAMESPACE_PREFIX );
-		if ( strncmp( self::NAMESPACE_PREFIX, $class, $prefix_length ) !== 0 ) {
+		if ( strncmp( self::NAMESPACE_PREFIX, $class_name, $prefix_length ) !== 0 ) {
 			return;
 		}
 
 		// Check cache first.
-		if ( isset( self::$class_map[ $class ] ) ) {
-			require self::$class_map[ $class ];
+		if ( isset( self::$class_map[ $class_name ] ) ) {
+			require self::$class_map[ $class_name ];
 			return;
 		}
 
 		// Get the relative class name.
-		$relative_class = substr( $class, $prefix_length );
+		$relative_class = substr( $class_name, $prefix_length );
 
 		// Replace namespace separators with directory separators.
 		$file = self::$base_dir . str_replace( '\\', '/', $relative_class ) . '.php';
 
 		// If the file exists, require it.
 		if ( file_exists( $file ) ) {
-			self::$class_map[ $class ] = $file;
+			self::$class_map[ $class_name ] = $file;
 			require $file;
 		}
 	}
