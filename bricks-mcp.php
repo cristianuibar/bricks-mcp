@@ -170,6 +170,18 @@ function bricks_mcp_activate(): void {
 register_activation_hook( __FILE__, 'bricks_mcp_activate' );
 
 /**
+ * Run plugin deactivation routine.
+ *
+ * An inactive plugin loads no update verifier, so drop its cached update offer.
+ *
+ * @return void
+ */
+function bricks_mcp_deactivate(): void {
+	BricksMCP\Updates\UpdateChecker::forget_update_offer();
+}
+register_deactivation_hook( __FILE__, 'bricks_mcp_deactivate' );
+
+/**
  * Initialize the plugin after theme is loaded (Bricks version available).
  *
  * @return void

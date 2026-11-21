@@ -210,6 +210,28 @@ if ( ! function_exists( 'delete_transient' ) ) {
 // ---------------------------------------------------------------------------
 // Error / sanitization / i18n helpers.
 // ---------------------------------------------------------------------------
+$GLOBALS['_bricks_mcp_test_site_transients'] = [];
+
+if ( ! function_exists( 'get_site_transient' ) ) {
+	function get_site_transient( string $transient ): mixed {
+		return $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] ?? false;
+	}
+}
+
+if ( ! function_exists( 'set_site_transient' ) ) {
+	function set_site_transient( string $transient, mixed $value, int $expiration = 0 ): bool {
+		$GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] = $value;
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_site_transient' ) ) {
+	function delete_site_transient( string $transient ): bool {
+		unset( $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] );
+		return true;
+	}
+}
+
 if ( ! function_exists( 'is_wp_error' ) ) {
 	function is_wp_error( mixed $thing ): bool {
 		return $thing instanceof \WP_Error;

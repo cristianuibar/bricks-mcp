@@ -286,6 +286,14 @@ final class UpdateChecker {
 			);
 		}
 
+		// The checksum belongs to one release: refuse a package from an older offer WordPress still has cached.
+		if ( ( $remote['package'] ?? '' ) !== $package ) {
+			return new \WP_Error(
+				'stale_package',
+				__( 'Update refused: the update offer is out of date. Check for updates again.', 'bricks-mcp' )
+			);
+		}
+
 		if ( false === $reply ) {
 			// Download the ZIP ourselves so we can verify it before WordPress uses it.
 			$temp_file = download_url( $package );
@@ -336,6 +344,23 @@ final class UpdateChecker {
 	 */
 	private static function is_release_asset_url( $url ): bool {
 		return is_string( $url ) && 1 === preg_match( self::RELEASE_ASSET_URL_PATTERN, $url );
+	}
+
+	/**
+	 * Remove this plugin's offer from WordPress's cached plugin updates.
+	 *
+	 * Runs on plugin deactivation: an inactive plugin loads no verifier, so a
+	 * cached offer must not stay installable.
+	 *
+	 * @return void
+	 */
+	public static function forget_update_offer(): void {
+		$updates = get_site_transient( 'update_plugins' );
+
+		if ( is_object( $updates ) && isset( $updates->response[ BRICKS_MCP_PLUGIN_BASENAME ] ) ) {
+			unset( $updates->response[ BRICKS_MCP_PLUGIN_BASENAME ] );
+			set_site_transient( 'update_plugins', $updates );
+		}
 	}
 
 	/**

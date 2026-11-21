@@ -488,6 +488,46 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	/**
+	 * Test: the cached checksum belongs to the cached release, so a package from an
+	 * older offer WordPress still has cached is refused, even when the supplied ZIP
+	 * matches the newer release's checksum.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_refuses_package_from_older_cached_offer(): void {
+		$newer_zip = 'v99.0.0 zip';
+		$this->cache_release_hash( hash( 'sha256', $newer_zip ) );
+		$supplied = $this->make_temp_file( $newer_zip );
+
+		$result = ( new UpdateChecker() )->verify_download(
+			$supplied,
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/v98.0.0/bricks-mcp.zip',
+			new \stdClass(),
+			[ 'plugin' => 'bricks-mcp/bricks-mcp.php' ]
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'stale_package', $result->get_error_code() );
+	}
+
+	/**
+	 * Test: deactivating the plugin drops its cached update offer (an inactive plugin
+	 * loads no verifier) and keeps other plugins' offers.
+	 *
+	 * Runs bricks-mcp.php in a separate PHP process.
+	 *
+	 * @return void
+	 */
+	public function test_deactivation_removes_cached_update_offer(): void {
+		$output = [];
+		$status = 1;
+		exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/deactivation.php' ) . ' 2>&1', $output, $status );
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertSame( [ 'offers' => [ 'other/other.php' ] ], json_decode( implode( "\n", $output ), true ) );
+	}
+
+	/**
 	 * Test: a plugin installed in a renamed folder is offered the update and its
 	 * download is still checked, so a ZIP with the wrong checksum is refused.
 	 *
