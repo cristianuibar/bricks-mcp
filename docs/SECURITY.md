@@ -53,10 +53,13 @@ Long building sessions can make many calls. Raise the limit for trusted users if
 
 ## CSS guard
 
-A second filter on `wp_pre_execute_ability` scans ability inputs before they run. It is on by default and can be switched off under Bricks > Bricks MCP Extensions.
+A filter on `wp_ability_normalize_input` scans ability inputs before they are validated and run. It runs at the last priority, so it sees schema defaults and values that other normalize filters add. It is on by default and can be switched off under Bricks > Bricks MCP Extensions.
 
 - It applies to every ability that writes, including the Bricks abilities. Abilities annotated read-only are skipped.
-- It checks the fields `customCss` and `_cssCustom` (including their `:breakpoint` and pseudo-class variants), `css`, `cssCode` and `stylesheet`, the `value` of typed edit-plan operations whose `settingPath` targets one of those settings, and the `<style>` elements and `style` attributes inside an `html` field.
+- It checks every string below the fields `customCss` and `_cssCustom` (including their `:breakpoint` and pseudo-class variants), `css`, `cssCode` and `stylesheet`, at any depth.
+- It checks the `value` of `_attributes` entries named `style` (any case). A `value` without a `name` next to it is checked too.
+- It checks the `value` of typed edit-plan operations whose `settingPath` (slash or dot separated, with or without a `/settings/` prefix) leads to one of those fields or into `_attributes`.
+- It checks the `<style>` elements and `style` attributes in any other string, since most Bricks text fields accept HTML.
 - It rejects `url(javascript:)`, `data:` URLs other than images (`data:image/png`, `jpeg`, `gif`, `webp`, `avif` and `svg+xml` are allowed), `expression()`, `@import`, `behavior:` and `-moz-binding:`. It removes comments (both as a browser reads them, outside strings and unquoted `url()`, and everywhere), decodes CSS escapes and strips tabs and line breaks inside URL schemes first, so `\75 rl(...)`, comment splitting and `ja\9 vascript:` do not bypass it.
 - It rejects any single CSS value over 100 KB.
 - A rejection returns a `bricks_mcp_css_blocked` error with status `400`. The message names the input path and the matched pattern.

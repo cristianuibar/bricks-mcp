@@ -63,19 +63,20 @@ namespace BricksMCP\Tests\Support {
 					do_action( 'wp_ability_invoked', $name, $input, $this );
 
 					$sentinel = new WP_Filter_Sentinel();
-					$pre      = $sentinel;
-					$filters  = $GLOBALS['_bricks_mcp_test_safety_filters']['wp_pre_execute_ability'] ?? [];
-					ksort( $filters );
-					foreach ( $filters as $callbacks ) {
-						foreach ( $callbacks as [ $callback, $accepted_args ] ) {
-							$pre = $callback( ...array_slice( [ $pre, $name, $input, $this ], 0, $accepted_args ) );
-						}
-					}
+					$pre      = $this->apply_safety_filters( 'wp_pre_execute_ability', $sentinel, $name, $input, $this );
 					if ( $pre !== $sentinel ) {
 						return $pre;
 					}
 
 					$args = $this->get_args();
+					if ( null === $input && array_key_exists( 'default', $args['input_schema'] ?? [] ) ) {
+						$input = $args['input_schema']['default'];
+					}
+					$input = $this->apply_safety_filters( 'wp_ability_normalize_input', $input, $name, $this );
+					if ( is_wp_error( $input ) ) {
+						return $input;
+					}
+
 					if ( isset( $args['permission_callback'] ) && true !== $args['permission_callback']( $input ) ) {
 						return new WP_Error( 'ability_invalid_permissions' );
 					}
@@ -87,6 +88,18 @@ namespace BricksMCP\Tests\Support {
 					}
 
 					return $result;
+				}
+
+				private function apply_safety_filters( string $hook, mixed $value, mixed ...$args ): mixed {
+					$filters = $GLOBALS['_bricks_mcp_test_safety_filters'][ $hook ] ?? [];
+					ksort( $filters );
+					foreach ( $filters as $callbacks ) {
+						foreach ( $callbacks as [ $callback, $accepted_args ] ) {
+							$value = $callback( ...array_slice( [ $value, ...$args ], 0, $accepted_args ) );
+						}
+					}
+
+					return $value;
 				}
 			};
 		}

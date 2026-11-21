@@ -52,27 +52,29 @@ final class CssGuard {
 	/**
 	 * Register the CSS guard filter.
 	 *
+	 * Runs last on the normalized input, so schema defaults and values added by other
+	 * normalize filters are checked before validation, permission checks and execution.
+	 *
 	 * @return void
 	 */
 	public function init(): void {
-		add_filter( 'wp_pre_execute_ability', [ $this, 'check' ], 10, 4 );
+		add_filter( 'wp_ability_normalize_input', [ $this, 'check' ], PHP_INT_MAX, 3 );
 	}
 
 	/**
-	 * Validate CSS before an ability executes.
+	 * Validate CSS in the normalized ability input.
 	 *
-	 * @param mixed       $pre Existing filter result.
+	 * @param mixed       $input Normalized ability input, or an error from an earlier filter.
 	 * @param string      $name Ability name.
-	 * @param mixed       $input Raw ability input.
 	 * @param \WP_Ability $ability Ability being executed.
 	 * @return mixed
 	 */
-	public function check( mixed $pre, string $name, mixed $input, \WP_Ability $ability ): mixed {
-		if ( ! $pre instanceof \WP_Filter_Sentinel || ! Options::get()['css_guard'] || true === ( $ability->get_meta()['annotations']['readonly'] ?? null ) ) {
-			return $pre;
+	public function check( mixed $input, string $name, \WP_Ability $ability ): mixed {
+		if ( is_wp_error( $input ) || ! Options::get()['css_guard'] || true === ( $ability->get_meta()['annotations']['readonly'] ?? null ) ) {
+			return $input;
 		}
 
-		return $this->scan_input( $input ) ?? $pre;
+		return $this->scan_input( $input ) ?? $input;
 	}
 
 	/**
@@ -88,33 +90,70 @@ final class CssGuard {
 	}
 
 	/**
-	 * Scan CSS fields in a JSON-like input.
+	 * Get the scan mode of a child value.
+	 *
+	 * Everything below a CSS key is CSS. Entries of `_attributes` are attributes, and the
+	 * value of an attribute is CSS unless the entry names an attribute other than `style`.
+	 *
+	 * @param string      $mode Scan mode of the parent value.
+	 * @param string      $key Child key.
+	 * @param string|null $attribute Attribute name when the parent is an attribute entry.
+	 * @return string
+	 */
+	private function child_mode( string $mode, string $key, ?string $attribute = null ): string {
+		return match ( true ) {
+			'css' === $mode, $this->is_css_key( $key ) => 'css',
+			'_attributes' === $key => 'attributes',
+			'attributes' === $mode => 'attribute',
+			'attribute' === $mode && 'value' === $key && ( null === $attribute || 'style' === strtolower( trim( $attribute ) ) ) => 'css',
+			default => '',
+		};
+	}
+
+	/**
+	 * Get the scan mode of a typed edit value from its setting path.
+	 *
+	 * @param string $setting_path Slash or dot separated setting path.
+	 * @return string
+	 */
+	private function setting_path_mode( string $setting_path ): string {
+		$mode = '';
+		foreach ( preg_split( '~[/.]~', $setting_path, -1, PREG_SPLIT_NO_EMPTY ) as $segment ) {
+			$mode = $this->child_mode( $mode, str_replace( [ '~1', '~0' ], [ '/', '~' ], $segment ) );
+		}
+
+		return $mode;
+	}
+
+	/**
+	 * Scan CSS and HTML strings in a JSON-like input.
 	 *
 	 * @param mixed  $input Input value.
-	 * @param string $parent_path Path to the parent value.
+	 * @param string $path Path to the value.
+	 * @param string $mode Scan mode: `css`, `attributes`, `attribute` or empty.
 	 * @return \WP_Error|null
 	 */
-	private function scan_input( mixed $input, string $parent_path = '' ): ?\WP_Error {
+	private function scan_input( mixed $input, string $path = '', string $mode = '' ): ?\WP_Error {
+		if ( is_string( $input ) ) {
+			return 'css' === $mode ? $this->check_css( $input, $path ) : $this->scan_html( $input, $path );
+		}
+
 		if ( ! is_array( $input ) && ! $input instanceof \stdClass ) {
 			return null;
 		}
 
 		$input        = (array) $input;
+		$attribute    = 'attribute' === $mode && is_string( $input['name'] ?? null ) ? $input['name'] : null;
 		$setting_path = $input['settingPath'] ?? null;
-		$css_value    = is_string( $setting_path ) && str_starts_with( $setting_path, '/settings/' )
-			&& $this->is_css_key( substr( $setting_path, strrpos( $setting_path, '/' ) + 1 ) );
 
 		foreach ( $input as $key => $value ) {
-			$path = '' === $parent_path ? (string) $key : "$parent_path.$key";
-
-			if ( is_string( $value ) && ( $this->is_css_key( (string) $key ) || ( 'value' === $key && $css_value ) ) ) {
-				$error = $this->check_css( $value, $path );
-			} elseif ( 'html' === $key && is_string( $value ) ) {
-				$error = $this->scan_html( $value, $path );
-			} else {
-				$error = $this->scan_input( $value, $path );
+			$key        = (string) $key;
+			$child_mode = $this->child_mode( $mode, $key, $attribute );
+			if ( '' === $child_mode && 'value' === $key && is_string( $setting_path ) ) {
+				$child_mode = $this->setting_path_mode( $setting_path );
 			}
 
+			$error = $this->scan_input( $value, '' === $path ? $key : "$path.$key", $child_mode );
 			if ( null !== $error ) {
 				return $error;
 			}
@@ -124,14 +163,14 @@ final class CssGuard {
 	}
 
 	/**
-	 * Check style elements and inline declarations from HTML import inputs.
+	 * Check style elements and inline declarations in a string that may hold HTML.
 	 *
-	 * @param string $html Imported HTML.
+	 * @param string $html String value.
 	 * @param string $path Input path.
 	 * @return \WP_Error|null
 	 */
 	private function scan_html( string $html, string $path ): ?\WP_Error {
-		if ( false === stripos( $html, 'style' ) || ! class_exists( \DOMDocument::class ) ) {
+		if ( ! str_contains( $html, '<' ) || false === stripos( $html, 'style' ) || ! class_exists( \DOMDocument::class ) ) {
 			return null;
 		}
 
