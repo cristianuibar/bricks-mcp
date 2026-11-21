@@ -36,6 +36,10 @@ final class Quality implements Module {
 
 	private const LAYOUT_ELEMENTS = [ 'section', 'container', 'div', 'block' ];
 
+	private const PRINTABLE_ID_PATTERN = '/^[A-Za-z0-9_-]{1,64}\z/';
+
+	private const INVALID_ID = '(invalid id)';
+
 	private const REPLACED_KEYS = [
 		'_maxWidth'          => [ '_widthMax', 'max-width' ],
 		'_textAlign'         => [ '_typography["text-align"]', 'text-align' ],
@@ -562,11 +566,11 @@ final class Quality implements Module {
 	 * @return array<int, array<string, mixed>>
 	 */
 	private function lint_elements( array $elements, array $context ): array {
-		$ids    = array_flip( array_map( 'strval', array_column( $elements, 'id' ) ) );
+		$ids    = array_flip( array_map( 'strval', array_filter( array_column( $elements, 'id' ), 'is_scalar' ) ) );
 		$issues = [];
 
 		foreach ( $elements as $element ) {
-			$id       = (string) ( $element['id'] ?? '' );
+			$id       = $this->printable_id( $element['id'] ?? null );
 			$name     = (string) ( $element['name'] ?? '' );
 			$settings = $this->settings_of( $element );
 			$issues   = array_merge(
@@ -596,13 +600,14 @@ final class Quality implements Module {
 		$issues = [];
 
 		foreach ( (array) ( $element['children'] ?? [] ) as $child ) {
-			if ( ! isset( $ids[ (string) $child ] ) ) {
+			if ( ! is_scalar( $child ) || ! isset( $ids[ (string) $child ] ) ) {
+				$child    = $this->printable_id( $child );
 				$issues[] = $this->issue(
 					$id,
 					'error',
 					'orphaned_child',
-					sprintf( 'Element %s lists child "%s" that does not exist.', $id, (string) $child ),
-					sprintf( 'Read the complete tree with bricks/get-page-elements and keep its documentDigest. In that tree remove "%2$s" from the children of %1$s and change nothing else. Send the complete tree back to bricks/set-page-elements with expectedDocumentDigest set to that digest. set-page-elements replaces the whole page, so never send only the repaired section.', $id, (string) $child )
+					sprintf( 'Element %s lists child "%s" that does not exist.', $id, $child ),
+					sprintf( 'Read the complete tree with bricks/get-page-elements and keep its documentDigest. In that tree remove "%2$s" from the children of %1$s and change nothing else. Send the complete tree back to bricks/set-page-elements with expectedDocumentDigest set to that digest. set-page-elements replaces the whole page, so never send only the repaired section.', $id, $child )
 				);
 			}
 		}
@@ -758,9 +763,10 @@ final class Quality implements Module {
 		$issues = [];
 
 		foreach ( $used as $class_id ) {
-			$class_id = trim( (string) $class_id );
+			$class_id = is_scalar( $class_id ) ? trim( (string) $class_id ) : $class_id;
 
-			if ( '' !== $class_id && ! isset( $class_ids[ $class_id ] ) ) {
+			if ( '' !== $class_id && ( ! is_string( $class_id ) || ! isset( $class_ids[ $class_id ] ) ) ) {
+				$class_id = $this->printable_id( $class_id );
 				$issues[] = $this->issue(
 					$id,
 					'warning',
@@ -871,6 +877,17 @@ final class Quality implements Module {
 			'message'   => $message,
 			'fix'       => $fix,
 		];
+	}
+
+	/**
+	 * Stored id as it may appear in a message or fix hint. Diagnostics are read
+	 * by an agent as guidance, so anything other than a plain id is replaced.
+	 *
+	 * @param mixed $value Stored id.
+	 * @return string
+	 */
+	private function printable_id( mixed $value ): string {
+		return is_scalar( $value ) && 1 === preg_match( self::PRINTABLE_ID_PATTERN, (string) $value ) ? (string) $value : self::INVALID_ID;
 	}
 
 	/**
