@@ -64,7 +64,8 @@ final class UpdateChecker {
 		add_filter( 'update_plugins_github.com', [ $this, 'check_update' ], 10, 4 );
 
 		// Intercept the plugin download to verify SHA-256 checksum before WP installs.
-		add_filter( 'upgrader_pre_download', [ $this, 'verify_download' ], 10, 4 );
+		// Runs last, so a ZIP supplied by any other download filter is verified too.
+		add_filter( 'upgrader_pre_download', [ $this, 'verify_download' ], PHP_INT_MAX, 4 );
 
 		// AJAX handler for "Check Now" button on settings page.
 		add_action( 'wp_ajax_bricks_mcp_check_update', [ $this, 'ajax_check_update' ] );
@@ -114,6 +115,11 @@ final class UpdateChecker {
 
 		// Only return update data if remote version is newer.
 		if ( version_compare( $plugin_data['Version'], $remote['version'], '>=' ) ) {
+			return $update;
+		}
+
+		// Offer only a trusted package with a valid checksum, so WordPress never caches an update that installs unverified.
+		if ( ! self::is_release_asset_url( $remote['package'] ?? null ) || '' === self::release_sha256( $remote ) ) {
 			return $update;
 		}
 
@@ -272,8 +278,8 @@ final class UpdateChecker {
 
 		// Refuse the update when the release has no valid checksum.
 		$remote   = $this->get_update_data();
-		$expected = is_string( $remote['sha256'] ?? null ) ? strtolower( $remote['sha256'] ) : '';
-		if ( 1 !== preg_match( '/^[0-9a-f]{64}$/', $expected ) ) {
+		$expected = self::release_sha256( $remote );
+		if ( '' === $expected ) {
 			return new \WP_Error(
 				'checksum_missing',
 				__( 'Update integrity check failed: the release has no valid SHA-256 checksum file.', 'bricks-mcp' )
@@ -308,6 +314,18 @@ final class UpdateChecker {
 
 		// Hash matches — return the verified temp file path so WordPress skips its redundant download.
 		return $temp_file;
+	}
+
+	/**
+	 * The release's SHA-256 checksum, lowercased, or '' when it has no valid one.
+	 *
+	 * @param array<string,mixed> $remote Release data from get_update_data().
+	 * @return string
+	 */
+	private static function release_sha256( array $remote ): string {
+		$sha256 = is_string( $remote['sha256'] ?? null ) ? strtolower( $remote['sha256'] ) : '';
+
+		return 1 === preg_match( '/^[0-9a-f]{64}\z/', $sha256 ) ? $sha256 : '';
 	}
 
 	/**

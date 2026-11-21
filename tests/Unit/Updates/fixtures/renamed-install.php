@@ -16,12 +16,13 @@ declare(strict_types=1);
 define( 'BRICKS_MCP_PLUGIN_BASENAME', 'bricks-mcp-main/bricks-mcp.php' );
 require dirname( __DIR__, 3 ) . '/bootstrap-simple.php';
 
-// Cached release with no checksum: the update must be refused.
+// Cached release whose checksum does not match the downloaded ZIP: the update must be refused.
 $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = [
 	'version' => '99.0.0',
 	'package' => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/bricks-mcp.zip',
-	'sha256'  => '',
+	'sha256'  => str_repeat( '0', 64 ),
 ];
+$GLOBALS['_bricks_mcp_test_download_url_return'] = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
 
 $offer = ( new BricksMCP\Updates\UpdateChecker() )->check_update(
 	false,

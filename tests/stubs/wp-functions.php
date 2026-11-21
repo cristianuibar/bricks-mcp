@@ -252,16 +252,41 @@ if ( ! function_exists( 'did_action' ) ) {
 	}
 }
 
+// Registered callbacks: $GLOBALS['_bricks_mcp_test_hooks'][ hook ][ priority ][] = [ callback, accepted_args ].
+$GLOBALS['_bricks_mcp_test_hooks'] = [];
+
 if ( ! function_exists( 'add_action' ) ) {
 	function add_action( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {
-		return true;
+		return add_filter( $hook_name, $callback, $priority, $accepted_args );
 	}
 }
 
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {
+		$GLOBALS['_bricks_mcp_test_hooks'][ $hook_name ][ $priority ][] = [ $callback, $accepted_args ];
 		return true;
 	}
+}
+
+/**
+ * Run the callbacks registered for a filter in priority order, as WP_Hook does.
+ *
+ * The apply_filters() stub stays a passthrough so other tests are unaffected.
+ *
+ * @param string $hook_name Filter name.
+ * @param mixed  $value     Value to filter.
+ * @param mixed  ...$args   Extra filter arguments.
+ * @return mixed
+ */
+function bricks_mcp_test_run_filter( string $hook_name, mixed $value, mixed ...$args ): mixed {
+	$callbacks = $GLOBALS['_bricks_mcp_test_hooks'][ $hook_name ] ?? [];
+	ksort( $callbacks );
+	foreach ( $callbacks as $registered ) {
+		foreach ( $registered as [ $callback, $accepted_args ] ) {
+			$value = $callback( ...array_slice( [ $value, ...$args ], 0, $accepted_args ) );
+		}
+	}
+	return $value;
 }
 
 if ( ! function_exists( 'wp_delete_file' ) ) {

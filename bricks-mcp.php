@@ -177,6 +177,8 @@ register_activation_hook( __FILE__, 'bricks_mcp_activate' );
 function bricks_mcp_init(): void {
 	if ( ! bricks_mcp_check_bricks_version() ) {
 		add_action( 'admin_notices', 'bricks_mcp_bricks_version_notice' );
+		// Keep the updater and its download verifier, so an update offer WordPress cached earlier is never installed unchecked.
+		( new BricksMCP\Updates\UpdateChecker() )->init();
 		return;
 	}
 	BricksMCP\Plugin::get_instance();

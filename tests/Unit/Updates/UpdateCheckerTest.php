@@ -61,6 +61,7 @@ final class UpdateCheckerTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = null;
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'] = [];
 		bricks_mcp_test_reset_admin();
+		$GLOBALS['_bricks_mcp_test_hooks'] = [];
 	}
 
 	/**
@@ -427,8 +428,68 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	/**
+	 * Test: a ZIP that a later download filter (priority 20, e.g. a package cache)
+	 * supplies is still verified, because the verifier runs after it.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_checks_zip_supplied_by_later_filter(): void {
+		$released = 'released zip';
+		$this->cache_release_hash( hash( 'sha256', $released ) );
+		$GLOBALS['_bricks_mcp_test_download_url_return'] = $this->make_temp_file( $released );
+		$corrupt = $this->make_temp_file( 'corrupt cached zip' );
+
+		( new UpdateChecker() )->init();
+		add_filter( 'upgrader_pre_download', static fn() => $corrupt, 20, 4 );
+
+		$result = bricks_mcp_test_run_filter( 'upgrader_pre_download', false, self::PACKAGE_URL, new \stdClass(), [ 'plugin' => 'bricks-mcp/bricks-mcp.php' ] );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'checksum_mismatch', $result->get_error_code() );
+	}
+
+	/**
+	 * Test: a release without a checksum is not offered, so WordPress never caches an
+	 * update it could later install without the verifier.
+	 *
+	 * @return void
+	 */
+	public function test_check_update_does_not_offer_release_without_checksum(): void {
+		$this->stub_release(
+			[
+				'tag_name' => 'v2.1.0',
+				'assets'   => [
+					[
+						'name'                 => 'bricks-mcp.zip',
+						'browser_download_url' => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/bricks-mcp.zip',
+					],
+				],
+			]
+		);
+
+		$this->assertFalse( $this->run_check_update() );
+	}
+
+	/**
+	 * Test: with Bricks Builder inactive, loading the plugin still registers the
+	 * download verifier, so a cached update offer is not installed unchecked.
+	 *
+	 * Runs bricks-mcp.php in a separate PHP process.
+	 *
+	 * @return void
+	 */
+	public function test_verifier_stays_registered_when_bricks_is_inactive(): void {
+		$output = [];
+		$status = 1;
+		exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/bricks-inactive.php' ) . ' 2>&1', $output, $status );
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertSame( [ 'result' => 'checksum_mismatch' ], json_decode( implode( "\n", $output ), true ) );
+	}
+
+	/**
 	 * Test: a plugin installed in a renamed folder is offered the update and its
-	 * download is still checked, so a release without a checksum is refused.
+	 * download is still checked, so a ZIP with the wrong checksum is refused.
 	 *
 	 * Runs in a separate PHP process with a different BRICKS_MCP_PLUGIN_BASENAME.
 	 *
@@ -443,7 +504,7 @@ final class UpdateCheckerTest extends TestCase {
 		$this->assertSame(
 			[
 				'offered' => true,
-				'result'  => 'checksum_missing',
+				'result'  => 'checksum_mismatch',
 			],
 			json_decode( implode( "\n", $output ), true )
 		);
@@ -484,7 +545,7 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	/**
-	 * Test: an untrusted package URL is dropped; an untrusted checksum URL is never fetched and blocks the update.
+	 * Test: an untrusted package URL is not offered; an untrusted checksum URL is never fetched and blocks the update.
 	 *
 	 * @return void
 	 */
@@ -517,11 +578,7 @@ final class UpdateCheckerTest extends TestCase {
 				]
 			);
 
-			$result = $this->run_check_update();
-
-			$this->assertIsArray( $result, $base );
-			$this->assertSame( '2.1.0', $result['version'], $base );
-			$this->assertSame( '', $result['package'], $base );
+			$this->assertFalse( $this->run_check_update(), $base );
 
 			$GLOBALS['_bricks_mcp_test_transients']               = [];
 			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] = [];
@@ -660,15 +717,27 @@ final class UpdateCheckerTest extends TestCase {
 						'name'                 => 'bricks-mcp.zip',
 						'browser_download_url' => [ 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/b.zip' ],
 					],
+					[
+						'name'                 => 'bricks-mcp.zip',
+						'browser_download_url' => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/bricks-mcp.zip',
+					],
+					[
+						'name'                 => 'bricks-mcp.zip.sha256',
+						'browser_download_url' => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/bricks-mcp.zip.sha256',
+					],
 				],
 			]
 		);
+		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
+			'response' => [ 'code' => 200 ],
+			'body'     => hash( 'sha256', 'zip' ) . "  bricks-mcp.zip\n",
+		];
 
 		$result = $this->run_check_update();
 
 		$this->assertIsArray( $result );
 		$this->assertSame( '2.1.0', $result['version'] );
-		$this->assertSame( '', $result['package'] );
+		$this->assertSame( 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/bricks-mcp.zip', $result['package'] );
 		$this->assertSame( '', $result['url'] );
 	}
 
