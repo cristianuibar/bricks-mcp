@@ -97,7 +97,7 @@ Open Bricks > Bricks MCP Extensions. Settings are stored in the option `bricks_m
 
 - **Abilities**: switch single `bricks-mcp/*` abilities off. A disabled ability is not registered.
 - **Rate limit**: requests per minute per user. Default 120. `0` turns it off, otherwise 10 to 1000. It applies to every ability run over REST, including Bricks' own. Calls that one ability makes to another are not counted twice. Over the limit, the call returns a `429` error with `retry_after`.
-- **CSS guard**: on by default. Blocks `javascript:` URLs, non-image `data:` URLs, `expression()`, `@import`, `behavior:`, `-moz-binding:` and CSS over 100 KB in the inputs of every writing ability, including Bricks' own and HTML imports with `<style>` or `style=` attributes.
+- **CSS guard**: on by default. Blocks `javascript:` URLs, non-image `data:` URLs, `expression()`, `@import`, `behavior:`, `-moz-binding:` and CSS over 100 KB in the inputs of every writing ability, including Bricks' own, `style` custom attributes and any HTML field with `<style>` or `style=` attributes.
 - **Diagnostics**: checks HTTPS, permalinks, Application Passwords, REST reachability, security plugins, hosting provider, the MCP endpoint and PHP timeouts.
 - **Updates**: shows the installed version and checks GitHub Releases.
 
