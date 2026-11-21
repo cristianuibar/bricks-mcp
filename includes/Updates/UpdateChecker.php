@@ -41,6 +41,17 @@ final class UpdateChecker {
 	private const RELEASE_ASSET_URL_PATTERN = '#^https://github\.com/cristianuibar/bricks-mcp/releases/download/(?!\.\.?/)[^/?\#\s]+/(?!\.\.?\z)[^/?\#\s]+\z#';
 
 	/**
+	 * Prefix on the package URL offered to WordPress.
+	 *
+	 * WordPress only downloads http(s) packages, so an offer it cached can be
+	 * downloaded only through verify_download(), which strips this prefix. An
+	 * offer that outlives the verifier (plugin inactive) cannot be installed.
+	 *
+	 * @var string
+	 */
+	private const VERIFIED_PACKAGE_PREFIX = 'bricks-mcp-verified+';
+
+	/**
 	 * Transient key for cached update data.
 	 *
 	 * @var string
@@ -128,7 +139,7 @@ final class UpdateChecker {
 			'slug'         => 'bricks-mcp',
 			'version'      => $remote['version'],
 			'url'          => $remote['url'] ?? '',
-			'package'      => $remote['package'] ?? '',
+			'package'      => self::VERIFIED_PACKAGE_PREFIX . $remote['package'],
 			'tested'       => $remote['tested'] ?? '',
 			'requires_php' => $remote['requires_php'] ?? '8.2',
 		];
@@ -266,6 +277,11 @@ final class UpdateChecker {
 		// An earlier filter already aborted the download.
 		if ( is_wp_error( $reply ) ) {
 			return $reply;
+		}
+
+		// Offers carry the release URL behind a prefix only this verifier resolves.
+		if ( str_starts_with( $package, self::VERIFIED_PACKAGE_PREFIX ) ) {
+			$package = substr( $package, strlen( self::VERIFIED_PACKAGE_PREFIX ) );
 		}
 
 		// Refuse a package that is not one of this repository's release downloads.

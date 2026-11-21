@@ -528,6 +528,34 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	/**
+	 * Test: an offer a concurrent refresh writes after the deactivation cleanup cannot
+	 * be installed without the verifier, and installs verified while it is active.
+	 *
+	 * WordPress downloads packages with wp_safe_remote_get(), whose URL validation
+	 * (wp_http_validate_url) accepts only http and https URLs.
+	 *
+	 * @return void
+	 */
+	public function test_offer_written_after_deactivation_is_only_downloadable_through_verifier(): void {
+		$content = 'v99.0.0 zip';
+		$this->cache_release_hash( hash( 'sha256', $content ) );
+		$GLOBALS['_bricks_mcp_test_download_url_return'] = $this->make_temp_file( $content );
+
+		// Deactivation cleanup runs, then a cron refresh that started earlier writes the offer.
+		UpdateChecker::forget_update_offer();
+		$offer = $this->run_check_update();
+		$this->assertIsArray( $offer );
+
+		$scheme = strtolower( (string) wp_parse_url( $offer['package'], PHP_URL_SCHEME ) );
+		$this->assertNotContains( $scheme, [ 'http', 'https' ], 'WordPress could download the offer without the verifier.' );
+
+		( new UpdateChecker() )->init();
+		$result = bricks_mcp_test_run_filter( 'upgrader_pre_download', false, $offer['package'], new \stdClass(), [ 'plugin' => 'bricks-mcp/bricks-mcp.php' ] );
+
+		$this->assertSame( $GLOBALS['_bricks_mcp_test_download_url_return'], $result );
+	}
+
+	/**
 	 * Test: a plugin installed in a renamed folder is offered the update and its
 	 * download is still checked, so a ZIP with the wrong checksum is refused.
 	 *
@@ -675,7 +703,7 @@ final class UpdateCheckerTest extends TestCase {
 		$result = $this->run_check_update();
 
 		$this->assertIsArray( $result );
-		$this->assertSame( $base . 'bricks-mcp.zip', $result['package'] );
+		$this->assertSame( 'bricks-mcp-verified+' . $base . 'bricks-mcp.zip', $result['package'] );
 		$this->assertSame( $base . 'bricks-mcp.zip.sha256', $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'][0]['url'] ?? null );
 
 		$temp = $this->make_temp_file( $content );
@@ -777,7 +805,7 @@ final class UpdateCheckerTest extends TestCase {
 
 		$this->assertIsArray( $result );
 		$this->assertSame( '2.1.0', $result['version'] );
-		$this->assertSame( 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/bricks-mcp.zip', $result['package'] );
+		$this->assertSame( 'bricks-mcp-verified+https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/bricks-mcp.zip', $result['package'] );
 		$this->assertSame( '', $result['url'] );
 	}
 
