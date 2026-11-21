@@ -101,6 +101,26 @@ final class CssGuardTest extends TestCase {
 				'html.styleAttribute.0',
 				'data_url',
 			],
+			'comment opener inside a quoted string'            => [
+				[ 'css' => '.x { content: "/*"; background: url(javascript:example); } .y { content: "*/"; }' ],
+				'css',
+				'javascript_url',
+			],
+			'comment opener after an escaped quote'            => [
+				[ 'css' => ".x { content: '\\'/*'; } @import 'example.css'; .y { content: '*/'; }" ],
+				'css',
+				'import',
+			],
+			'comment opener inside an unquoted URL'            => [
+				[ 'css' => '.x { background: url(/*); background-image: url(data:text/html,example); } .y { background: url(*/); }' ],
+				'css',
+				'data_url',
+			],
+			'comment opener inside an escaped unquoted URL'    => [
+				[ 'css' => '.x { background: \\75 rl(/*); behavior: url(example.htc); } .y { background: url(*/); }' ],
+				'css',
+				'behaviour',
+			],
 		];
 	}
 

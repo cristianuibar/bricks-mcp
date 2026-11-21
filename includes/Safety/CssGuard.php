@@ -36,6 +36,20 @@ final class CssGuard {
 	];
 
 	/**
+	 * Comments and the CSS tokens a comment cannot start inside: strings, unquoted url() (also with an escaped name) and identifiers with escapes.
+	 *
+	 * @var string
+	 */
+	private const TOKEN_PATTERN = '~/\*.*?(?:\*/|\z)'
+		. '|"(?:[^"\\\\\r\n\f]|\\\\(?:\r\n|.))*+"?'
+		. '|\'(?:[^\'\\\\\r\n\f]|\\\\(?:\r\n|.))*+\'?'
+		. '|(?<![#@])(?:u|\\\\(?:0{0,4}[57]5(?:\r\n|[ \t\r\n\f]|(?![0-9a-f]))|u))'
+		. '(?:r|\\\\(?:0{0,4}[57]2(?:\r\n|[ \t\r\n\f]|(?![0-9a-f]))|r))'
+		. '(?:l|\\\\(?:0{0,4}[46]c(?:\r\n|[ \t\r\n\f]|(?![0-9a-f]))|l))'
+		. '\([ \t\r\n\f]*+(?![\'"])(?:[^)\\\\]|\\\\.)*+\)?'
+		. '|(?:[\w\x80-\xff-]|\\\\(?:[0-9a-f]{1,6}(?:\r\n|[ \t\r\n\f])?|[^\r\n\f0-9a-f]))++~is';
+
+	/**
 	 * Register the CSS guard filter.
 	 *
 	 * @return void
@@ -165,11 +179,16 @@ final class CssGuard {
 			);
 		}
 
+		// Comments are removed as a browser reads them, and also by the plain pattern, which ignores strings.
 		$comment_pattern = '~/\*.*?(?:\*/|\z)~s';
-		$joined          = preg_replace( $comment_pattern, '', $css ) ?? $css;
-		$separated       = preg_replace( $comment_pattern, ' ', $css ) ?? $css;
+		$candidates      = [
+			$this->strip_css_comments( $css, '' ),
+			$this->strip_css_comments( $css, ' ' ),
+			preg_replace( $comment_pattern, '', $css ) ?? $css,
+			preg_replace( $comment_pattern, ' ', $css ) ?? $css,
+		];
 
-		foreach ( array_unique( [ $joined, $separated ] ) as $candidate ) {
+		foreach ( array_unique( $candidates ) as $candidate ) {
 			$normalized     = $this->decode_css_escapes( $candidate );
 			$url_normalized = str_replace( [ "\t", "\r", "\n" ], '', $normalized );
 
@@ -190,6 +209,21 @@ final class CssGuard {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Replace comments outside strings, unquoted URLs and escapes.
+	 *
+	 * @param string $css Raw CSS.
+	 * @param string $replacement Text that replaces each comment.
+	 * @return string
+	 */
+	private function strip_css_comments( string $css, string $replacement ): string {
+		return preg_replace_callback(
+			self::TOKEN_PATTERN,
+			static fn( array $token ): string => str_starts_with( $token[0], '/*' ) ? $replacement : $token[0],
+			$css
+		) ?? $css;
 	}
 
 	/**

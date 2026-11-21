@@ -57,7 +57,7 @@ A second filter on `wp_pre_execute_ability` scans ability inputs before they run
 
 - It applies to every ability that writes, including the Bricks abilities. Abilities annotated read-only are skipped.
 - It checks the fields `customCss` and `_cssCustom` (including their `:breakpoint` and pseudo-class variants), `css`, `cssCode` and `stylesheet`, the `value` of typed edit-plan operations whose `settingPath` targets one of those settings, and the `<style>` elements and `style` attributes inside an `html` field.
-- It rejects `url(javascript:)`, `data:` URLs other than images (`data:image/png`, `jpeg`, `gif`, `webp`, `avif` and `svg+xml` are allowed), `expression()`, `@import`, `behavior:` and `-moz-binding:`. It removes comments, decodes CSS escapes and strips tabs and line breaks inside URL schemes first, so `\75 rl(...)`, comment splitting and `ja\9 vascript:` do not bypass it.
+- It rejects `url(javascript:)`, `data:` URLs other than images (`data:image/png`, `jpeg`, `gif`, `webp`, `avif` and `svg+xml` are allowed), `expression()`, `@import`, `behavior:` and `-moz-binding:`. It removes comments (both as a browser reads them, outside strings and unquoted `url()`, and everywhere), decodes CSS escapes and strips tabs and line breaks inside URL schemes first, so `\75 rl(...)`, comment splitting and `ja\9 vascript:` do not bypass it.
 - It rejects any single CSS value over 100 KB.
 - A rejection returns a `bricks_mcp_css_blocked` error with status `400`. The message names the input path and the matched pattern.
 
