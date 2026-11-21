@@ -30,38 +30,8 @@ jobs:
           grep 'BRICKS_MCP_VERSION' bricks-mcp.php | head -1
           grep 'Stable tag:' readme.txt | head -1
 
-      - name: Build plugin ZIP
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          mkdir -p build/bricks-mcp
-          rsync -a \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='vendor' \
-            --exclude='docs' \
-            --exclude='mu-plugins' \
-            --exclude='logs' \
-            --exclude='tests' \
-            --exclude='.planning' \
-            --exclude='.wp-env.json' \
-            --exclude='package.json' \
-            --exclude='package-lock.json' \
-            --exclude='composer.json' \
-            --exclude='composer.lock' \
-            --exclude='phpunit.xml' \
-            --exclude='phpunit-unit.xml' \
-            --exclude='phpcs.xml' \
-            --exclude='.editorconfig' \
-            --exclude='.gitignore' \
-            --exclude='build' \
-            --exclude='.github' \
-            --exclude='update-server' \
-            --exclude='.claude' \
-            --exclude='README.md' \
-            --exclude='.wordpress-org' \
-            --exclude='.distignore' \
-            ./ build/bricks-mcp/
-          cd build && zip -r "bricks-mcp.zip" bricks-mcp/
+      - name: Build and check plugin ZIP
+        run: bash .github/scripts/build-release-zip.sh build
 
       - name: Generate SHA-256 checksum
         run: |

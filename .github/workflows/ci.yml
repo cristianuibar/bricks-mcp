@@ -50,3 +50,6 @@ jobs:
 
       - name: Run unit tests
         run: php vendor/bin/phpunit -c phpunit-unit.xml
+
+      - name: Build and check release ZIP
+        run: bash .github/scripts/build-release-zip.sh "$RUNNER_TEMP/release"
