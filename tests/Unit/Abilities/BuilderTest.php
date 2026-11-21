@@ -240,6 +240,36 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( 'bricks_mcp_duplicate_category', $duplicate->get_error_code() );
 	}
 
+	public function test_category_creation_limits_the_name_length(): void {
+		$stored = [ [ 'id' => 'legacy', 'name' => 'Existing' ] ];
+		update_option( 'bricks_global_classes_categories', $stored );
+		$ability = wp_get_ability( 'bricks-mcp/create-global-class-category' );
+
+		$too_long = $ability->execute( [ 'name' => str_repeat( 'ș', 101 ) ] );
+
+		$this->assertInstanceOf( WP_Error::class, $too_long );
+		$this->assertSame( 'bricks_mcp_category_name_too_long', $too_long->get_error_code() );
+		$this->assertSame( 400, $too_long->get_error_data()['status'] );
+		$this->assertSame( $stored, get_option( 'bricks_global_classes_categories' ) );
+
+		$longest = $ability->execute( [ 'name' => str_repeat( 'ș', 100 ) ] );
+
+		$this->assertSame( [ ...$stored, $longest ], get_option( 'bricks_global_classes_categories' ) );
+	}
+
+	public function test_category_creation_skips_stored_names_that_are_not_strings(): void {
+		$stored = [ [ 'id' => 'broken', 'name' => [ 'Layout' ] ], [ 'id' => 'number', 'name' => 7 ], [ 'id' => 'legacy', 'name' => 'Existing' ] ];
+		update_option( 'bricks_global_classes_categories', $stored );
+		$ability = wp_get_ability( 'bricks-mcp/create-global-class-category' );
+
+		$duplicate = $ability->execute( [ 'name' => 'EXISTING' ] );
+		$category  = $ability->execute( [ 'name' => 'Layout' ] );
+
+		$this->assertInstanceOf( WP_Error::class, $duplicate );
+		$this->assertSame( 'bricks_mcp_duplicate_category', $duplicate->get_error_code() );
+		$this->assertSame( [ ...$stored, $category ], get_option( 'bricks_global_classes_categories' ) );
+	}
+
 	public function test_category_deletion_uncategorizes_its_classes(): void {
 		$remaining = [ 'id' => 'otherc', 'name' => 'Other' ];
 		$classes   = [
