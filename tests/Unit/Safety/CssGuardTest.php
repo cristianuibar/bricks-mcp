@@ -101,6 +101,46 @@ final class CssGuardTest extends TestCase {
 				'html.styleAttribute.0',
 				'data_url',
 			],
+			'style attribute in custom attributes'             => [
+				[ 'elements' => [ [ 'settings' => [ '_attributes' => [ [ 'id' => 'a1', 'name' => ' Style ', 'value' => 'background: url(javascript:example)' ] ] ] ] ] ],
+				'elements.0.settings._attributes.0.value',
+				'javascript_url',
+			],
+			'string below a list under a CSS key'              => [
+				[ 'settings' => [ '_cssCustom' => [ 'rules' => [ '.x {}', '@import "example.css";' ] ] ] ],
+				'settings._cssCustom.rules.1',
+				'import',
+			],
+			'inline CSS in a rich text field'                  => [
+				[ 'elements' => [ [ 'settings' => [ 'text' => '<p style="behavior: url(example.htc)">Example</p>' ] ] ] ],
+				'elements.0.settings.text.styleAttribute.0',
+				'behaviour',
+			],
+			'stylesheet in another HTML field'                 => [
+				[ 'content' => '<style>.x { color: expression(1); }</style>' ],
+				'content.style.0',
+				'expression',
+			],
+			'typed edit with a dotted setting path'            => [
+				[ 'operations' => [ [ 'settingPath' => 'settings._cssCustom:hover', 'value' => '@import "example.css";' ] ] ],
+				'operations.0.value',
+				'import',
+			],
+			'typed edit with a bare setting key'               => [
+				[ 'operations' => [ [ 'settingPath' => 'customCss', 'value' => '@import "example.css";' ] ] ],
+				'operations.0.value',
+				'import',
+			],
+			'typed edit of a custom attribute value'           => [
+				[ 'operations' => [ [ 'settingPath' => '/settings/_attributes/0/value', 'value' => '-moz-binding: none' ] ] ],
+				'operations.0.value',
+				'moz_binding',
+			],
+			'typed edit of the custom attribute list'          => [
+				[ 'operations' => [ [ 'settingPath' => '/settings/_attributes', 'value' => [ [ 'name' => 'style', 'value' => 'background: url(data:text/html,example)' ] ] ] ] ],
+				'operations.0.value.0.value',
+				'data_url',
+			],
 		];
 	}
 
@@ -149,6 +189,32 @@ final class CssGuardTest extends TestCase {
 			'settings' => [ '_cssClasses' => '@import example', 'label' => 'expression()' ],
 		];
 		self::assertSame( 'executed', $this->ability->execute( $input ) );
+	}
+
+	public function test_allows_css_patterns_in_attributes_other_than_style(): void {
+		$input = [
+			'settings'   => [ '_attributes' => [ [ 'name' => 'data-style', 'value' => '@import example' ], [ 'name' => 'title', 'value' => 'expression()' ] ] ],
+			'operations' => [ [ 'settingPath' => '/settings/_attributes/1', 'value' => [ 'name' => 'title', 'value' => 'behavior: none' ] ] ],
+		];
+		self::assertSame( 'executed', $this->ability->execute( $input ) );
+	}
+
+	public function test_blocks_css_added_during_input_normalization(): void {
+		$ability = make_safety_ability(
+			'bricks/update-page-settings',
+			[
+				'input_schema'     => [ 'default' => [ 'settings' => [ 'customCss' => '@import "example.css";' ] ] ],
+				'execute_callback' => static fn() => 'executed',
+			]
+		);
+		$result  = $ability->execute();
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( [ 'status' => 400, 'path' => 'settings.customCss', 'pattern' => 'import' ], $result->get_error_data() );
+
+		\BricksMCP\Safety\add_filter( 'wp_ability_normalize_input', static fn( $input ) => [ 'css' => '.x { behavior: none; }' ] + $input, 10, 1 );
+		$result = $this->ability->execute( [ 'title' => 'Example' ] );
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( [ 'status' => 400, 'path' => 'css', 'pattern' => 'behaviour' ], $result->get_error_data() );
 	}
 
 	public function test_allows_css_when_guard_is_disabled(): void {
