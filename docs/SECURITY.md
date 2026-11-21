@@ -43,6 +43,7 @@ A filter on `wp_pre_execute_ability` limits executions per user.
 - It applies to every ability run over REST, including the Bricks abilities. It does not count abilities run from PHP, such as in WP-CLI or cron.
 - Default 120 requests per minute per user. Set it under Bricks > Bricks MCP Extensions. `0` turns it off, otherwise 10 to 1000.
 - Counting uses a 60-second window, kept in the object cache when one is configured, otherwise in one transient per user named `bricks_mcp_rl_{user_id}`.
+- The limit is exact only with a persistent object cache, which increments the counter atomically. Without one, the transient is read and written back in two steps, so parallel requests can read the same count and a user can go over the limit by about the number of requests sent at the same time. Treat it as approximate on those sites.
 - Requests without a logged-in user are not counted; the MCP Adapter rejects them before any ability runs.
 - If the object cache drops a counter mid-window, the call is allowed and counting starts again.
 - Calls that one ability makes to another count once.
