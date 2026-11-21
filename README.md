@@ -108,26 +108,42 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the security model.
 Version 2.0 is a breaking change.
 
 - The old endpoint `/wp-json/bricks-mcp/v1/mcp` is removed. Reconnect your AI client once through Bricks > Settings > AI. A notice in wp-admin reminds administrators until dismissed.
-- The old tools (`content`, `design`, `template`, `media`, `menu`, `component`, `woocommerce`, `code`, `bricks`, `get_site_info`, `get_builder_guide`) are gone. Bricks abilities replace most of them.
+- The 20 tools of 1.x are gone. Bricks abilities replace almost all of them; the table below maps each one.
 - The old settings (`require_auth`, `custom_base_url`, dangerous actions) are gone. Authentication is the adapter's Application Passwords.
 - Bricks 2.5 now owns the option `bricks_mcp_settings`. On upgrade the plugin carries the old rate limit over to `bricks_mcp_extensions_settings` and removes its own 1.x keys from the old option. It leaves the Bricks keys alone and never writes that option otherwise.
 
 | Old tool | Use now |
 |---|---|
-| `content` read page elements | `bricks/get-page-elements` |
-| `content` add or edit elements | `bricks/add-element`, `bricks/update-element`, `bricks/batch-update-elements`, `bricks/set-page-elements` |
-| `content` create page or post | `bricks/create-post` |
-| `content` page settings | `bricks/set-page-settings` |
-| `content` SEO | `bricks-mcp/get-seo`, `bricks-mcp/update-seo` |
-| `design` global classes | `bricks/list-global-classes`, `bricks/create-global-class`, `bricks/update-global-class` |
-| `design` colors and typography | Bricks color, theme style and global settings abilities |
-| `template` | `bricks/list-templates` and the other `bricks/*template*` abilities |
+| `content` read page elements | `bricks/get-page-elements`| 1.x tool | Use now |
+|---|---|
+| `get_site_info` | `bricks/get-system-information` |
+| `get_builder_guide` | `bricks/start-here`, `bricks/get-builder-guide`, `bricks-mcp/get-guide` |
+| `wordpress` | `bricks/find-post` |
+| `bricks` enable or disable the editor | `bricks-mcp/set-editor-mode` |
+| `bricks` global settings | `bricks/get-global-settings`, `bricks/set-global-settings` |
+| `page` list, search, create, duplicate, delete | `bricks/find-post`, `bricks/create-post`, `bricks/duplicate-post`, `bricks/delete-post` |
+| `page` elements | `bricks/get-page-elements`, `bricks/set-page-elements` |
+| `page` settings | `bricks/get-page-settings`, `bricks/set-page-settings` |
+| `page` SEO | `bricks-mcp/get-seo`, `bricks-mcp/update-seo` |
+| `page` status and featured image | `bricks-mcp/set-post-status`, `bricks-mcp/set-featured-image` |
+| `element` | `bricks/add-element`, `bricks/update-element`, `bricks/batch-update-elements`, `bricks/remove-element`, `bricks-mcp/move-element` |
+| `template` | `bricks/list-templates`, `bricks/get-template`, `bricks/create-template`, `bricks/delete-template`, `bricks/set-template-settings` |
+| `template_condition` | `bricks/set-template-conditions`, `bricks-mcp/resolve-templates` |
+| `template_taxonomy` | No ability. Manage tags and bundles under Bricks > Templates. |
+| `global_class` | `bricks/list-global-classes`, `bricks/create-global-class`, `bricks/update-global-class`, `bricks/delete-global-class` |
+| `global_class` categories | `bricks-mcp/create-global-class-category`, `bricks-mcp/delete-global-class-category` |
+| `theme_style` | `bricks/list-theme-styles`, `bricks/get-theme-styles`, `bricks/create-theme-style`, `bricks/update-theme-style`, `bricks/delete-theme-style` |
+| `typography_scale` | `bricks/generate-scale-variables` |
+| `color_palette` | `bricks/list-color-palettes`, `bricks/create-color-palette`, `bricks/update-color-palette`, `bricks/create-color`, `bricks/update-color` |
+| `global_variable` | `bricks/list-global-variables`, `bricks/set-global-variables`, `bricks/set-global-variable-categories` |
+| `component` | `bricks/list-components`, `bricks/get-component`, `bricks/create-component`, `bricks/update-component`, `bricks/delete-component` |
 | `media` library | `bricks/find-media`, `bricks/upload-media` |
 | `media` Unsplash | `bricks-mcp/search-unsplash`, `bricks-mcp/import-unsplash-photo` |
-| `get_builder_guide` | `bricks/start-here`, `bricks/get-builder-guide`, `bricks-mcp/get-guide` |
-| `page_diagnose` | `bricks-mcp/diagnose-page` |
-
-Check the live list of `bricks/*` abilities with your client's tool listing. Bricks decides which abilities are enabled under Bricks > Settings > AI.
+| `menu` | `bricks/list-nav-menus`, `bricks/get-nav-menu`, `bricks/save-nav-menu`, `bricks/delete-nav-menu` |
+| `woocommerce` | `bricks/get-woo-setup-status`, `bricks/plan-woo-setup`, `bricks/run-woo-setup` |
+| `font` | `bricks-mcp/list-adobe-fonts`, `bricks-mcp/update-font-settings` |
+| `code` page CSS and scripts | `bricks/set-page-settings` with `customCss`, `customScriptsHeader`, `customScriptsBodyHeader` or `customScriptsBodyFooter` |
+ which abilities are enabled under Bricks > Settings > AI.
 
 ## Local development
 

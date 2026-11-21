@@ -588,9 +588,10 @@ final class Media implements Module {
 			'permission_callback' => [ $this, 'search_unsplash_permission' ],
 			'meta'                => [
 				'annotations' => [
-					'readonly'    => true,
-					'destructive' => false,
-					'idempotent'  => true,
+					'readonly'      => true,
+					'destructive'   => false,
+					'idempotent'    => true,
+					'openWorldHint' => true,
 				],
 			],
 		];
@@ -654,8 +655,9 @@ final class Media implements Module {
 			'permission_callback' => [ $this, 'import_unsplash_permission' ],
 			'meta'                => [
 				'annotations' => [
-					'readonly'    => false,
-					'destructive' => false,
+					'readonly'      => false,
+					'destructive'   => false,
+					'openWorldHint' => true,
 				],
 			],
 		];

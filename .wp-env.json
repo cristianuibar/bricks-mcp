@@ -3,8 +3,8 @@
 	"core": "WordPress/WordPress#7.1",
 	"phpVersion": "8.2",
 	"plugins": [
-		".",
-		"https://downloads.wordpress.org/plugin/mcp-adapter.zip"
+		"https://downloads.wordpress.org/plugin/mcp-adapter.zip",
+		"."
 	],
 	"config": {
 		"WP_DEBUG": true,
