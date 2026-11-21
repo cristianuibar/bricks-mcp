@@ -1,7 +1,7 @@
 {
 	"name": "bricks-mcp",
-	"version": "1.5.0",
-	"description": "MCP (Model Context Protocol) server for WordPress AI integration",
+	"version": "2.0.0",
+	"description": "Extra abilities for the AI layer built into Bricks Builder, served through the WordPress MCP Adapter",
 	"author": "Cristian Uibar <cristi@buffup.media>",
 	"license": "GPL-2.0-or-later",
 	"private": true,

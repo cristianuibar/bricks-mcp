@@ -19,10 +19,6 @@ jobs:
         with:
           php-version: '8.2'
 
-      - name: Install Composer dependencies (production)
-        if: hashFiles('composer.json') != ''
-        run: composer install --no-dev --optimize-autoloader --no-interaction
-
       - name: Stamp version from tag
         run: |
           VERSION=${GITHUB_REF_NAME#v}
@@ -41,6 +37,10 @@ jobs:
           rsync -a \
             --exclude='.git' \
             --exclude='node_modules' \
+            --exclude='vendor' \
+            --exclude='docs' \
+            --exclude='mu-plugins' \
+            --exclude='logs' \
             --exclude='tests' \
             --exclude='.planning' \
             --exclude='.wp-env.json' \
@@ -49,6 +49,7 @@ jobs:
             --exclude='composer.json' \
             --exclude='composer.lock' \
             --exclude='phpunit.xml' \
+            --exclude='phpunit-unit.xml' \
             --exclude='phpcs.xml' \
             --exclude='.editorconfig' \
             --exclude='.gitignore' \

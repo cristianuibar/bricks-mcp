@@ -1,113 +1,134 @@
-=== Bricks MCP ===
+=== Bricks MCP Extensions ===
 Contributors: cristianuibar, optiwebopz
-Tags: ai, bricks builder, mcp, artificial intelligence, page builder
-Requires at least: 6.4
-Tested up to: 6.8
-Stable tag: 1.5.1
+Tags: ai, bricks builder, mcp, abilities api, seo
+Requires at least: 7.1
+Tested up to: 7.1
+Stable tag: 2.0.0
 Requires PHP: 8.2
+Requires Plugins: mcp-adapter
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Connect AI assistants like Claude to your Bricks Builder site. Build and edit pages using natural language — no clicking required.
+Adds SEO, media, template and page-QA abilities to the AI abilities built into Bricks Builder. One MCP connection reaches both.
 
 == Description ==
 
-Bricks MCP turns your WordPress site into an AI-controlled page builder. It implements the Model Context Protocol (MCP) — an open standard for connecting AI assistants to external tools — so that any MCP-compatible client (Claude Desktop, Claude Code, and others) can read and modify your Bricks Builder pages through plain conversation.
+Bricks Builder 2.5 ships about 185 built-in abilities that let an AI assistant read and edit pages, elements, global classes, templates, media and settings. The official MCP Adapter plugin serves WordPress abilities to AI clients such as Claude Desktop and Claude Code.
 
-Tell your AI assistant "create a hero section with a headline and a call-to-action button" and it happens. No template hunting. No clicking through panels.
+Bricks MCP Extensions adds 16 abilities named `bricks-mcp/*` for what Bricks does not cover. It does not run its own MCP server. The adapter serves our abilities on the same endpoint as the Bricks abilities, so you connect your AI client once.
 
-= How It Works =
+= What it adds =
 
-The plugin registers a REST API endpoint on your WordPress site that speaks the MCP protocol. You add the endpoint URL to your AI client's MCP configuration, authenticate with a WordPress Application Password, and your AI can start working with your site immediately.
+* **SEO**: read and write titles, descriptions, noindex, canonical and Open Graph fields in Yoast SEO, Rank Math, SEOPress or Slim SEO, or in Bricks page settings when none is active.
+* **Post status**: publish, schedule, draft or privatise posts, pages and Bricks templates.
+* **Featured image and editor mode**: set the featured image, and switch a post between Bricks and the WordPress editor.
+* **Builder**: move elements, see which templates apply to a post, create and delete global class categories.
+* **Media and fonts**: search and import Unsplash photos, list Adobe Fonts, update Bricks font-loading settings.
+* **Quality**: lint a page's element data, run a pre-publish audit prompt, read a guide to the abilities.
 
-= Available Tools =
+Every ability checks WordPress capabilities, and abilities that edit Bricks data also check Bricks builder access. A rate limiter and a CSS guard apply to every ability that runs over REST. Administrators can switch single abilities off under Bricks > Bricks MCP Extensions.
 
-The MCP server exposes 11 canonical tools (call `tools/list` for schemas). Legacy names such as `get_bricks_page`, `update_bricks_page`, `search_media`, and `delete_bricks_element` resolve via aliases — prefer canonical names below.
-
-* **get_site_info** — Site metadata and connection diagnostics (action: diagnose)
-* **get_builder_guide** — Built-in Bricks builder reference for AI context
-* **bricks** — Bricks settings, element schemas, breakpoints, and global queries
-* **content** — Pages and posts: list, search, CRUD, Bricks element trees, SEO (view: visual supported)
-* **template** — Template library import, export, and management
-* **design** — Global classes, color palettes, and typography
-* **media** — Media library operations; Unsplash image search requires an API key in plugin settings
-* **menu** — WordPress navigation menus
-* **component** — Reusable Bricks components
-* **woocommerce** — WooCommerce Bricks page scaffolds
-* **code** — Page custom CSS and scripts (dangerous_actions required for writes)
-
-All tools are free to use. The plugin is open source and hosted on [GitHub](https://github.com/cristianuibar/bricks-mcp).
-
-= Authentication =
-
-All requests are authenticated using WordPress Application Passwords, the built-in authentication system available since WordPress 5.6. No third-party authentication service is involved.
+The plugin is open source and hosted on [GitHub](https://github.com/cristianuibar/bricks-mcp).
 
 = Requirements =
 
-* WordPress 6.4 or later
+* WordPress 7.1 or later
 * PHP 8.2 or later
-* Bricks Builder theme 1.6 or later (required for Bricks-specific tools)
+* Bricks Builder 2.5 or later
+* The MCP Adapter plugin
 
 = Getting Started =
 
-1. Install and activate the plugin.
-2. Go to **Settings > Bricks MCP** and enable the plugin.
-3. Create a WordPress Application Password under **Users > Profile**.
-4. Add the MCP server URL to your AI client configuration.
-5. Start building pages with natural language.
-
-Full setup documentation is available in the [GitHub repository](https://github.com/cristianuibar/bricks-mcp).
+1. Install and activate Bricks Builder 2.5 or later and the MCP Adapter plugin.
+2. Install and activate this plugin.
+3. Open **Bricks > Settings > AI** and follow the steps there: create an Application Password and copy the client config.
+4. Paste the config into your AI client.
 
 == External Services ==
 
-This plugin optionally connects to the Unsplash API to search for images.
+This plugin contacts two external services.
 
-**Service:** Unsplash (api.unsplash.com)
-**When used:** Only when the `media` tool image search action is called by an AI assistant, and only if you have configured an Unsplash API key in the plugin settings.
-**What is sent:** Your search query string and your Unsplash API key.
-**Unsplash Terms of Service:** https://unsplash.com/terms
-**Unsplash Privacy Policy:** https://unsplash.com/privacy
-**Unsplash API Guidelines:** https://unsplash.com/documentation
+**Unsplash (api.unsplash.com)**
+When used: only when an AI assistant runs `bricks-mcp/search-unsplash` or `bricks-mcp/import-unsplash-photo`, and only if you saved an Unsplash API key in the Bricks settings.
+What is sent: the search query or photo ID, and your Unsplash API key.
+Terms: https://unsplash.com/terms
+Privacy: https://unsplash.com/privacy
+API guidelines: https://unsplash.com/documentation
 
-No data is sent to Unsplash unless you explicitly configure an API key and an AI assistant invokes the image search tool.
+**GitHub (api.github.com)**
+When used: to check for plugin updates, from the Plugins screen, the update checks WordPress runs, and the Check Now button in Bricks > Bricks MCP Extensions.
+What is sent: a request for the latest release of the `cristianuibar/bricks-mcp` repository. The plugin downloads the release ZIP from GitHub when you update.
+Terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service
+Privacy: https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement
 
 No other external services are contacted by this plugin.
 
 == Installation ==
 
-1. Upload the `bricks-mcp` folder to the `/wp-content/plugins/` directory, or install the plugin via the WordPress Plugins screen.
-2. Activate the plugin through the **Plugins** screen in WordPress.
-3. Navigate to **Settings > Bricks MCP** to configure the plugin.
-4. Enable the MCP server and optionally require authentication (strongly recommended for production sites).
-5. Go to **Users > Your Profile** and scroll to **Application Passwords**. Create a new Application Password and copy it — you will need it for your AI client.
-6. Add your site's MCP endpoint URL and credentials to your AI client (see the [GitHub repository](https://github.com/cristianuibar/bricks-mcp) for client-specific setup guides).
-7. (Optional) Enter an Unsplash API key in the settings to enable image search.
+1. Install and activate Bricks Builder 2.5 or later.
+2. Install and activate the MCP Adapter plugin from the Plugins screen.
+3. Upload the `bricks-mcp` folder to `/wp-content/plugins/`, or install the plugin through the Plugins screen, then activate it.
+4. Open **Bricks > Settings > AI**, create an Application Password and copy the client config into your AI client.
+5. Open **Bricks > Bricks MCP Extensions** to switch abilities off, set the rate limit and CSS guard, and run diagnostics.
 
 == Frequently Asked Questions ==
 
-= What is MCP (Model Context Protocol)? =
+= Do I need two connections, one for Bricks and one for this plugin? =
 
-MCP is an open protocol created by Anthropic that gives AI assistants a standard way to connect to external tools and data sources. It works like a universal adapter: the AI client connects to an MCP server, discovers what tools are available, and calls them by name. This plugin implements that server for WordPress and Bricks Builder.
+No. The MCP Adapter serves the Bricks abilities and the `bricks-mcp/*` abilities on one endpoint, `/wp-json/mcp/mcp-adapter-default-server`. Connect your AI client once.
 
 = Does this plugin work without Bricks Builder? =
 
-Yes, partially. Without Bricks Builder, only `get_site_info` and read-only `content` actions (e.g. list/get posts) are available. All other canonical tools — including `get_builder_guide`, `bricks`, `content` Bricks writes, `template`, `design`, `media`, `menu`, `component`, `woocommerce`, and `code` — require Bricks Builder to be installed and active.
+No. It needs Bricks Builder 2.5 or later. Its abilities build on the Bricks abilities and the Bricks builder permissions.
 
-= Which AI tools and clients are supported? =
+= Does it work without the MCP Adapter? =
 
-Any MCP-compatible client can connect to this plugin. Verified clients include Claude Desktop and Claude Code. Because MCP is an open protocol, support for other clients is expected to grow over time.
+The abilities register with WordPress, but no AI client can reach them. Install the MCP Adapter plugin.
 
-= Is it safe to expose a REST API endpoint for AI access? =
+= Which AI clients are supported? =
 
-Yes, when configured correctly. The plugin enforces WordPress Application Password authentication by default. Only users with the appropriate WordPress capabilities can use the tools. For extra security, you can restrict access by IP or role. Never disable authentication on a publicly accessible site.
+Any MCP client that can connect to the adapter endpoint with an Application Password, including Claude Desktop and Claude Code.
+
+= How is access controlled? =
+
+Authentication uses WordPress Application Passwords, handled by the adapter. Each ability has its own permission check: post abilities need permission to edit the post and use the Bricks builder, font settings need `manage_options`, and media abilities need `upload_files`. The plugin adds no endpoint of its own.
+
+= Is there a rate limit? =
+
+Yes. The default is 120 requests per minute per user, for every ability run over REST, including the Bricks abilities. Set it to 0 under Bricks > Bricks MCP Extensions to turn it off.
+
+= What happens to my 1.x setup? =
+
+The old endpoint `/wp-json/bricks-mcp/v1/mcp` is removed. Reconnect your AI client once through Bricks > Settings > AI. The old tools are replaced by Bricks abilities. See the changelog.
+
+= Does uninstalling delete Bricks settings? =
+
+No. Uninstalling removes only this plugin's options and transients. It does not touch `bricks_mcp_settings`, which belongs to Bricks.
 
 == Screenshots ==
 
-1. The Bricks MCP settings page under Settings > Bricks MCP.
-2. Example Claude Desktop configuration connecting to the MCP server endpoint.
-3. An AI assistant creating a Bricks Builder hero section from a plain-text prompt.
+1. The settings page under Bricks > Bricks MCP Extensions.
 
 == Changelog ==
+
+= 2.0.0 =
+Breaking changes:
+* The plugin no longer runs its own MCP server. It requires WordPress 7.1, Bricks Builder 2.5 and the MCP Adapter plugin.
+* The endpoint `/wp-json/bricks-mcp/v1/mcp` is removed. Connect once through Bricks > Settings > AI to the adapter endpoint `/wp-json/mcp/mcp-adapter-default-server`.
+* All 1.x tools are removed. Bricks abilities cover pages, elements, global classes, templates, media and menus. The plugin keeps only what Bricks lacks, as 16 `bricks-mcp/*` abilities.
+* The settings `require_auth`, `custom_base_url` and dangerous actions are removed. Authentication is the adapter's Application Passwords.
+* Settings moved to the option `bricks_mcp_extensions_settings`. The settings page is now Bricks > Bricks MCP Extensions.
+
+New:
+* 16 abilities: get-seo, update-seo, set-post-status, set-featured-image, set-editor-mode, move-element, resolve-templates, create-global-class-category, delete-global-class-category, search-unsplash, import-unsplash-photo, list-adobe-fonts, update-font-settings, diagnose-page, audit-page (prompt) and get-guide (resource).
+* Per-ability toggles, a rate limit and a CSS guard that apply to every ability executed over REST.
+* Admin notice after upgrading from 1.x, and a notice when the Bricks abilities are switched off.
+
+Fixes:
+* The plugin no longer reads or writes `bricks_mcp_settings`. Bricks 2.5 uses the same option name for its own AI settings and the two collided. Old keys are migrated out, Bricks keys are left alone.
+* The GitHub updater no longer offers this plugin's ZIP to other plugins hosted on GitHub.
+* SEO writes without an SEO plugin now go through `bricks/set-page-settings`, so Bricks validates them and keeps revisions.
+* Font-loading settings are validated against the values Bricks accepts.
 
 = 1.5.1 =
 * Fix: save_elements() uses resolve_elements_meta_key() for header/footer templates.
@@ -225,6 +246,9 @@ Yes, when configured correctly. The plugin enforces WordPress Application Passwo
 * Unsplash API integration for image search.
 
 == Upgrade Notice ==
+
+= 2.0.0 =
+Breaking release. Requires WordPress 7.1, Bricks 2.5 and the MCP Adapter plugin. The old endpoint is removed: reconnect your AI client once through Bricks > Settings > AI.
 
 = 1.5.1 =
 Data integrity and diagnostics release: safer Bricks writes, page diagnostics, visual layout view, and documentation aligned with canonical MCP tools. Recommended for all users.

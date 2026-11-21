@@ -8,12 +8,13 @@
  * @license           GPL-2.0-or-later
  *
  * @wordpress-plugin
- * Plugin Name:       Bricks MCP
+ * Plugin Name:       Bricks MCP Extensions
  * Plugin URI:        https://aiforbricks.com
- * Description:       AI-powered assistant for Bricks Builder. Control your website with natural language through MCP-compatible AI tools like Claude.
- * Version:           1.5.1
- * Requires at least: 6.4
+ * Description:       Adds SEO, media, template and page-QA abilities to the AI abilities built into Bricks Builder. AI agents reach them through the same MCP connection as Bricks.
+ * Version:           2.0.0
+ * Requires at least: 7.1
  * Requires PHP:      8.2
+ * Requires Plugins:  mcp-adapter
  * Author:            Uibar Ion-Cristian
  * Author URI:        https://aiforbricks.com
  * License:           GPL-2.0-or-later
@@ -31,16 +32,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin version.
-define( 'BRICKS_MCP_VERSION', '1.5.1' );
+define( 'BRICKS_MCP_VERSION', '2.0.0' );
 
 // Minimum PHP version.
 define( 'BRICKS_MCP_MIN_PHP_VERSION', '8.2' );
 
 // Minimum WordPress version.
-define( 'BRICKS_MCP_MIN_WP_VERSION', '6.4' );
+define( 'BRICKS_MCP_MIN_WP_VERSION', '7.1' );
 
 // Minimum Bricks Builder version.
-define( 'BRICKS_MCP_MIN_BRICKS_VERSION', '1.6' );
+define( 'BRICKS_MCP_MIN_BRICKS_VERSION', '2.5' );
 
 // Plugin directory path.
 define( 'BRICKS_MCP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
@@ -79,7 +80,7 @@ function bricks_mcp_check_wp_version(): bool {
 function bricks_mcp_php_version_notice(): void {
 	$message = sprintf(
 		/* translators: 1: Required PHP version, 2: Current PHP version */
-		esc_html__( 'Bricks MCP requires PHP %1$s or higher. You are running PHP %2$s. Please upgrade PHP to use this plugin.', 'bricks-mcp' ),
+		esc_html__( 'Bricks MCP Extensions requires PHP %1$s or higher. You are running PHP %2$s. Please upgrade PHP to use this plugin.', 'bricks-mcp' ),
 		BRICKS_MCP_MIN_PHP_VERSION,
 		PHP_VERSION
 	);
@@ -95,7 +96,7 @@ function bricks_mcp_wp_version_notice(): void {
 	global $wp_version;
 	$message = sprintf(
 		/* translators: 1: Required WordPress version, 2: Current WordPress version */
-		esc_html__( 'Bricks MCP requires WordPress %1$s or higher. You are running WordPress %2$s. Please upgrade WordPress to use this plugin.', 'bricks-mcp' ),
+		esc_html__( 'Bricks MCP Extensions requires WordPress %1$s or higher. You are running WordPress %2$s. Please upgrade WordPress to use this plugin.', 'bricks-mcp' ),
 		BRICKS_MCP_MIN_WP_VERSION,
 		$wp_version
 	);
@@ -111,10 +112,10 @@ function bricks_mcp_check_bricks_version(): bool {
 	if ( ! defined( 'BRICKS_VERSION' ) ) {
 		return false;
 	}
-	if ( ! class_exists( '\Bricks\Elements' ) ) {
+	if ( ! class_exists( '\Bricks\Abilities\Manager' ) ) {
 		return false;
 	}
-	return version_compare( BRICKS_VERSION, BRICKS_MCP_MIN_BRICKS_VERSION, '>=' );
+	return version_compare( BRICKS_VERSION, BRICKS_MCP_MIN_BRICKS_VERSION . '-dev', '>=' );
 }
 
 /**
@@ -126,13 +127,13 @@ function bricks_mcp_bricks_version_notice(): void {
 	if ( ! defined( 'BRICKS_VERSION' ) ) {
 		$message = sprintf(
 			/* translators: %s: Required Bricks version */
-			esc_html__( 'Bricks MCP requires Bricks Builder %s or higher. Bricks Builder is not installed or not activated.', 'bricks-mcp' ),
+			esc_html__( 'Bricks MCP Extensions requires Bricks Builder %s or higher. Bricks Builder is not installed or not activated.', 'bricks-mcp' ),
 			BRICKS_MCP_MIN_BRICKS_VERSION
 		);
 	} else {
 		$message = sprintf(
 			/* translators: 1: Required Bricks version, 2: Current Bricks version */
-			esc_html__( 'Bricks MCP requires Bricks Builder %1$s or higher. You are running Bricks %2$s. Please upgrade Bricks Builder to use this plugin.', 'bricks-mcp' ),
+			esc_html__( 'Bricks MCP Extensions requires Bricks Builder %1$s or higher. You are running Bricks %2$s. Please upgrade Bricks Builder to use this plugin.', 'bricks-mcp' ),
 			BRICKS_MCP_MIN_BRICKS_VERSION,
 			BRICKS_VERSION
 		);
@@ -157,11 +158,6 @@ require_once BRICKS_MCP_PLUGIN_DIR . 'includes/Autoloader.php';
 // Initialize autoloader.
 BricksMCP\Autoloader::register();
 
-// Load Composer autoloader if available (for Opis JSON Schema).
-$bricks_mcp_composer_autoload = BRICKS_MCP_PLUGIN_DIR . 'vendor/autoload.php';
-if ( file_exists( $bricks_mcp_composer_autoload ) ) {
-	require_once $bricks_mcp_composer_autoload;
-}
 
 /**
  * Run plugin activation routine.
@@ -172,16 +168,6 @@ function bricks_mcp_activate(): void {
 	BricksMCP\Activator::activate();
 }
 register_activation_hook( __FILE__, 'bricks_mcp_activate' );
-
-/**
- * Run plugin deactivation routine.
- *
- * @return void
- */
-function bricks_mcp_deactivate(): void {
-	BricksMCP\Deactivator::deactivate();
-}
-register_deactivation_hook( __FILE__, 'bricks_mcp_deactivate' );
 
 /**
  * Initialize the plugin after theme is loaded (Bricks version available).

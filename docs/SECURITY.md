@@ -1,87 +1,91 @@
 # Security
 
-This document describes the security model of the Bricks MCP plugin — how it authenticates requests, how it limits traffic, what operations require explicit opt-in, and what the plugin explicitly does not do.
+This document describes the security model of Bricks MCP Extensions 2.0: how requests are authenticated, which permissions each ability needs, what the safety settings do and what the plugin does not do.
 
-## Security Model
+## Model
 
-Bricks MCP exposes WordPress data through MCP (Model Context Protocol) endpoints. All communication uses HTTP/REST only — there is no stdio transport, no WebSocket transport, and no persistent background process. Every request goes through WordPress's built-in REST API infrastructure, which means WordPress authentication, nonces, and capability checks apply normally.
+The plugin has no MCP server and no REST route of its own. It registers abilities with the WordPress Abilities API and marks them public. The official MCP Adapter plugin serves them, together with the Bricks abilities, on `/wp-json/mcp/mcp-adapter-default-server`. Every request goes through the WordPress REST API, so WordPress authentication and capability checks apply.
+
+The plugin emits no CORS headers. AI clients connect server to server.
 
 ## Authentication
 
-WordPress Application Passwords are the authentication mechanism. The `require_auth` setting is enabled by default and gates all MCP endpoints.
+Authentication is handled by WordPress and the adapter, not by this plugin. Clients send a WordPress Application Password over HTTP Basic auth. Create one under Users > Profile > Application Passwords, or through Bricks > Settings > AI.
 
-When `require_auth` is enabled:
+- Every ability runs as the authenticated user. It can do only what that user's capabilities allow.
+- Application Passwords need HTTPS, or `WP_ENVIRONMENT_TYPE` set to `local`. Use HTTPS on production sites.
+- Use a dedicated user with the lowest role that fits the work, and revoke the password when you stop using it.
+- The older `require_auth` and `custom_base_url` settings no longer exist. There is no way to turn authentication off in this plugin.
 
-- The user must be authenticated (logged in via Application Password over HTTP Basic Auth)
-- The user must have the `manage_options` capability (WordPress Administrator) — enforced in `Server::check_permissions()` before any tool runs
-- Additional per-tool capability checks may apply inside `Router::execute_tool()` after the server gate (see table below)
+## Permissions
 
-Application Passwords are the standard WordPress mechanism for REST API authentication from external tools such as Claude Code and Gemini CLI. They can be generated from any user's profile page under **Users > Profile > Application Passwords**.
+Each ability has a `permission_callback`. Abilities that touch Bricks data mirror Bricks' own checks; plain WordPress operations use WordPress capabilities only. A failed check returns a `403` error.
 
-Unauthenticated access is possible only if the site administrator explicitly disables the `require_auth` setting in **Bricks > MCP > Require Authentication**. This is not recommended for production sites.
+| Abilities | Required |
+|---|---|
+| `get-seo`, `update-seo`, `set-featured-image` | `edit_post` for the post. Without an SEO plugin, `update-seo` writes through `bricks/set-page-settings`, which also checks Bricks builder access. |
+| `set-post-status` | `edit_post` for the post. Publish, future and private also need the post type's publish capability. |
+| `set-editor-mode`, `move-element`, `resolve-templates`, `diagnose-page`, `audit-page` | `edit_post` for the post, and Bricks builder access for that post |
+| `create-global-class-category`, `delete-global-class-category` | `edit_posts` and the Bricks builder permission `edit_global_classes` (the check Bricks uses for global class edits) |
+| `list-adobe-fonts`, `update-font-settings` | `manage_options` |
+| `search-unsplash` | `upload_files` |
+| `import-unsplash-photo` | `upload_files`. With `postId`, also `edit_post` for that post. |
+| `get-guide` | `edit_posts` |
 
-### Tool capability requirements (Router layer)
+Writes to Bricks element data and page settings go through the Bricks abilities, so Bricks' own validation, revisions and undo history apply.
 
-All authenticated MCP access requires `manage_options` at the server gate (see above). The table below describes additional Router-level checks after that gate:
+Administrators can switch any `bricks-mcp/*` ability off under Bricks > Bricks MCP Extensions. A disabled ability is not registered, so no client can call it. The Bricks abilities are managed in Bricks > Settings > AI.
 
-| Tool / pattern | Router capability | Notes |
-|----------------|-------------------|-------|
-| `get_builder_guide` | None | Read-only reference |
-| `content` (dispatcher) | None at router gate | Per-action checks inside handler (read vs write) |
-| `get_site_info` | `read` | Site metadata and diagnostics |
-| All other canonical tools | `manage_options` | Writes and privileged reads (Bricks, templates, media, etc.) |
+## Rate limiting
 
-## Rate Limiting
+A filter on `wp_pre_execute_ability` limits executions per user.
 
-The plugin enforces a per-user request rate limit to prevent runaway AI agent loops from overloading the server.
+- It applies to every ability run over REST, including the Bricks abilities. It does not count abilities run from PHP, such as in WP-CLI or cron.
+- Default 120 requests per minute per user. Set it under Bricks > Bricks MCP Extensions. `0` turns it off, otherwise 10 to 1000.
+- Counting uses a 60-second window, kept in the object cache when one is configured, otherwise in one transient per user named `bricks_mcp_rl_{user_id}`.
+- Requests without a logged-in user are not counted; the MCP Adapter rejects them before any ability runs.
+- If the object cache drops a counter mid-window, the call is allowed and counting starts again.
+- Calls that one ability makes to another count once.
+- Over the limit, the call returns a `bricks_mcp_rate_limited` error with status `429` and `retry_after` in seconds. The message also states the wait, because the MCP Adapter passes only the message text to clients.
 
-- Default: 120 requests per minute per authenticated user
-- Configurable from **Bricks > MCP > Rate Limit** (range: 10–1000 RPM)
-- Per-user tracking uses WordPress transients keyed by user ID (`bricks_mcp_rl_{user_id}`)
-- When the limit is exceeded, the server returns HTTP `429` Too Many Requests with a `Retry-After` header indicating when the window resets
-- Applies to both REST API routes and the Streamable HTTP (SSE) endpoint
-- Rate limiting is only active when authentication is required — without a user identity, there is no user to track
-- Window: 60-second sliding window, auto-resets via transient TTL
+Long building sessions can make many calls. Raise the limit for trusted users if you hit it.
 
-For intensive AI building sessions (for example, "build me a landing page" workflows that fire 30–50 tool calls), consider increasing the limit to 300 RPM in the settings.
+## CSS guard
 
-## Dangerous Actions Toggle
+A second filter on `wp_pre_execute_ability` scans ability inputs before they run. It is on by default and can be switched off under Bricks > Bricks MCP Extensions.
 
-Some operations are gated behind a separate **Dangerous Actions** toggle in addition to normal authentication. This toggle is off by default, with a prominent red warning in the admin settings.
+- It applies to every ability that writes, including the Bricks abilities. Abilities annotated read-only are skipped.
+- It checks the fields `customCss` and `_cssCustom` (including their `:breakpoint` and pseudo-class variants), `css`, `cssCode` and `stylesheet`, the `value` of typed edit-plan operations whose `settingPath` targets one of those settings, and the `<style>` elements and `style` attributes inside an `html` field.
+- It rejects `url(javascript:)`, `data:` URLs other than images (`data:image/png`, `jpeg`, `gif`, `webp`, `avif` and `svg+xml` are allowed), `expression()`, `@import`, `behavior:` and `-moz-binding:`. It removes comments, decodes CSS escapes and strips tabs and line breaks inside URL schemes first, so `\75 rl(...)`, comment splitting and `ja\9 vascript:` do not bypass it.
+- It rejects any single CSS value over 100 KB.
+- A rejection returns a `bricks_mcp_css_blocked` error with status `400`. The message names the input path and the matched pattern.
 
-When **disabled** (default):
+The guard does not check JavaScript. Bricks decides which abilities may write scripts and code. Review those under Bricks > Settings > AI before you give an agent access.
 
-- `code:set_page_css` is rejected (dedicated CSS write path with pattern checks when enabled)
-- `code:set_page_scripts` is rejected — custom JavaScript writes require dangerous actions mode
-- Note: `content` → `update_settings` may still accept a `customCss` page setting without the `code` tool gate; prefer `code:set_page_css` for explicit CSS writes
-- Page settings keys `customScriptsHeader`, `customScriptsBodyHeader`, and `customScriptsBodyFooter` are rejected on update
-- JS-capable keys are stripped from template import operations
+## Secrets
 
-When **enabled**:
+`bricks-mcp/list-adobe-fonts` reports only whether an Adobe Fonts project is configured, never the project ID. The Unsplash API key is read from the Bricks settings and sent only to `api.unsplash.com`.
 
-- AI tools can write custom CSS via `set_page_css` (with pattern sanitization and 100 KB size cap)
-- AI tools can write JavaScript to page header and body script fields (stored as supplied — no script sanitization; enable only on trusted dev sites)
-- Dangerous patterns in CSS are rejected; JavaScript is not filtered beyond the dangerous-actions toggle
+## Data and uninstall
 
-API keys and secrets stored in Bricks settings are always masked as `****configured****` regardless of this setting.
+- Plugin settings live in the option `bricks_mcp_extensions_settings`.
+- The option `bricks_mcp_settings` belongs to Bricks 2.5+. The plugin never writes it, except once on upgrade from 1.x, when it removes its own old keys and leaves the Bricks keys.
+- Uninstalling deletes `bricks_mcp_extensions_settings`, `bricks_mcp_version`, `bricks_mcp_activated_at`, `bricks_mcp_reconnect_notice`, the transients `bricks_mcp_update_data`, `bricks_mcp_activation_checks` and the `bricks_mcp_rl_*` rate limit transients. It never touches `bricks_mcp_settings`.
 
-Recommendation: only enable on development sites or when working with a trusted AI agent team.
+## Updates
 
-## What This Plugin Does NOT Do
+The plugin updates from GitHub Releases. The updater offers an update only for this plugin and checks the release ZIP against the SHA-256 checksum file published with the release before WordPress installs it. If a release has no checksum file, the check is skipped.
 
-- No `eval()`, `assert()`, or dynamic PHP code execution
-- No raw SQL queries — all database access goes through WordPress APIs (`get_post_meta`, `update_post_meta`, `get_option`, `update_option`, `WP_Query`)
-- No file system writes outside the WordPress media library (`download_url` + `media_handle_sideload`)
-- No shell commands (`exec`, `shell_exec`, `system`, `passthru`)
-- No `unserialize()` on user-controlled data
-- No direct file includes with user-supplied paths
-- No unauthenticated write operations — all mutations require appropriate capabilities
-- No stdio or WebSocket transport — HTTP REST only, through WordPress's built-in REST infrastructure
-- No cross-site data access — the plugin operates within the single WordPress installation it is installed on
-- No browser-facing CORS headers — CLI tools connect server-side; no `Access-Control-Allow-Origin` headers are emitted
+## What this plugin does not do
 
-## Reporting Vulnerabilities
+- No own REST route, no stdio or WebSocket transport, no background process.
+- No `eval()`, shell commands or `unserialize()` on user input.
+- No raw SQL on user input. The only direct query deletes this plugin's own rate limit transients on uninstall.
+- No file writes outside the media library. Unsplash imports use `bricks/upload-media`.
+- No access without WordPress authentication. Ability permission checks need a logged-in user.
+- No cross-site access. The plugin works on the single site it is installed on.
+- No CORS headers.
 
-To report a security vulnerability, contact: **cristi@buffup.media**
+## Reporting vulnerabilities
 
-Please use responsible disclosure — share details privately before publishing. The maintainer will acknowledge the report within 48 hours and provide a timeline for a fix.
+To report a security vulnerability, contact **cristi@buffup.media**. Share details privately before publishing. The maintainer will acknowledge the report within 48 hours and give a timeline for a fix.

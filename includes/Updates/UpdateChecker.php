@@ -104,7 +104,11 @@ final class UpdateChecker {
 	 * @param array<string>        $locales     Installed locales.
 	 * @return mixed Update data array if update available, original value otherwise.
 	 */
-	public function check_update( $update, array $plugin_data, string $plugin_file, array $locales ) {
+	public function check_update( $update, array $plugin_data, string $plugin_file, array $locales ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- Signature fixed by the update_plugins_{$hostname} filter.
+		if ( BRICKS_MCP_PLUGIN_BASENAME !== $plugin_file ) {
+			return $update;
+		}
+
 		$remote = $this->get_update_data();
 
 		if ( empty( $remote['version'] ) ) {

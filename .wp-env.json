@@ -1,8 +1,11 @@
 {
 	"$schema": "https://schemas.wp.org/trunk/wp-env.json",
-	"core": "WordPress/WordPress#6.7",
+	"core": "WordPress/WordPress#7.1",
 	"phpVersion": "8.2",
-	"plugins": ["."],
+	"plugins": [
+		".",
+		"https://downloads.wordpress.org/plugin/mcp-adapter.zip"
+	],
 	"config": {
 		"WP_DEBUG": true,
 		"WP_DEBUG_LOG": true,
@@ -15,6 +18,6 @@
 		"wp-content/mu-plugins": "./mu-plugins"
 	},
 	"lifecycleScripts": {
-		"afterStart": "npx wp-env run cli composer install --working-dir=/var/www/html/wp-content/plugins/bricks-mcp && npx wp-env run tests-cli composer install --working-dir=/var/www/html/wp-content/plugins/bricks-mcp && npx wp-env run cli wp plugin activate bricks-mcp && npx wp-env run cli wp rewrite structure '/%postname%/'"
+		"afterStart": "npx wp-env run cli composer install --working-dir=/var/www/html/wp-content/plugins/bricks-mcp && npx wp-env run tests-cli composer install --working-dir=/var/www/html/wp-content/plugins/bricks-mcp && npx wp-env run cli wp plugin activate mcp-adapter bricks-mcp && npx wp-env run cli wp rewrite structure '/%postname%/'"
 	}
 }

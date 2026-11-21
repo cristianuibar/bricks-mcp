@@ -39,13 +39,13 @@ class HostingProviderCheck implements DiagnosticCheck {
 	 */
 	private const KNOWN_PROVIDERS = array(
 		'wpengine'   => array(
-			'name'       => 'WP Engine',
-			'detect'     => 'IS_WP_ENGINE',
-			'detect_fn'  => 'is_wpe',
-			'risk'       => 'medium',
-			'fix_steps'  => array(
-				'WP Engine may strip Authorization headers. Add to .htaccess: SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1',
-				'If using WP Engine Smart Plugin Manager, ensure Bricks MCP is not disabled.',
+			'name'      => 'WP Engine',
+			'detect'    => 'IS_WP_ENGINE',
+			'detect_fn' => 'is_wpe',
+			'risk'      => 'medium',
+			'fix_steps' => array(
+				'WP Engine may strip Authorization headers, breaking Application Password authentication to the MCP Adapter. Add to .htaccess: SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1',
+				'If using WP Engine Smart Plugin Manager, ensure Bricks MCP Extensions and MCP Adapter are not disabled.',
 			),
 		),
 		'kinsta'     => array(
@@ -63,7 +63,7 @@ class HostingProviderCheck implements DiagnosticCheck {
 			'detect_fn' => null,
 			'risk'      => 'medium',
 			'fix_steps' => array(
-				'Flywheel may strip Authorization headers. Add to .htaccess: SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1',
+				'Flywheel may strip Authorization headers, breaking Application Password authentication to the MCP Adapter. Add to .htaccess: SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1',
 			),
 		),
 		'cloudways'  => array(
@@ -160,7 +160,7 @@ class HostingProviderCheck implements DiagnosticCheck {
 					'status'    => 'warn',
 					'message'   => sprintf(
 						// translators: %s is the hosting provider name.
-						__( 'Detected hosting: %s. This provider may require additional configuration for Application Passwords to work.', 'bricks-mcp' ),
+						__( 'Detected hosting: %s. This provider may require additional configuration for Application Password authentication to the MCP Adapter.', 'bricks-mcp' ),
 						$provider['name']
 					),
 					'fix_steps' => $provider['fix_steps'],
@@ -195,7 +195,7 @@ class HostingProviderCheck implements DiagnosticCheck {
 	/**
 	 * Detect a hosting provider using multiple detection strategies.
 	 *
-	 * @param string                                                                                       $provider_key Provider array key.
+	 * @param string                                                                                               $provider_key Provider array key.
 	 * @param array{name: string, detect: string, detect_fn?: string|null, risk: string, fix_steps: array<string>} $provider     Provider configuration.
 	 * @return bool True if the provider is detected.
 	 */

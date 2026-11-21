@@ -1,6 +1,6 @@
 <?php
 /**
- * MCP endpoint reachability check.
+ * MCP Adapter endpoint reachability check.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
@@ -12,17 +12,12 @@ namespace BricksMCP\Admin\Checks;
 
 use BricksMCP\Admin\DiagnosticCheck;
 
-// Prevent direct access.
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
 /**
- * Checks whether the Bricks MCP REST endpoint is registered and responding.
- *
- * A 401 or 405 (Method Not Allowed) response is treated as pass because
- * the MCP endpoint expects POST requests with authentication — the unauthenticated
- * GET simply confirms the endpoint is registered.
+ * Checks whether the WordPress MCP Adapter default server route is registered and responding.
  */
 class McpEndpointCheck implements DiagnosticCheck {
 
@@ -59,67 +54,102 @@ class McpEndpointCheck implements DiagnosticCheck {
 	 * @return array<string>
 	 */
 	public function dependencies(): array {
-		return array( 'rest_api_reachable', 'app_passwords' );
+		return [ 'rest_api_reachable', 'app_passwords' ];
 	}
 
 	/**
-	 * Run the MCP endpoint check.
+	 * Run the MCP Adapter endpoint check.
 	 *
 	 * @return array<string, mixed>
 	 */
 	public function run(): array {
-		$endpoint_url = rest_url( 'bricks-mcp/v1/mcp' );
+		$endpoint_url = $this->endpoint_url();
 
 		$response = wp_remote_get(
 			$endpoint_url,
-			array(
+			[
 				'timeout'   => 5,
 				'sslverify' => false,
-			)
+			]
 		);
 
 		if ( is_wp_error( $response ) ) {
-			return array(
+			return [
 				'id'        => $this->id(),
 				'label'     => $this->label(),
 				'status'    => 'fail',
 				'message'   => sprintf(
-					// translators: %s is the WP_Error message.
-					__( 'MCP endpoint loopback request failed: %s', 'bricks-mcp' ),
+					/* translators: %s: WP_Error message */
+					__( 'MCP Adapter endpoint loopback request failed: %s', 'bricks-mcp' ),
 					$response->get_error_message()
 				),
-				'fix_steps' => array(
+				'fix_steps' => [
 					__( 'Check that loopback requests are allowed on your server.', 'bricks-mcp' ),
 					__( 'Check the WordPress Site Health page for loopback request status.', 'bricks-mcp' ),
-				),
+				],
 				'category'  => $this->category(),
-			);
+			];
 		}
 
-		$http_code = wp_remote_retrieve_response_code( $response );
+		$http_code = (int) wp_remote_retrieve_response_code( $response );
 
 		if ( 404 === $http_code ) {
-			return array(
+			return [
 				'id'        => $this->id(),
 				'label'     => $this->label(),
 				'status'    => 'fail',
-				'message'   => __( 'MCP endpoint not found. The bricks-mcp/v1 namespace may not be registered.', 'bricks-mcp' ),
-				'fix_steps' => array(
-					__( 'Ensure the Bricks MCP plugin is activated and the "Enable MCP Server" setting is on.', 'bricks-mcp' ),
-				),
+				'message'   => __( 'MCP Adapter endpoint not found. The mcp/mcp-adapter-default-server route is not registered.', 'bricks-mcp' ),
+				'fix_steps' => [
+					__( 'Ensure the WordPress MCP Adapter plugin is installed and activated.', 'bricks-mcp' ),
+					__( 'Check Bricks > Settings > AI to verify the MCP server status.', 'bricks-mcp' ),
+				],
 				'category'  => $this->category(),
-			);
+			];
 		}
 
-		// 401 (auth required), 405 (Method Not Allowed — GET on a POST endpoint),
-		// and 200 all mean the endpoint exists and is responding.
-		return array(
+		if ( ( $http_code >= 200 && $http_code < 300 ) || in_array( $http_code, [ 401, 403, 405 ], true ) ) {
+			return [
+				'id'        => $this->id(),
+				'label'     => $this->label(),
+				'status'    => 'pass',
+				'message'   => __( 'MCP Adapter endpoint is registered and responding.', 'bricks-mcp' ),
+				'fix_steps' => [],
+				'category'  => $this->category(),
+			];
+		}
+
+		$is_server_error = $http_code >= 500 || $http_code <= 0;
+
+		return [
 			'id'        => $this->id(),
 			'label'     => $this->label(),
-			'status'    => 'pass',
-			'message'   => __( 'MCP endpoint is registered and responding.', 'bricks-mcp' ),
-			'fix_steps' => array(),
+			'status'    => $is_server_error ? 'fail' : 'warn',
+			'message'   => sprintf(
+				/* translators: %d: HTTP status code returned by the MCP Adapter endpoint */
+				__( 'MCP Adapter endpoint returned unexpected HTTP status %d.', 'bricks-mcp' ),
+				$http_code
+			),
+			'fix_steps' => [
+				__( 'Check your PHP and server error logs for errors on the /wp-json/mcp/mcp-adapter-default-server route.', 'bricks-mcp' ),
+				__( 'Check Bricks > Settings > AI and confirm the WordPress MCP Adapter plugin is functioning properly.', 'bricks-mcp' ),
+			],
 			'category'  => $this->category(),
-		);
+		];
+	}
+
+	/**
+	 * Resolve the MCP Adapter default server URL.
+	 *
+	 * @return string
+	 */
+	private function endpoint_url(): string {
+		if ( class_exists( '\Bricks\Helpers' ) && is_callable( [ '\Bricks\Helpers', 'get_mcp_adapter_endpoint_url' ] ) ) {
+			return (string) \Bricks\Helpers::get_mcp_adapter_endpoint_url();
+		}
+
+		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Bricks' own filter name.
+		$route = (string) apply_filters( 'bricks_mcp_adapter_rest_route', 'mcp/mcp-adapter-default-server' );
+
+		return rtrim( rest_url( $route ), '/' );
 	}
 }

@@ -105,6 +105,25 @@ final class UpdateCheckerTest extends TestCase {
 	 *
 	 * @return void
 	 */
+	public function test_check_update_ignores_other_github_hosted_plugins(): void {
+		$GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = [
+			'version' => '99.0.0',
+			'package' => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/bricks-mcp.zip',
+		];
+
+		$result = $this->checker->check_update(
+			false,
+			[
+				'Version'   => '1.0.0',
+				'UpdateURI' => 'https://github.com/someone/other-plugin',
+			],
+			'other-plugin/other-plugin.php',
+			[]
+		);
+
+		$this->assertFalse( $result );
+	}
+
 	public function test_verify_download_passthrough_when_already_handled(): void {
 		$this->set_expected_hash( 'abc123' );
 

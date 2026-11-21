@@ -2,8 +2,7 @@
 /**
  * Plugin uninstallation handler.
  *
- * This file is executed when the plugin is uninstalled via the WordPress admin.
- * It removes all plugin data from the database.
+ * Removes only data this plugin owns. `bricks_mcp_settings` belongs to Bricks 2.5+ and is left alone.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
@@ -16,81 +15,21 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
 
-/**
- * Delete all plugin options.
- *
- * @return void
- */
-function bricks_mcp_delete_options(): void {
-	$options = [
-		'bricks_mcp_settings',
-		'bricks_mcp_version',
-		'bricks_mcp_activated_at',
-	];
-
-	foreach ( $options as $option ) {
-		delete_option( $option );
-	}
+foreach ( [ 'bricks_mcp_extensions_settings', 'bricks_mcp_version', 'bricks_mcp_activated_at', 'bricks_mcp_reconnect_notice' ] as $bricks_mcp_option ) {
+	delete_option( $bricks_mcp_option );
 }
 
-/**
- * Delete all plugin transients.
- *
- * @return void
- */
-function bricks_mcp_delete_transients(): void {
-	global $wpdb;
-
-	// Delete all transients with the plugin prefix.
-	$wpdb->query(
-		$wpdb->prepare(
-			"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
-			$wpdb->esc_like( '_transient_bricks_mcp_' ) . '%',
-			$wpdb->esc_like( '_transient_timeout_bricks_mcp_' ) . '%'
-		)
-	);
+foreach ( [ 'bricks_mcp_update_data', 'bricks_mcp_activation_checks' ] as $bricks_mcp_transient ) {
+	delete_transient( $bricks_mcp_transient );
 }
 
-/**
- * Delete all plugin user meta.
- *
- * @return void
- */
-function bricks_mcp_delete_user_meta(): void {
-	global $wpdb;
+global $wpdb;
 
-	// Delete all user meta with the plugin prefix.
-	$wpdb->query(
-		$wpdb->prepare(
-			"DELETE FROM {$wpdb->usermeta} WHERE meta_key LIKE %s",
-			$wpdb->esc_like( 'bricks_mcp_' ) . '%'
-		)
-	);
-}
-
-/**
- * Clear any scheduled cron events.
- *
- * @return void
- */
-function bricks_mcp_clear_cron(): void {
-	$cron_hooks = [
-		'bricks_mcp_cleanup',
-	];
-
-	foreach ( $cron_hooks as $hook ) {
-		$timestamp = wp_next_scheduled( $hook );
-		if ( $timestamp ) {
-			wp_unschedule_event( $timestamp, $hook );
-		}
-	}
-}
-
-// Run cleanup.
-bricks_mcp_delete_options();
-bricks_mcp_delete_transients();
-bricks_mcp_delete_user_meta();
-bricks_mcp_clear_cron();
-
-// Flush rewrite rules.
-flush_rewrite_rules();
+// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Rate-limit transients have per-user keys, so they are removed by prefix.
+$wpdb->query(
+	$wpdb->prepare(
+		"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+		$wpdb->esc_like( '_transient_bricks_mcp_rl_' ) . '%',
+		$wpdb->esc_like( '_transient_timeout_bricks_mcp_rl_' ) . '%'
+	)
+);

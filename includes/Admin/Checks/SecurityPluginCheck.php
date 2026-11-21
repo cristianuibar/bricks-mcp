@@ -33,42 +33,42 @@ class SecurityPluginCheck implements DiagnosticCheck {
 	 * @var array<string, array{name: string, risk: string, note: string}>
 	 */
 	private const KNOWN_PLUGINS = array(
-		'wordfence/wordfence.php'                                          => array(
+		'wordfence/wordfence.php'                     => array(
 			'name' => 'Wordfence',
 			'risk' => 'low',
 			'note' => 'Wordfence does not block REST API or App Passwords.',
 		),
-		'better-wp-security/better-wp-security.php'                       => array(
+		'better-wp-security/better-wp-security.php'   => array(
 			'name' => 'iThemes/Solid Security',
 			'risk' => 'high',
 			'note' => 'May disable Application Passwords or restrict REST API access.',
 		),
-		'sucuri-scanner/sucuri.php'                                        => array(
+		'sucuri-scanner/sucuri.php'                   => array(
 			'name' => 'Sucuri Security',
 			'risk' => 'medium',
 			'note' => 'WAF rules may block /wp-json/ at network level (not detectable from PHP).',
 		),
-		'all-in-one-wp-security-and-firewall/wp-security.php'             => array(
+		'all-in-one-wp-security-and-firewall/wp-security.php' => array(
 			'name' => 'All In One WP Security',
 			'risk' => 'high',
 			'note' => 'May block REST API for non-logged-in users via Firewall > PHP rules.',
 		),
-		'perfmatters/perfmatters.php'                                      => array(
+		'perfmatters/perfmatters.php'                 => array(
 			'name' => 'Perfmatters',
 			'risk' => 'high',
-			'note' => 'May disable REST API. Add "bricks-mcp" to Perfmatters > REST API > Allowed Routes.',
+			'note' => 'May disable REST API. Add "mcp" to Perfmatters > REST API > Allowed Routes.',
 		),
-		'wp-cerber/wp-cerber.php'                                          => array(
+		'wp-cerber/wp-cerber.php'                     => array(
 			'name' => 'WP Cerber',
 			'risk' => 'high',
 			'note' => 'May block REST API and Application Passwords. Check Hardening settings.',
 		),
-		'disable-wp-rest-api/disable-wp-rest-api.php'                     => array(
+		'disable-wp-rest-api/disable-wp-rest-api.php' => array(
 			'name' => 'Disable WP REST API',
 			'risk' => 'critical',
-			'note' => 'Blocks REST API for non-authenticated users. Deactivate or whitelist bricks-mcp namespace.',
+			'note' => 'Blocks REST API for non-authenticated users. Deactivate or whitelist the mcp REST namespace.',
 		),
-		'disable-json-api/disable-json-api.php'                           => array(
+		'disable-json-api/disable-json-api.php'       => array(
 			'name' => 'Disable REST API',
 			'risk' => 'critical',
 			'note' => 'Blocks REST API entirely. Deactivate this plugin.',

@@ -12,7 +12,6 @@ namespace BricksMCP\Admin;
 
 use BricksMCP\Admin\Checks\AppPasswordsAvailableCheck;
 use BricksMCP\Admin\Checks\AppPasswordsUserCheck;
-use BricksMCP\Admin\Checks\BricksActiveCheck;
 use BricksMCP\Admin\Checks\HostingProviderCheck;
 use BricksMCP\Admin\Checks\HttpsCheck;
 use BricksMCP\Admin\Checks\McpEndpointCheck;
@@ -67,7 +66,6 @@ class DiagnosticRunner {
 		$this->register( new RestApiReachableCheck() );
 		$this->register( new SecurityPluginCheck() );
 		$this->register( new HostingProviderCheck() );
-		$this->register( new BricksActiveCheck() );
 		$this->register( new McpEndpointCheck() );
 		$this->register( new PhpTimeoutCheck() );
 
@@ -122,7 +120,7 @@ class DiagnosticRunner {
 					'category'  => $check->category(),
 				);
 			} else {
-				$result             = $check->run();
+				$result               = $check->run();
 				$results[ $check_id ] = $result;
 
 				if ( 'fail' === ( $result['status'] ?? '' ) ) {
@@ -159,12 +157,12 @@ class DiagnosticRunner {
 	 * @return array<DiagnosticCheck> Ordered list of checks.
 	 */
 	private function resolve_order(): array {
-		$ordered   = array();
-		$visited   = array();
-		$in_stack  = array();
+		$ordered  = array();
+		$visited  = array();
+		$in_stack = array();
 
 		$visit = null;
-		$visit = function( string $id ) use ( &$ordered, &$visited, &$in_stack, &$visit ): void {
+		$visit = function ( string $id ) use ( &$ordered, &$visited, &$in_stack, &$visit ): void {
 			if ( isset( $visited[ $id ] ) ) {
 				return;
 			}
