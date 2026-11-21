@@ -220,20 +220,30 @@ final class CssGuard {
 		}
 
 		// Comments are removed as a browser reads them, and also by the plain pattern, which ignores strings.
+		// A regex failure (null or false) blocks the value, since the text it left unchanged may hide a pattern.
 		$comment_pattern = '~/\*.*?(?:\*/|\z)~s';
-		$candidates      = [
-			$this->strip_css_comments( $css, '' ),
-			$this->strip_css_comments( $css, ' ' ),
-			preg_replace( $comment_pattern, '', $css ) ?? $css,
-			preg_replace( $comment_pattern, ' ', $css ) ?? $css,
-		];
+		$candidates      = array_map(
+			fn( ?string $candidate ): ?string => null === $candidate ? null : $this->decode_css_escapes( $candidate ),
+			[
+				$this->strip_css_comments( $css, '' ),
+				$this->strip_css_comments( $css, ' ' ),
+				preg_replace( $comment_pattern, '', $css ),
+				preg_replace( $comment_pattern, ' ', $css ),
+			]
+		);
+		if ( in_array( null, $candidates, true ) ) {
+			return $this->scan_error( $path );
+		}
 
-		foreach ( array_unique( $candidates ) as $candidate ) {
-			$normalized     = $this->decode_css_escapes( $candidate );
+		foreach ( array_unique( $candidates ) as $normalized ) {
 			$url_normalized = str_replace( [ "\t", "\r", "\n" ], '', $normalized );
 
 			foreach ( self::PATTERNS as $name => [ $pattern, $label ] ) {
-				if ( preg_match( $pattern, str_ends_with( $name, '_url' ) ? $url_normalized : $normalized ) ) {
+				$matched = preg_match( $pattern, str_ends_with( $name, '_url' ) ? $url_normalized : $normalized );
+				if ( false === $matched ) {
+					return $this->scan_error( $path );
+				}
+				if ( 1 === $matched ) {
 					return new \WP_Error(
 						'bricks_mcp_css_blocked',
 						/* translators: 1: Input path, 2: Disallowed CSS pattern. */
@@ -252,27 +262,46 @@ final class CssGuard {
 	}
 
 	/**
+	 * Build the error for CSS whose scan failed, for example on a PCRE limit.
+	 *
+	 * @param string $path Input path.
+	 * @return \WP_Error
+	 */
+	private function scan_error( string $path ): \WP_Error {
+		return new \WP_Error(
+			'bricks_mcp_css_blocked',
+			/* translators: %s: Input path. */
+			sprintf( __( 'Blocked unsafe CSS at %s: the CSS could not be checked.', 'bricks-mcp' ), $path ),
+			[
+				'status'  => 400,
+				'path'    => $path,
+				'pattern' => 'scan_error',
+			]
+		);
+	}
+
+	/**
 	 * Replace comments outside strings, unquoted URLs and escapes.
 	 *
 	 * @param string $css Raw CSS.
 	 * @param string $replacement Text that replaces each comment.
-	 * @return string
+	 * @return string|null Null when the regex fails.
 	 */
-	private function strip_css_comments( string $css, string $replacement ): string {
+	private function strip_css_comments( string $css, string $replacement ): ?string {
 		return preg_replace_callback(
 			self::TOKEN_PATTERN,
 			static fn( array $token ): string => str_starts_with( $token[0], '/*' ) ? $replacement : $token[0],
 			$css
-		) ?? $css;
+		);
 	}
 
 	/**
 	 * Decode escapes relevant to the ASCII patterns.
 	 *
 	 * @param string $css CSS without comments.
-	 * @return string
+	 * @return string|null Null when the regex fails.
 	 */
-	private function decode_css_escapes( string $css ): string {
+	private function decode_css_escapes( string $css ): ?string {
 		return preg_replace_callback(
 			'~\\\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\r\n\f])?|(\r\n|[\r\n\f])|(.))~is',
 			static function ( array $escape ): string {
@@ -283,6 +312,6 @@ final class CssGuard {
 				return $escape[3] ?? '';
 			},
 			$css
-		) ?? $css;
+		);
 	}
 }

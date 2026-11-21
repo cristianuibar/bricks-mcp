@@ -61,7 +61,7 @@ A filter on `wp_ability_normalize_input` scans ability inputs before they are va
 - It checks the `value` of typed edit-plan operations whose `settingPath` (slash or dot separated, with or without a `/settings/` prefix) leads to one of those fields or into `_attributes`.
 - It checks the `<style>` elements and `style` attributes in any other string, since most Bricks text fields accept HTML.
 - It rejects `url(javascript:)`, `data:` URLs other than images (`data:image/png`, `jpeg`, `gif`, `webp`, `avif` and `svg+xml` are allowed), `expression()`, `@import`, `behavior:` and `-moz-binding:`. It removes comments (both as a browser reads them, outside strings and unquoted `url()`, and everywhere), decodes CSS escapes and strips tabs and line breaks inside URL schemes first, so `\75 rl(...)`, comment splitting and `ja\9 vascript:` do not bypass it.
-- It rejects any single CSS value over 100 KB.
+- It rejects any single CSS value over 100 KB, and any value whose scan fails, for example on a low `pcre.backtrack_limit` (pattern `scan_error`).
 - A rejection returns a `bricks_mcp_css_blocked` error with status `400`. The message names the input path and the matched pattern.
 
 The guard does not check JavaScript. Bricks decides which abilities may write scripts and code. Review those under Bricks > Settings > AI before you give an agent access.

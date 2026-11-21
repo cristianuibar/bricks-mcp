@@ -199,6 +199,21 @@ final class CssGuardTest extends TestCase {
 		self::assertStringContainsString( $detail[ $pattern ], $result->get_error_message() );
 	}
 
+	public function test_blocks_css_when_the_scan_hits_a_regex_limit(): void {
+		$limit = ini_get( 'pcre.backtrack_limit' );
+		ini_set( 'pcre.backtrack_limit', '1' );
+		try {
+			$result = $this->ability->execute( [ 'css' => '.x { content: "' . str_repeat( 'a', 5000 ) . '/*"; behavior: url(example.htc); } .y { content: "*/"; }' ] );
+		} finally {
+			ini_set( 'pcre.backtrack_limit', $limit );
+		}
+
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( 'bricks_mcp_css_blocked', $result->get_error_code() );
+		self::assertSame( [ 'status' => 400, 'path' => 'css', 'pattern' => 'scan_error' ], $result->get_error_data() );
+		self::assertStringContainsString( 'could not be checked', $result->get_error_message() );
+	}
+
 	public function test_allows_inline_images_in_css(): void {
 		foreach ( [ 'png', 'jpeg', 'jpg', 'gif', 'webp', 'avif', 'svg+xml' ] as $type ) {
 			self::assertSame( 'executed', $this->ability->execute( [ 'css' => ".x { background: url('data:image/$type;base64,AAAA'); }" ] ), $type );
