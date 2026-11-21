@@ -1,0 +1,135 @@
+<?php
+/**
+ * HttpsCheck and HostingProviderCheck HTTPS-advice unit tests.
+ *
+ * @package BricksMCP
+ * @license GPL-2.0-or-later
+ */
+
+declare(strict_types=1);
+
+namespace BricksMCP\Tests\Unit\Admin\Checks;
+
+use BricksMCP\Admin\Checks\HostingProviderCheck;
+use BricksMCP\Admin\Checks\HttpsCheck;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Tests that plain HTTP is not reported as safe outside local environments.
+ */
+final class HttpsCheckTest extends TestCase {
+
+	/**
+	 * Reset stubs before each test.
+	 *
+	 * @return void
+	 */
+	protected function setUp(): void {
+		bricks_mcp_test_reset_admin();
+		unset( $_SERVER['HTTP_X_FORWARDED_PROTO'], $_SERVER['PANTHEON_ENVIRONMENT'] );
+	}
+
+	/**
+	 * Clean up request globals.
+	 *
+	 * @return void
+	 */
+	protected function tearDown(): void {
+		unset( $_SERVER['HTTP_X_FORWARDED_PROTO'], $_SERVER['PANTHEON_ENVIRONMENT'] );
+	}
+
+	/**
+	 * Whether any fix step recommends the force-enable filter.
+	 *
+	 * @param array<string, mixed> $result Check result.
+	 * @return bool
+	 */
+	private function has_force_enable_step( array $result ): bool {
+		foreach ( $result['fix_steps'] as $step ) {
+			if ( str_contains( $step, '__return_true' ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Status and force-enable advice for each environment on plain HTTP and HTTPS.
+	 *
+	 * @return void
+	 */
+	public function test_status_and_force_enable_advice_by_environment(): void {
+		// [ is_ssl, environment, app passwords available, expected status, force-enable step shown ].
+		$cases = [
+			[ true, 'production', true, 'pass', false ],
+			[ false, 'production', true, 'warn', false ],
+			[ false, 'staging', true, 'warn', false ],
+			[ false, 'production', false, 'fail', false ],
+			[ false, 'local', true, 'pass', false ],
+			[ false, 'development', true, 'pass', false ],
+			[ false, 'local', false, 'fail', true ],
+			[ false, 'development', false, 'fail', true ],
+		];
+
+		foreach ( $cases as [ $ssl, $env, $available, $status, $force_step ] ) {
+			$label = sprintf( 'ssl=%s env=%s available=%s', var_export( $ssl, true ), $env, var_export( $available, true ) );
+
+			$GLOBALS['_bricks_mcp_test_is_ssl']                  = $ssl;
+			$GLOBALS['_bricks_mcp_test_environment_type']        = $env;
+			$GLOBALS['_bricks_mcp_test_app_passwords_available'] = $available;
+
+			$result = ( new HttpsCheck() )->run();
+
+			$this->assertSame( $status, $result['status'], $label );
+			$this->assertSame( $force_step, $this->has_force_enable_step( $result ), $label );
+		}
+	}
+
+	/**
+	 * The local force-enable step carries a cleartext warning.
+	 *
+	 * @return void
+	 */
+	public function test_local_force_enable_step_warns_about_cleartext(): void {
+		$GLOBALS['_bricks_mcp_test_environment_type'] = 'local';
+
+		$result = ( new HttpsCheck() )->run();
+		$steps  = array_values( array_filter( $result['fix_steps'], static fn ( string $step ): bool => str_contains( $step, '__return_true' ) ) );
+
+		$this->assertCount( 1, $steps );
+		$this->assertStringContainsString( 'cleartext', $steps[0] );
+	}
+
+	/**
+	 * A client-supplied X-Forwarded-Proto header does not count as HTTPS.
+	 *
+	 * @return void
+	 */
+	public function test_forwarded_proto_header_alone_is_not_https(): void {
+		$_SERVER['HTTP_X_FORWARDED_PROTO']                   = 'https';
+		$GLOBALS['_bricks_mcp_test_app_passwords_available'] = true;
+
+		$result = ( new HttpsCheck() )->run();
+
+		$this->assertSame( 'warn', $result['status'] );
+	}
+
+	/**
+	 * Pantheon advice offers the force-enable filter only in local/development environments.
+	 *
+	 * @return void
+	 */
+	public function test_pantheon_force_enable_advice_is_local_only(): void {
+		$_SERVER['PANTHEON_ENVIRONMENT'] = 'live';
+
+		foreach ( [ 'production' => false, 'staging' => false, 'local' => true, 'development' => true ] as $env => $shown ) {
+			$GLOBALS['_bricks_mcp_test_environment_type'] = $env;
+
+			$result = ( new HostingProviderCheck() )->run();
+
+			$this->assertSame( 'warn', $result['status'], $env );
+			$this->assertStringContainsString( 'Pantheon', $result['message'], $env );
+			$this->assertSame( $shown, $this->has_force_enable_step( $result ), $env );
+		}
+	}
+}

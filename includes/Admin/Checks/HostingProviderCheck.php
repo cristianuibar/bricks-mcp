@@ -100,7 +100,7 @@ class HostingProviderCheck implements DiagnosticCheck {
 			'detect_fn' => null,
 			'risk'      => 'high',
 			'fix_steps' => array(
-				'Pantheon previously disabled Application Passwords by default. Check: add_filter("wp_is_application_passwords_available", "__return_true"); in wp-config.php or a mu-plugin.',
+				'Pantheon previously disabled Application Passwords by default. Check wp-config.php and mu-plugins for a "wp_is_application_passwords_available" filter that returns false, and serve the site over HTTPS before re-enabling them.',
 				'Ensure Pantheon Advanced Page Cache does not cache /wp-json/ responses.',
 			),
 		),
@@ -154,6 +154,14 @@ class HostingProviderCheck implements DiagnosticCheck {
 			}
 
 			if ( 'high' === $provider['risk'] || 'medium' === $provider['risk'] ) {
+				$fix_steps = $provider['fix_steps'];
+
+				// The force-enable filter removes the HTTPS requirement, so only offer it locally.
+				$force_enable_step = HttpsCheck::force_enable_step();
+				if ( 'pantheon' === $provider_key && null !== $force_enable_step ) {
+					$fix_steps[] = $force_enable_step;
+				}
+
 				return array(
 					'id'        => $this->id(),
 					'label'     => $this->label(),
@@ -163,7 +171,7 @@ class HostingProviderCheck implements DiagnosticCheck {
 						__( 'Detected hosting: %s. This provider may require additional configuration for Application Password authentication to the MCP Adapter.', 'bricks-mcp' ),
 						$provider['name']
 					),
-					'fix_steps' => $provider['fix_steps'],
+					'fix_steps' => $fix_steps,
 					'category'  => $this->category(),
 				);
 			}

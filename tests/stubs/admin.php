@@ -23,6 +23,9 @@ function bricks_mcp_test_reset_admin(): void {
 	$GLOBALS['_bricks_mcp_test_wp_remote_get_responses'] = [];
 	$GLOBALS['_bricks_mcp_test_registered_settings'] = [];
 	$GLOBALS['_bricks_mcp_test_json_response']       = null;
+	$GLOBALS['_bricks_mcp_test_is_ssl']              = false;
+	$GLOBALS['_bricks_mcp_test_environment_type']    = 'production';
+	$GLOBALS['_bricks_mcp_test_app_passwords_available'] = false;
 }
 
 bricks_mcp_test_reset_admin();
@@ -244,6 +247,39 @@ if ( ! function_exists( 'wp_remote_get' ) ) {
 			'response' => [ 'code' => 200 ],
 			'body'     => '',
 		];
+	}
+}
+
+if ( ! function_exists( 'is_ssl' ) ) {
+	/**
+	 * Stub is_ssl.
+	 *
+	 * @return bool
+	 */
+	function is_ssl(): bool {
+		return (bool) ( $GLOBALS['_bricks_mcp_test_is_ssl'] ?? false );
+	}
+}
+
+if ( ! function_exists( 'wp_get_environment_type' ) ) {
+	/**
+	 * Stub wp_get_environment_type.
+	 *
+	 * @return string
+	 */
+	function wp_get_environment_type(): string {
+		return (string) ( $GLOBALS['_bricks_mcp_test_environment_type'] ?? 'production' );
+	}
+}
+
+if ( ! function_exists( 'wp_is_application_passwords_available' ) ) {
+	/**
+	 * Stub wp_is_application_passwords_available.
+	 *
+	 * @return bool
+	 */
+	function wp_is_application_passwords_available(): bool {
+		return (bool) ( $GLOBALS['_bricks_mcp_test_app_passwords_available'] ?? false );
 	}
 }
 
