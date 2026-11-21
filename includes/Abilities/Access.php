@@ -35,7 +35,16 @@ final class Access {
 			return new \WP_Error( 'bricks_mcp_forbidden', __( 'You are not allowed to edit this post.', 'bricks-mcp' ), [ 'status' => 403 ] );
 		}
 
-		if ( $needs_builder && class_exists( '\Bricks\Capabilities' ) && ! \Bricks\Capabilities::current_user_can_use_builder( $post_id ) ) {
+		if ( ! $needs_builder ) {
+			return true;
+		}
+
+		// Fail closed: without the Bricks check, builder access cannot be confirmed.
+		if ( ! class_exists( '\Bricks\Capabilities' ) || ! is_callable( [ '\Bricks\Capabilities', 'current_user_can_use_builder' ] ) ) {
+			return new \WP_Error( 'bricks_mcp_builder_check_unavailable', __( 'Bricks builder access cannot be checked. Update Bricks to a supported version.', 'bricks-mcp' ), [ 'status' => 501 ] );
+		}
+
+		if ( ! \Bricks\Capabilities::current_user_can_use_builder( $post_id ) ) {
 			return new \WP_Error( 'bricks_mcp_forbidden_builder', __( 'You are not allowed to use the Bricks builder on this post.', 'bricks-mcp' ), [ 'status' => 403 ] );
 		}
 
