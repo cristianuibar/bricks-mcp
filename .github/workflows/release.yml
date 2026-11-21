@@ -5,19 +5,17 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          php-version: '8.2'
+          persist-credentials: false
 
       - name: Stamp version from tag
         run: |
@@ -69,9 +67,13 @@ jobs:
           sha256sum bricks-mcp.zip > bricks-mcp.zip.sha256
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            build/bricks-mcp.zip
-            build/bricks-mcp.zip.sha256
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            build/bricks-mcp.zip \
+            build/bricks-mcp.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes
