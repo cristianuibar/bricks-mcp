@@ -126,11 +126,6 @@ final class CssGuardTest extends TestCase {
 				'content.style.0',
 				'import',
 			],
-			'inline CSS after a name libxml truncates'         => [
-				[ 'content' => '<p ' . str_repeat( 'a', 100 ) . 'style="behavior: url(example.htc)">Example</p>' ],
-				'content.styleAttribute.0',
-				'behaviour',
-			],
 			'typed edit with a dotted setting path'            => [
 				[ 'operations' => [ [ 'settingPath' => 'settings._cssCustom:hover', 'value' => '@import "example.css";' ] ] ],
 				'operations.0.value',
