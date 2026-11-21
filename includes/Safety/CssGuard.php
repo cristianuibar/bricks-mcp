@@ -33,6 +33,7 @@ final class CssGuard {
 		'data_url'       => [ '~url\s*\(\s*["\']?\s*data\s*:(?!image/(?:png|jpe?g|gif|webp|avif|svg\+xml)[;,])~i', 'url(data:)' ],
 		'behaviour'      => [ '/(?<![\w-])behaviou?r\s*:/i', 'behavior:' ],
 		'moz_binding'    => [ '/-moz-binding\s*:/i', '-moz-binding:' ],
+		'style_close'    => [ '~</style~i', '</style>' ],
 	];
 
 	/**
@@ -270,10 +271,13 @@ final class CssGuard {
 			return $this->unchecked_error( $path, 'scan_error', __( 'the CSS could not be checked.', 'bricks-mcp' ) );
 		}
 
-		foreach ( array_unique( $candidates ) as $normalized ) {
+		// An HTML parser ends a style element at a closing tag even inside a CSS comment, so the raw CSS is checked for one too.
+		$scans   = array_map( static fn( string $candidate ): array => [ $candidate, self::PATTERNS ], array_unique( $candidates ) );
+		$scans[] = [ $css, [ 'style_close' => self::PATTERNS['style_close'] ] ];
+		foreach ( $scans as [ $normalized, $patterns ] ) {
 			$url_normalized = str_replace( [ "\t", "\r", "\n" ], '', $normalized );
 
-			foreach ( self::PATTERNS as $name => [ $pattern, $label ] ) {
+			foreach ( $patterns as $name => [ $pattern, $label ] ) {
 				$matched = preg_match( $pattern, str_ends_with( $name, '_url' ) ? $url_normalized : $normalized );
 				if ( false === $matched ) {
 					return $this->unchecked_error( $path, 'scan_error', __( 'the CSS could not be checked.', 'bricks-mcp' ) );
