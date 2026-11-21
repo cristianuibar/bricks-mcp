@@ -1,237 +1,187 @@
-# Bricks MCP
+# Bricks MCP Extensions
 
-AI-powered assistant for [Bricks Builder](https://bricksbuilder.io/). Control your website with natural language through MCP-compatible AI tools like Claude.
+Extra abilities for the AI layer built into [Bricks Builder](https://bricksbuilder.io/) 2.5+, served through the official [MCP Adapter](https://wordpress.org/plugins/mcp-adapter/) plugin.
 
-**Talk to your website. It listens.**
+Bricks ships about 185 built-in `bricks/*` abilities for pages, elements, global classes, templates, media and settings. This plugin adds 16 `bricks-mcp/*` abilities for what Bricks does not cover: SEO, post status, featured images, editor mode, element moves, template resolution, global class categories, Unsplash, Adobe Fonts, font settings and page diagnostics.
 
-## What It Does
+The plugin has no MCP server of its own. The MCP Adapter exposes every public ability, ours and Bricks', on one endpoint, so you connect your AI client once:
 
-Bricks MCP is a WordPress plugin that implements an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, letting AI assistants read and write your Bricks Builder site. Connect Claude Code, Claude Desktop, Cursor, or any compatible MCP client and manage pages, templates, global classes, theme styles, WooCommerce layouts, and more through natural language.
-
-## Features
-
-- 11 canonical MCP tools covering the full Bricks Builder data model
-- Read and write pages, templates, elements, and global settings
-- WooCommerce support (product pages, cart, checkout, account templates)
-- Global classes, theme styles, typography scales, color palettes, variables
-- Media library management with Unsplash integration
-- WordPress menus, fonts, and custom code management
-- Built-in connection tester and config snippet generator
-- Works with Claude Code, Claude Desktop, Cursor, and other compatible MCP clients
+```
+https://your-site.com/wp-json/mcp/mcp-adapter-default-server
+```
 
 ## Requirements
 
-- WordPress 6.4+
+- WordPress 7.1+
 - PHP 8.2+
-- Bricks Builder 1.6+
+- Bricks Builder 2.5+
+- The [MCP Adapter](https://wordpress.org/plugins/mcp-adapter/) plugin (`mcp-adapter`)
 
-## Installation
+## Install
 
-No Composer required. The plugin ships its own PSR-4 autoloader (`includes/Autoloader.php`) that maps the `BricksMCP\` namespace to the `includes/` directory. Simply upload and activate -- no build step needed.
+1. Install and activate Bricks Builder 2.5+.
+2. Install and activate the MCP Adapter plugin.
+3. Download the latest ZIP from [GitHub Releases](https://github.com/cristianuibar/bricks-mcp/releases), then use Plugins > Add New > Upload Plugin and activate it.
 
-1. Download the latest release from [GitHub Releases](https://github.com/cristianuibar/bricks-mcp/releases)
-2. Upload to your WordPress site via Plugins > Add New > Upload Plugin
-3. Activate the plugin
-4. Go to Settings > Bricks MCP to configure
+The plugin folder and slug stay `bricks-mcp`. New releases appear in the normal WordPress update screen. The updater reads GitHub Releases and verifies the ZIP's SHA-256 checksum before WordPress installs it.
 
-### LocalWP / Manual Server Setup
+## Connect your AI client
 
-If you run LocalWP or a custom server stack, PHP and Nginx may need configuration changes for stable MCP connections (SSE streaming requires longer timeouts and unbuffered responses). See the [LocalWP Setup Guide](docs/LOCALWP_SETUP.md) for step-by-step instructions.
+Connect once. The connection reaches the Bricks abilities and these ones.
 
-## Connecting Your AI Tool
+1. Open Bricks > Settings > AI.
+2. Check that the abilities API is enabled and the adapter is installed.
+3. Create an Application Password for a user who can use the Bricks builder.
+4. Copy the client config Bricks shows and paste it into your AI client.
 
-### Claude Code
+Bricks > Bricks MCP Extensions shows the endpoint URL and whether the adapter is connected.
 
-```bash
-claude mcp add bricks-mcp https://yoursite.com/wp-json/bricks-mcp/v1/mcp --transport http
+### Direct HTTP
+
+Clients that support Streamable HTTP can connect to the endpoint without the npx bridge. Send the Application Password as a Basic auth header:
+
+```
+Authorization: Basic base64(username:application-password)
 ```
 
-### Claude Desktop / Cursor / Other MCP Clients
+Claude Code:
 
-Add to your MCP config (`.mcp.json` or equivalent):
+```bash
+claude mcp add --transport http bricks https://your-site.com/wp-json/mcp/mcp-adapter-default-server \
+  --header "Authorization: Basic BASE64_OF_USERNAME_COLON_APP_PASSWORD"
+```
+
+Create the Base64 value with `printf '%s' 'username:xxxx xxxx xxxx xxxx xxxx xxxx' | base64 -w0`. Remove the spaces from the Application Password if your client rejects them.
+
+Application Passwords need HTTPS on production sites. WordPress also allows them when `WP_ENVIRONMENT_TYPE` is `local`.
+
+## Abilities
+
+Every ability is registered with the WordPress Abilities API and marked public, so the adapter serves it. Names use camelCase inputs such as `postId` and `attachmentId`.
+
+| Ability | What it does | Type |
+|---|---|---|
+| `bricks-mcp/get-seo` | Reads SEO fields from Yoast SEO, Rank Math, SEOPress or Slim SEO, or from Bricks page settings when none is active. | Read |
+| `bricks-mcp/update-seo` | Writes SEO fields to the same sources. Fields the source cannot store are reported as unsupported. | Write |
+| `bricks-mcp/set-post-status` | Sets publish, draft, pending, private or future (scheduled). Publishing Bricks templates needs this, since Bricks creates them as drafts. | Write |
+| `bricks-mcp/set-featured-image` | Sets or removes the featured image with a media library attachment. | Write |
+| `bricks-mcp/set-editor-mode` | Chooses whether Bricks or the WordPress editor renders a post. Element data is kept. | Write |
+| `bricks-mcp/move-element` | Reorders or reparents an element and its subtree. | Write |
+| `bricks-mcp/resolve-templates` | Shows which Bricks templates apply to a post. | Read |
+| `bricks-mcp/create-global-class-category` | Creates a global class category. | Write |
+| `bricks-mcp/delete-global-class-category` | Deletes a category and moves its classes to Uncategorized. | Write (destructive) |
+| `bricks-mcp/search-unsplash` | Searches Unsplash with the API key saved in Bricks settings. | Read |
+| `bricks-mcp/import-unsplash-photo` | Imports an Unsplash photo into the media library through `bricks/upload-media`, with attribution. | Write |
+| `bricks-mcp/list-adobe-fonts` | Lists cached Adobe Fonts families and the Bricks font-loading settings. | Read |
+| `bricks-mcp/update-font-settings` | Updates `disableGoogleFonts`, `webfontLoading`, `customFontsPreload` and `googleFontsFilesystem`. | Write |
+| `bricks-mcp/diagnose-page` | Lints the stored element data of a page, header or footer and names the Bricks ability that fixes each problem. | Read |
+| `bricks-mcp/audit-page` | MCP prompt that guides a pre-publish audit. Findings only. | Read (prompt) |
+| `bricks-mcp/get-guide` | Markdown guide to these abilities, also an MCP resource at `bricks-mcp://guide`. | Read (resource) |
+
+Writes to element data and page settings go through Bricks abilities, so Bricks keeps its validation, revisions and undo history.
+
+### Permissions
+
+Each ability has a `permission_callback` that mirrors Bricks:
+
+- SEO, post status and featured image need `edit_post` for that post. The other post abilities also need Bricks builder access for it.
+- Global class categories need `edit_posts` and the Bricks builder permission `edit_global_classes`.
+- Font settings need `manage_options`.
+- Unsplash search and import need `upload_files`. Importing with a `postId` also needs `edit_post` for that post.
+- Setting a status of publish, future or private also needs the post type's publish capability.
+- The guide needs `edit_posts`.
+
+## Settings
+
+Open Bricks > Bricks MCP Extensions. Settings are stored in the option `bricks_mcp_extensions_settings`.
+
+- **Abilities**: switch single `bricks-mcp/*` abilities off. A disabled ability is not registered.
+- **Rate limit**: requests per minute per user. Default 120. `0` turns it off, otherwise 10 to 1000. It applies to every ability run over REST, including Bricks' own. Calls that one ability makes to another are not counted twice. Over the limit, the call returns a `429` error with `retry_after`.
+- **CSS guard**: on by default. Blocks `javascript:` URLs, non-image `data:` URLs, `expression()`, `@import`, `behavior:`, `-moz-binding:` and CSS over 100 KB in the inputs of every writing ability, including Bricks' own and HTML imports with `<style>` or `style=` attributes.
+- **Diagnostics**: checks HTTPS, permalinks, Application Passwords, REST reachability, security plugins, hosting provider, the MCP endpoint and PHP timeouts.
+- **Updates**: shows the installed version and checks GitHub Releases.
+
+See [docs/SECURITY.md](docs/SECURITY.md) for the security model.
+
+## Upgrading from 1.x
+
+Version 2.0 is a breaking change.
+
+- The old endpoint `/wp-json/bricks-mcp/v1/mcp` is removed. Reconnect your AI client once through Bricks > Settings > AI. A notice in wp-admin reminds administrators until dismissed.
+- The old tools (`content`, `design`, `template`, `media`, `menu`, `component`, `woocommerce`, `code`, `bricks`, `get_site_info`, `get_builder_guide`) are gone. Bricks abilities replace most of them.
+- The old settings (`require_auth`, `custom_base_url`, dangerous actions) are gone. Authentication is the adapter's Application Passwords.
+- Bricks 2.5 now owns the option `bricks_mcp_settings`. On upgrade the plugin carries the old rate limit over to `bricks_mcp_extensions_settings` and removes its own 1.x keys from the old option. It leaves the Bricks keys alone and never writes that option otherwise.
+
+| Old tool | Use now |
+|---|---|
+| `content` read page elements | `bricks/get-page-elements` |
+| `content` add or edit elements | `bricks/add-element`, `bricks/update-element`, `bricks/batch-update-elements`, `bricks/set-page-elements` |
+| `content` create page or post | `bricks/create-post` |
+| `content` page settings | `bricks/set-page-settings` |
+| `content` SEO | `bricks-mcp/get-seo`, `bricks-mcp/update-seo` |
+| `design` global classes | `bricks/list-global-classes`, `bricks/create-global-class`, `bricks/update-global-class` |
+| `design` colors and typography | Bricks color, theme style and global settings abilities |
+| `template` | `bricks/list-templates` and the other `bricks/*template*` abilities |
+| `media` library | `bricks/find-media`, `bricks/upload-media` |
+| `media` Unsplash | `bricks-mcp/search-unsplash`, `bricks-mcp/import-unsplash-photo` |
+| `get_builder_guide` | `bricks/start-here`, `bricks/get-builder-guide`, `bricks-mcp/get-guide` |
+| `page_diagnose` | `bricks-mcp/diagnose-page` |
+
+Check the live list of `bricks/*` abilities with your client's tool listing. Bricks decides which abilities are enabled under Bricks > Settings > AI.
+
+## Local development
+
+Requires Docker and Node.js 18+.
+
+```bash
+npm install
+npm start
+```
+
+`.wp-env.json` starts WordPress 7.1 with PHP 8.2, installs `mcp-adapter` from WordPress.org, maps `mu-plugins/` and activates both plugins. Local site: http://localhost:8888 (admin / password).
+
+Bricks is a paid theme and is not in the repository. Add it with a `.wp-env.override.json` next to `.wp-env.json` that points to a local copy:
 
 ```json
 {
-  "mcpServers": {
-    "bricks-mcp": {
-      "type": "http",
-      "url": "https://yoursite.com/wp-json/bricks-mcp/v1/mcp",
-      "headers": {
-        "Authorization": "Basic BASE64_ENCODED_CREDENTIALS"
-      }
-    }
-  }
+	"themes": [ "/path/to/bricks" ]
 }
 ```
 
-Authentication uses WordPress [Application Passwords](https://make.wordpress.org/core/2020/11/05/application-passwords-integration-guide/) (Users > Profile > Application Passwords).
+Run `npm run destroy && npm start` after adding it, then activate the theme.
 
-ChatGPT is not currently supported as an MCP client for this plugin. ChatGPT's MCP flow requires OAuth 2.1 and dynamic client registration, while Bricks MCP uses WordPress Application Passwords for authentication.
+| Command | Does |
+|---|---|
+| `npm start` / `npm stop` | Start or stop wp-env. |
+| `npm run test` | Unit and integration tests inside wp-env. |
+| `npm run test:unit` | Unit tests only. |
+| `npm run lint` / `npm run lint:fix` | PHPCS check or fix. |
+| `npm run wp <command>` | Run WP-CLI. |
+| `npm run logs:watch` | Follow the debug log. |
 
-## Available Tools
+Without Docker:
 
-| Tool | Description |
-|------|-------------|
-| `get_site_info` | Read WordPress site details and run connection diagnostics |
-| `get_builder_guide` | Read the Bricks builder guide before editing content |
-| `bricks` | Manage Bricks builder settings, schema, queries, and references |
-| `content` | Manage WordPress and Bricks content across posts, pages, and elements |
-| `template` | Manage Bricks templates, conditions, and template taxonomies |
-| `design` | Manage Bricks design tokens across classes, styles, palettes, variables, and fonts |
-| `media` | Upload media, search Unsplash, manage library |
-| `menu` | WordPress menu management |
-| `component` | Bricks component (reusable element) management |
-| `woocommerce` | WooCommerce page templates and product layouts |
-| `code` | Page-level CSS and JavaScript |
-
-## Try It Out
-
-Once connected, try these prompts with your AI tool. Each one exercises different MCP tools and can be used to verify the integration is working.
-
-### Basic checks
-
-```
-What WordPress site am I connected to? What version is it running?
+```bash
+composer install
+composer test        # PHPCS and unit tests
+composer test:unit   # unit tests only
 ```
 
-```
-List all active plugins on this site.
-```
-
-```
-Show me the Bricks Builder guide so I understand how to build pages.
-```
-
-### Page building
-
-```
-Create a new page called "About Us" with a hero section containing a heading
-"About Our Company" and a paragraph of placeholder text below it.
-```
-
-```
-Add a two-column container to the About Us page. Put a heading and text in the
-left column, and an image placeholder in the right column.
-```
-
-```
-List all my pages and show which ones use Bricks Builder.
-```
-
-### Global styles
-
-```
-Create a global class called "btn-primary" with 12px 24px padding, white text,
-#2563eb background, 6px border radius, and 600 font weight.
-```
-
-```
-Create a color palette called "Brand Colors" with: Primary #2563eb, Secondary
-#7c3aed, Accent #f59e0b, and Neutral #64748b.
-```
-
-```
-Create a theme style that sets all H1 headings to 48px bold and H2 to 36px
-semibold.
-```
-
-### Templates
-
-```
-Create a section template called "CTA Banner" with a dark background section
-containing a centered heading and a button.
-```
-
-```
-List all my templates and their types.
-```
-
-### Menus
-
-```
-Create a navigation menu called "Main Menu" with links to Home (/), About
-(/about/), Services (/services/), and Contact (/contact/).
-```
-
-### Advanced
-
-```
-Show me the Bricks settings and breakpoints configured on this site.
-```
-
-```
-Create a typography scale with steps: xs 12px, sm 14px, base 16px, lg 20px,
-xl 24px, 2xl 32px, 3xl 48px. Use the prefix --fs-.
-```
-
-```
-Create a set of global CSS variables for spacing: --space-xs 4px, --space-sm
-8px, --space-md 16px, --space-lg 32px, --space-xl 64px.
-```
-
-## Configuration
-
-Go to **Settings > Bricks MCP** in WordPress admin:
-
-- **Enable MCP Server** — toggle the server on/off
-- **Require Authentication** — restrict access to authenticated users
-- **Custom Base URL** — for reverse proxies or custom domains
-- **Dangerous Actions** — enable write access to global Bricks settings and code execution
+Unit tests use stubs for WordPress, the Abilities API and Bricks, so they do not need Bricks installed.
 
 ## Extending
 
-Add custom tools using the `bricks_mcp_tools` filter:
+An ability module is a class that implements `BricksMCP\Abilities\Module`:
 
 ```php
-add_filter( 'bricks_mcp_tools', function( $tools ) {
-    $tools['my_custom_tool'] = [
-        'name'        => 'my_custom_tool',
-        'description' => 'My custom tool description',
-        'inputSchema' => [
-            'type'       => 'object',
-            'properties' => [],
-        ],
-        'handler'     => function( $args ) {
-            return ['result' => 'success'];
-        },
-    ];
-    return $tools;
-});
+interface Module {
+	public function abilities(): array;
+}
 ```
 
-## Local Development
+`abilities()` returns `[ 'bricks-mcp/name' => $args ]`, where `$args` are the arguments of `wp_register_ability()`: label, description, category, input and output schemas, `execute_callback`, `permission_callback` and `meta.annotations`. Add the class to `Registrar::MODULES`. The registrar marks the ability public, skips it when it is disabled in settings and lists it in the settings page.
 
-Prerequisites: [Docker](https://docs.docker.com/get-docker/) and [Node.js](https://nodejs.org/) 18+.
-
-```bash
-git clone https://github.com/cristianuibar/bricks-mcp.git
-cd bricks-mcp
-npm install
-npm run start
-```
-
-That's it. The first start takes a few minutes to download WordPress and set up the containers. Composer dependencies are installed automatically inside the containers.
-
-Local site: http://localhost:8888 (admin / password)
-
-### Available Commands
-
-```bash
-npm run start        # Start WordPress environment (Docker via wp-env)
-npm run stop         # Stop the environment
-npm run test         # Run all PHPUnit tests
-npm run test:unit    # Run unit tests only
-npm run lint         # WordPress coding standards check
-npm run lint:fix     # Auto-fix linting issues
-npm run wp <command> # Run WP-CLI commands
-npm run logs:watch   # Tail the PHP debug log
-```
-
-### How It Works
-
-The dev environment uses [@wordpress/env](https://developer.wordpress.org/block-editor/reference-guides/packages/packages-env/) (wp-env), which runs WordPress in Docker containers. The plugin directory is mounted directly into the container, so file changes are reflected immediately.
-
-A [mu-plugin](mu-plugins/wp-env-fixes.php) is included to fix Docker networking quirks (REST API loopback and Application Passwords over HTTP).
+Use `Access::edit_post()` and `Access::manage_site()` for permissions and `Access::run_bricks_ability()` to call a Bricks ability. Put new category slugs in `Registrar::CATEGORIES`.
 
 ## License
 

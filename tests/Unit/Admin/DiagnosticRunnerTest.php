@@ -258,4 +258,31 @@ final class DiagnosticRunnerTest extends TestCase {
 		$this->assertArrayHasKey( 'summary', $result );
 		$this->assertStringContainsString( '/3 checks passed', $result['summary'] );
 	}
+
+	/**
+	 * Test that register_defaults registers the 9 v2 checks without bricks_active.
+	 *
+	 * @return void
+	 */
+	public function test_register_defaults_registers_expected_checks(): void {
+		$runner = new DiagnosticRunner();
+		$runner->register_defaults();
+
+		$ids = array_keys( $runner->get_checks() );
+
+		$this->assertSame(
+			[
+				'https',
+				'permalink_structure',
+				'app_passwords',
+				'app_passwords_user',
+				'rest_api_reachable',
+				'security_plugins',
+				'hosting_provider',
+				'mcp_endpoint',
+				'php_timeout',
+			],
+			$ids
+		);
+	}
 }

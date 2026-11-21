@@ -30,6 +30,7 @@ $GLOBALS['_bricks_mcp_test_cache']            = [];
 $GLOBALS['_bricks_mcp_test_settings']         = [];
 $GLOBALS['_bricks_mcp_test_ext_object_cache'] = true;
 $GLOBALS['_bricks_mcp_test_transients']       = [];
+$GLOBALS['_bricks_mcp_test_options']          = [];
 
 // ---------------------------------------------------------------------------
 // WP_Error class.
@@ -120,19 +121,25 @@ if ( ! class_exists( 'WP_REST_Response' ) ) {
 // ---------------------------------------------------------------------------
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $option, mixed $default = false ): mixed {
-		if ( 'bricks_mcp_settings' === $option ) {
-			return $GLOBALS['_bricks_mcp_test_settings'] ?? $default;
+		if ( 'bricks_mcp_settings' === $option && ! array_key_exists( $option, $GLOBALS['_bricks_mcp_test_options'] ) ) {
+			return $GLOBALS['_bricks_mcp_test_settings'] ?: $default;
 		}
-		return $default;
+		return array_key_exists( $option, $GLOBALS['_bricks_mcp_test_options'] ) ? $GLOBALS['_bricks_mcp_test_options'][ $option ] : $default;
 	}
 }
 
 if ( ! function_exists( 'update_option' ) ) {
-	function update_option( string $option, mixed $value ): bool {
-		if ( 'bricks_mcp_settings' === $option ) {
-			$GLOBALS['_bricks_mcp_test_settings'] = $value;
-		}
+	function update_option( string $option, mixed $value, mixed $autoload = null ): bool {
+		$GLOBALS['_bricks_mcp_test_options'][ $option ] = $value;
 		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_option' ) ) {
+	function delete_option( string $option ): bool {
+		$existed = array_key_exists( $option, $GLOBALS['_bricks_mcp_test_options'] );
+		unset( $GLOBALS['_bricks_mcp_test_options'][ $option ] );
+		return $existed;
 	}
 }
 
@@ -388,7 +395,10 @@ if ( ! function_exists( 'wp_remote_retrieve_header' ) ) {
 }
 
 if ( ! function_exists( 'current_user_can' ) ) {
-	function current_user_can( string $capability ): bool {
+	function current_user_can( string $capability, mixed ...$args ): bool {
+		if ( isset( $GLOBALS['_bricks_mcp_test_caps'] ) && array_key_exists( $capability, $GLOBALS['_bricks_mcp_test_caps'] ) ) {
+			return (bool) $GLOBALS['_bricks_mcp_test_caps'][ $capability ];
+		}
 		return $GLOBALS['_bricks_mcp_test_current_user_can'] ?? true;
 	}
 }

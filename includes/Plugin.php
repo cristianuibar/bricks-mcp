@@ -16,12 +16,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Plugin class.
- *
- * The main orchestrator class for the plugin.
- * Uses singleton pattern to ensure only one instance runs.
+ * Boots the abilities, safety layer, updater and admin screens.
  */
 final class Plugin {
+
+	public const RECONNECT_NOTICE_OPTION = 'bricks_mcp_reconnect_notice';
 
 	/**
 	 * Plugin instance.
@@ -31,13 +30,6 @@ final class Plugin {
 	private static ?self $instance = null;
 
 	/**
-	 * MCP Server instance.
-	 *
-	 * @var MCP\Server|null
-	 */
-	private ?MCP\Server $mcp_server = null;
-
-	/**
 	 * Update checker instance.
 	 *
 	 * @var Updates\UpdateChecker|null
@@ -45,19 +37,12 @@ final class Plugin {
 	private ?Updates\UpdateChecker $update_checker = null;
 
 	/**
-	 * Admin settings instance.
-	 *
-	 * @var Admin\Settings|null
-	 */
-	private ?Admin\Settings $admin_settings = null;
-
-	/**
 	 * Get the singleton instance.
 	 *
 	 * @return self The plugin instance.
 	 */
 	public static function get_instance(): self {
-		if ( self::$instance === null ) {
+		if ( null === self::$instance ) {
 			self::$instance = new self();
 		}
 		return self::$instance;
@@ -93,101 +78,45 @@ final class Plugin {
 	 * @return void
 	 */
 	private function init(): void {
-		// Migrate stored settings (strip orphaned keys from previous versions).
-		$this->migrate_settings();
+		self::maybe_upgrade();
 
-		// Initialize internationalization.
-		$this->init_i18n();
+		( new I18n() )->init();
 
-		// Initialize update checker (unconditional — fires on admin and cron).
 		$this->update_checker = new Updates\UpdateChecker();
 		$this->update_checker->init();
 
-		// Initialize MCP server.
-		$this->init_mcp_server();
+		( new Abilities\Registrar() )->init();
+		( new Abilities\Guide() )->init();
+		( new Safety\RateLimiter() )->init();
+		( new Safety\CssGuard() )->init();
 
-		// Initialize admin functionality only in admin context.
 		if ( is_admin() ) {
-			$this->init_admin();
+			( new Admin\Settings() )->init();
+			( new Admin\SiteHealth() )->init();
+			( new Admin\Notices() )->init();
 		}
 
-		// Register hooks.
-		$this->register_hooks();
+		add_filter( 'plugin_action_links_' . BRICKS_MCP_PLUGIN_BASENAME, [ $this, 'add_action_links' ] );
 	}
 
 	/**
-	 * Initialize internationalization.
+	 * Run version upgrades once per version change.
 	 *
 	 * @return void
 	 */
-	private function init_i18n(): void {
-		$i18n = new I18n();
-		$i18n->init();
-	}
+	public static function maybe_upgrade(): void {
+		$stored = get_option( 'bricks_mcp_version', '' );
 
-	/**
-	 * Initialize MCP server.
-	 *
-	 * @return void
-	 */
-	private function init_mcp_server(): void {
-		$this->mcp_server = new MCP\Server();
-		$this->mcp_server->init();
-	}
-
-	/**
-	 * Initialize admin functionality.
-	 *
-	 * @return void
-	 */
-	private function init_admin(): void {
-		$this->admin_settings = new Admin\Settings();
-		$this->admin_settings->init();
-
-		$site_health = new Admin\SiteHealth();
-		$site_health->init();
-	}
-
-	/**
-	 * Migrate stored settings to strip orphaned keys from previous versions.
-	 *
-	 * Removes rate_limit, rate_limit_window, and allowed_endpoints keys
-	 * that are no longer used. No-op after first run (keys already removed).
-	 *
-	 * @return void
-	 */
-	private function migrate_settings(): void {
-		$settings = get_option( 'bricks_mcp_settings', [] );
-
-		if ( ! is_array( $settings ) ) {
+		if ( BRICKS_MCP_VERSION === $stored ) {
 			return;
 		}
 
-		$dirty = false;
-
-		foreach ( [ 'rate_limit', 'rate_limit_window', 'allowed_endpoints' ] as $key ) {
-			if ( array_key_exists( $key, $settings ) ) {
-				unset( $settings[ $key ] );
-				$dirty = true;
-			}
+		if ( is_string( $stored ) && '' !== $stored && version_compare( $stored, '2.0.0', '<' ) ) {
+			update_option( self::RECONNECT_NOTICE_OPTION, 1 );
+			Options::migrate_legacy();
 		}
 
-		if ( $dirty ) {
-			update_option( 'bricks_mcp_settings', $settings );
-		}
-	}
-
-	/**
-	 * Register plugin hooks.
-	 *
-	 * @return void
-	 */
-	private function register_hooks(): void {
-		// Add plugin action links.
-		add_filter(
-			'plugin_action_links_' . BRICKS_MCP_PLUGIN_BASENAME,
-			[ $this, 'add_action_links' ]
-		);
+		update_option( 'bricks_mcp_version', BRICKS_MCP_VERSION );
 	}
 
 	/**
@@ -215,15 +144,6 @@ final class Plugin {
 	 */
 	public function get_update_checker(): ?Updates\UpdateChecker {
 		return $this->update_checker;
-	}
-
-	/**
-	 * Get the MCP server instance.
-	 *
-	 * @return MCP\Server|null The MCP server instance.
-	 */
-	public function get_mcp_server(): ?MCP\Server {
-		return $this->mcp_server;
 	}
 
 	/**

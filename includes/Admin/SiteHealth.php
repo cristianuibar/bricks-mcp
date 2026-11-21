@@ -10,14 +10,11 @@ declare(strict_types=1);
 
 namespace BricksMCP\Admin;
 
-// Prevent direct access.
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
 /**
- * SiteHealth class.
- *
  * Registers Bricks MCP checks in the WordPress Site Health screen.
  */
 class SiteHealth {
@@ -38,18 +35,19 @@ class SiteHealth {
 	 * @return array<string, mixed> Modified tests with Bricks MCP checks added.
 	 */
 	public function register_tests( array $tests ): array {
-		$tests['direct']['bricks_mcp_rest_api'] = [
+		$tests['direct']['bricks_mcp_rest_api']       = [
 			'label' => __( 'Bricks MCP: REST API reachable', 'bricks-mcp' ),
 			'test'  => [ $this, 'test_rest_api' ],
 		];
-		$tests['direct']['bricks_mcp_app_passwords'] = [
+		$tests['direct']['bricks_mcp_app_passwords']  = [
 			'label' => __( 'Bricks MCP: Application Passwords', 'bricks-mcp' ),
 			'test'  => [ $this, 'test_app_passwords' ],
 		];
-		$tests['direct']['bricks_mcp_bricks_active'] = [
-			'label' => __( 'Bricks MCP: Bricks Builder active', 'bricks-mcp' ),
-			'test'  => [ $this, 'test_bricks_active' ],
+		$tests['direct']['bricks_mcp_adapter_active'] = [
+			'label' => __( 'Bricks MCP: MCP Adapter active', 'bricks-mcp' ),
+			'test'  => [ $this, 'test_mcp_adapter_active' ],
 		];
+
 		return $tests;
 	}
 
@@ -61,7 +59,8 @@ class SiteHealth {
 	public function test_rest_api(): array {
 		$check  = new Checks\RestApiReachableCheck();
 		$result = $check->run();
-		return $this->format_site_health_result( $result, 'security' );
+
+		return $this->format_site_health_result( $result );
 	}
 
 	/**
@@ -72,28 +71,63 @@ class SiteHealth {
 	public function test_app_passwords(): array {
 		$check  = new Checks\AppPasswordsAvailableCheck();
 		$result = $check->run();
-		return $this->format_site_health_result( $result, 'security' );
+
+		return $this->format_site_health_result( $result );
 	}
 
 	/**
-	 * Run the Bricks Builder active check.
+	 * Check whether the WordPress MCP Adapter plugin is active.
 	 *
 	 * @return array<string, mixed> Site Health result array.
 	 */
-	public function test_bricks_active(): array {
-		$check  = new Checks\BricksActiveCheck();
-		$result = $check->run();
-		return $this->format_site_health_result( $result, 'performance' );
+	public function test_mcp_adapter_active(): array {
+		if ( defined( 'WP_MCP_VERSION' ) ) {
+			return [
+				'label'       => __( 'MCP Adapter is active', 'bricks-mcp' ),
+				'status'      => 'good',
+				'badge'       => [
+					'label' => __( 'Bricks MCP', 'bricks-mcp' ),
+					'color' => 'blue',
+				],
+				'description' => sprintf(
+					'<p>%s</p>',
+					esc_html(
+						sprintf(
+							/* translators: %s: MCP Adapter version */
+							__( 'WordPress MCP Adapter v%s is active and exposing registered abilities.', 'bricks-mcp' ),
+							(string) constant( 'WP_MCP_VERSION' )
+						)
+					)
+				),
+				'actions'     => '',
+				'test'        => 'bricks_mcp_adapter_active',
+			];
+		}
+
+		return [
+			'label'       => __( 'MCP Adapter is not active', 'bricks-mcp' ),
+			'status'      => 'critical',
+			'badge'       => [
+				'label' => __( 'Bricks MCP', 'bricks-mcp' ),
+				'color' => 'red',
+			],
+			'description' => '<p>' . esc_html__( 'WordPress MCP Adapter is required to expose Bricks and Bricks MCP Extensions abilities to AI clients.', 'bricks-mcp' ) . '</p>',
+			'actions'     => sprintf(
+				'<p><a href="%s">%s</a></p>',
+				esc_url( admin_url( 'admin.php?page=bricks-ai' ) ),
+				esc_html__( 'Open Bricks AI Settings', 'bricks-mcp' )
+			),
+			'test'        => 'bricks_mcp_adapter_active',
+		];
 	}
 
 	/**
 	 * Convert a DiagnosticCheck result to WP Site Health format.
 	 *
 	 * @param array<string, mixed> $check_result Result from DiagnosticCheck::run().
-	 * @param string               $test_type    Site Health test type ('security' | 'performance').
 	 * @return array<string, mixed> Formatted Site Health result.
 	 */
-	private function format_site_health_result( array $check_result, string $test_type ): array {
+	private function format_site_health_result( array $check_result ): array {
 		$status_map = [
 			'pass'    => 'good',
 			'warn'    => 'recommended',

@@ -1,16 +1,40 @@
 # LocalWP Setup Guide
 
-This guide configures your LocalWP environment for stable MCP connections. Bricks MCP uses Server-Sent Events (SSE) for streaming, which requires PHP execution time and Nginx buffering adjustments.
+This guide prepares a LocalWP site for Bricks MCP Extensions and an AI client.
 
 ## Prerequisites
 
-- LocalWP installed with a running WordPress site
-- Bricks MCP plugin activated
-- Site using Nginx (LocalWP default)
+- A LocalWP site running WordPress 7.1+ and PHP 8.2+
+- Bricks Builder 2.5+ installed and active as the theme
+- The MCP Adapter plugin (`mcp-adapter`) installed and active
+- Bricks MCP Extensions installed and active
 
-## 1. Find Your Site's Configuration Directory
+## 1. Pretty permalinks
 
-LocalWP stores per-site server configuration under the site root:
+Open Settings > Permalinks and pick any structure except Plain. The adapter endpoint is a REST route and the diagnostics expect pretty permalinks.
+
+## 2. Application Passwords
+
+Application Passwords need HTTPS or a local environment type. In LocalWP, use one of:
+
+- Site > Overview > SSL > Trust, then use the `https://` site URL.
+- Set the environment type in `app/public/wp-config.php`: `define( 'WP_ENVIRONMENT_TYPE', 'local' );`
+
+## 3. Increase the PHP timeout
+
+Ability calls that import media or write large pages can run longer than 30 seconds. Raise the limits.
+
+**File:** `conf/php/php.ini.hbs` in the site folder, or `conf/php/php.ini` if your LocalWP version has no `.hbs` file:
+
+```ini
+max_execution_time = 300
+```
+
+> If a `.hbs` file exists, edit it. LocalWP regenerates the plain file from it on restart.
+
+If the PHP-FPM config has `request_terminate_timeout`, set it to `300` in the `[www]` section of the `.conf` file under `conf/php/`.
+
+Site folders by OS:
 
 | OS | Site root |
 |----|-----------|
@@ -18,59 +42,33 @@ LocalWP stores per-site server configuration under the site root:
 | Windows | `C:\Users\<username>\Local Sites\<site-name>\` |
 | Linux | `~/Local Sites/<site-name>/` |
 
-All configuration files are inside the `conf/` subdirectory.
+## 4. Restart the site
 
-## 2. Increase PHP-FPM Request Timeout
+In LocalWP, stop and start the site so the changes apply.
 
-The PHP-FPM `request_terminate_timeout` controls how long a PHP process can run before being killed. The default is often 30 seconds, which is too short for SSE streams.
+## 5. Connect your AI client
 
-**File:** `conf/php/php-fpm.conf`
+1. Open Bricks > Settings > AI.
+2. Create an Application Password and copy the client config.
+3. Paste it into your AI client.
 
-> **Note:** If `php-fpm.conf` is not at that path, look for any `.conf` file inside `conf/php/` that contains a `[www]` section header. Newer LocalWP versions with PHP 8.x may use a versioned subdirectory like `conf/php/8.x/php-fpm.d/www.conf`.
+The endpoint is `https://<site>.local/wp-json/mcp/mcp-adapter-default-server`. Use the `https://` URL if you trusted the certificate, otherwise the `http://` URL. Bricks > Bricks MCP Extensions shows the endpoint for your site.
 
-Find the `[www]` section and add or update:
+AI clients run on your machine, so the `.local` hostname resolves through LocalWP. If a client cannot reach the site, check that LocalWP is running and the site is started.
 
-```ini
-request_terminate_timeout = 300
-```
+## 6. Verify
 
-Also set `max_execution_time` in `conf/php/php.ini` (create the file if it doesn't exist):
-
-```ini
-max_execution_time = 300
-```
-
-## 3. Disable Nginx FastCGI Buffering
-
-SSE streams must not be buffered by Nginx, or events will be delayed until the buffer fills.
-
-**File:** `conf/nginx/site.conf.hbs`
-
-> **Important:** Edit the `.hbs` file, not `site.conf`. LocalWP regenerates `site.conf` from the `.hbs` template on restart, so direct edits to `site.conf` will be lost.
-
-Inside the `server { }` block (before or after the existing `location` directives), add:
-
-```nginx
-fastcgi_buffering off;
-```
-
-## 4. Restart the Site
-
-In LocalWP, right-click your site and select **Restart** (or click the Stop/Start toggle). This applies both the PHP-FPM and Nginx configuration changes.
-
-## 5. Verify
-
-1. Open **Settings > Bricks MCP** in WordPress admin
-2. Run the diagnostic checks — **PHP Execution Time** should show a green pass
-3. Test an MCP connection with a long-running tool call (e.g., listing many posts)
-
-If the diagnostic still shows a warning, double-check that you edited the correct files and restarted the site.
+1. Open Bricks > Bricks MCP Extensions.
+2. Click Run Diagnostics. HTTPS, permalinks, Application Passwords, REST reachability, MCP endpoint and PHP Execution Time should pass.
+3. Ask your AI client to list its tools. You should see `bricks/*` and `bricks-mcp/*` abilities.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Diagnostic still shows warning after restart | Edited wrong PHP config file | Search for the file containing `[www]` in `conf/php/` |
-| SSE stream drops after ~30 seconds | `request_terminate_timeout` not applied | Verify the directive is inside the `[www]` section, not outside it |
-| Events arrive in bursts instead of real-time | Nginx buffering still enabled | Confirm `fastcgi_buffering off;` is in `site.conf.hbs` (not `site.conf`) |
-| Config changes lost after restart | Edited `site.conf` instead of `site.conf.hbs` | Move the directive to the `.hbs` file |
+| MCP endpoint check fails | Adapter inactive, or plain permalinks | Activate `mcp-adapter` and set pretty permalinks. |
+| Application Passwords unavailable | Site is HTTP and not `local` | Trust the SSL certificate or set `WP_ENVIRONMENT_TYPE` to `local`. |
+| Loopback request failed | Site cannot reach its own URL | Check LocalWP's router mode and Site Health. |
+| PHP Execution Time warns after restart | Edited a generated file | Edit `php.ini.hbs` and restart again. |
+| `429` errors from an agent | Rate limit reached | Raise the limit in Bricks > Bricks MCP Extensions. |
+| Only `bricks-mcp/*` tools appear | Bricks abilities are switched off | Turn them on in Bricks > Settings > AI. |
