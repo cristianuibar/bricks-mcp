@@ -804,6 +804,10 @@ final class UpdateCheckerTest extends TestCase {
 				'response' => [ 'code' => 200 ],
 				'body'     => substr( hash( 'sha256', 'zip' ), 0, 63 ) . "  bricks-mcp.zip\n",
 			],
+			'overlong digest'  => [
+				'response' => [ 'code' => 200 ],
+				'body'     => hash( 'sha256', 'zip' ) . "0  bricks-mcp.zip\n",
+			],
 			'html page'        => [
 				'response' => [ 'code' => 200 ],
 				'body'     => '<html>' . str_repeat( 'z', 80 ) . '</html>',
