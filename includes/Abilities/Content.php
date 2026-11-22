@@ -910,7 +910,8 @@ final class Content implements Module {
 	 * Delete a post meta row only while it still holds the given value.
 	 *
 	 * WordPress's delete_metadata() selects the matching row IDs and then deletes those IDs, so a save between the two is lost.
-	 * One DELETE that matches the value cannot remove a newer save.
+	 * One DELETE that matches the value cannot remove a newer save. The value is compared as bytes: the column's collation
+	 * would match a save that only changed letter case or trailing spaces.
 	 *
 	 * @param int    $post_id  Post ID; a revision keeps its own row.
 	 * @param string $meta_key Meta key.
@@ -920,17 +921,15 @@ final class Content implements Module {
 	private function delete_post_meta_if_unchanged( int $post_id, string $meta_key, mixed $value ): void {
 		global $wpdb;
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.SlowDBQuery -- delete_metadata() cannot match the value in its DELETE; the meta cache is cleared below.
-		$wpdb->delete(
-			$wpdb->postmeta,
-			[
-				'post_id'    => $post_id,
-				'meta_key'   => $meta_key,
-				'meta_value' => maybe_serialize( $value ),
-			],
-			[ '%d', '%s', '%s' ]
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- delete_metadata() cannot match the value in its DELETE; the meta cache is cleared below.
+		$wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s AND meta_value = CAST( %s AS BINARY )",
+				$post_id,
+				$meta_key,
+				maybe_serialize( $value )
+			)
 		);
-		// phpcs:enable
 		wp_cache_delete( $post_id, 'post_meta' );
 	}
 

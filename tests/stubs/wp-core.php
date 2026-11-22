@@ -144,14 +144,16 @@ if ( ! function_exists( 'delete_metadata' ) ) {
 
 if ( ! class_exists( 'wpdb' ) ) {
 	/**
-	 * Minimal wpdb stub: delete() removes a post meta row from the in-memory store.
+	 * Minimal wpdb stub: deletes post meta rows from the in-memory store.
+	 *
+	 * Like MySQL's default utf8mb4 collations, a meta_value comparison ignores letter case and trailing spaces unless it is cast to BINARY.
 	 */
 	class wpdb {
 		/** @var string */
 		public string $postmeta = 'wp_postmeta';
 
 		/**
-		 * Delete the post meta row whose post_id, meta_key and serialized meta_value all match, in one step like one DELETE statement.
+		 * Delete the post meta row matching post_id and meta_key, and meta_value when given.
 		 *
 		 * @param string               $table  Table name.
 		 * @param array<string, mixed> $where  Column values.
@@ -159,15 +161,64 @@ if ( ! class_exists( 'wpdb' ) ) {
 		 * @return int|false Rows deleted.
 		 */
 		public function delete( string $table, array $where, ?array $format = null ): int|false {
-			$post_id = (int) $where['post_id'];
-			$meta    = $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] ?? [];
-			if ( $this->postmeta !== $table || ! array_key_exists( $where['meta_key'], $meta ) ) {
+			if ( $this->postmeta !== $table ) {
 				return 0;
 			}
-			if ( array_key_exists( 'meta_value', $where ) && (string) $where['meta_value'] !== (string) maybe_serialize( $meta[ $where['meta_key'] ] ) ) {
+			return $this->delete_post_meta_row( (int) $where['post_id'], (string) $where['meta_key'], isset( $where['meta_value'] ) ? (string) $where['meta_value'] : null, false );
+		}
+
+		/**
+		 * Replace %d and %s placeholders like wpdb::prepare(), quoting and escaping strings.
+		 *
+		 * @param string $query   Query with placeholders.
+		 * @param mixed  ...$args Values.
+		 * @return string
+		 */
+		public function prepare( string $query, mixed ...$args ): string {
+			return (string) preg_replace_callback(
+				'/%[ds]/',
+				static function ( array $placeholder ) use ( &$args ): string {
+					$arg = array_shift( $args );
+					return '%d' === $placeholder[0] ? (string) (int) $arg : "'" . addslashes( (string) $arg ) . "'";
+				},
+				$query
+			);
+		}
+
+		/**
+		 * Run a post meta DELETE on post_id, meta_key and meta_value; any other query fails the test.
+		 *
+		 * @param string $query Prepared query.
+		 * @return int|false Rows deleted.
+		 */
+		public function query( string $query ): int|false {
+			$quoted = "'((?:[^'\\\\]|\\\\.)*)'";
+			if ( ! preg_match( "/^DELETE FROM {$this->postmeta} WHERE post_id = (\\d+) AND meta_key = {$quoted} AND meta_value = (CAST\\( )?{$quoted}( AS BINARY \\))?$/", $query, $matches ) ) {
+				throw new LogicException( "Unsupported query: {$query}" );
+			}
+			return $this->delete_post_meta_row( (int) $matches[1], stripslashes( $matches[2] ), stripslashes( $matches[4] ), '' !== $matches[3] && '' !== ( $matches[5] ?? '' ) );
+		}
+
+		/**
+		 * Delete one post meta row in one step, like one DELETE statement.
+		 *
+		 * @param int         $post_id  Post ID.
+		 * @param string      $meta_key Meta key.
+		 * @param string|null $value    Serialized value to match, or null for any.
+		 * @param bool        $binary   Whether the value is compared byte for byte.
+		 * @return int Rows deleted.
+		 */
+		protected function delete_post_meta_row( int $post_id, string $meta_key, ?string $value, bool $binary ): int {
+			$meta = $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] ?? [];
+			if ( ! array_key_exists( $meta_key, $meta ) ) {
 				return 0;
 			}
-			unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $where['meta_key'] ] );
+			$stored  = (string) maybe_serialize( $meta[ $meta_key ] );
+			$collate = static fn( string $text ): string => $binary ? $text : mb_strtolower( rtrim( $text, ' ' ) );
+			if ( null !== $value && $collate( $value ) !== $collate( $stored ) ) {
+				return 0;
+			}
+			unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $meta_key ] );
 			return 1;
 		}
 	}
