@@ -131,7 +131,7 @@ final class UpdateChecker {
 		}
 
 		// Only return update data if remote version is newer.
-		if ( version_compare( $plugin_data['Version'], $remote['version'], '>=' ) ) {
+		if ( ! self::is_newer_version( (string) $plugin_data['Version'], (string) $remote['version'] ) ) {
 			return $update;
 		}
 
@@ -369,6 +369,20 @@ final class UpdateChecker {
 	 */
 	private static function offerable( array $remote ): array {
 		return self::is_release_asset_url( $remote['package'] ?? null ) && '' !== self::release_sha256( $remote ) ? $remote : [];
+	}
+
+	/**
+	 * Whether a release version takes precedence over the installed version.
+	 *
+	 * Build metadata ("+build.7") is ignored, as SemVer gives it no precedence:
+	 * 2.1.0+build.7 is not newer than 2.1.0+build.6 or 2.1.0.
+	 *
+	 * @param string $installed Installed plugin version.
+	 * @param string $release   Release version.
+	 * @return bool
+	 */
+	public static function is_newer_version( string $installed, string $release ): bool {
+		return version_compare( (string) preg_replace( '/\+.*\z/s', '', $installed ), (string) preg_replace( '/\+.*\z/s', '', $release ), '<' );
 	}
 
 	/**

@@ -111,7 +111,7 @@ final class Settings {
 		$status      = $this->get_connection_status();
 		$option      = Options::OPTION;
 		$update_data = ( new UpdateChecker() )->get_cached_update_data();
-		$has_update  = ! empty( $update_data['version'] ) && version_compare( BRICKS_MCP_VERSION, (string) $update_data['version'], '<' );
+		$has_update  = ! empty( $update_data['version'] ) && UpdateChecker::is_newer_version( BRICKS_MCP_VERSION, (string) $update_data['version'] );
 		?>
 		<div class="wrap bricks-mcp-wrap">
 			<h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
