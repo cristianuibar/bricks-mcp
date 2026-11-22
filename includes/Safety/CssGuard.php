@@ -294,24 +294,33 @@ final class CssGuard {
 	 * Either needs a start tag holding a `style` name. libxml truncates names at 100 characters,
 	 * so any character may come before that name. A start tag ends at its first `>` unless a
 	 * quoted attribute value holds it, so a quote before that `>` extends the tag to the end.
+	 * The string is searched in place, as it may be far larger than the HTML size limit.
 	 *
 	 * @param string $html String value.
 	 * @return bool True also when the regex fails.
 	 */
 	private function may_hold_style_markup( string $html ): bool {
 		$offset = 0;
+		$style  = -1;
 		while ( 1 === ( $found = preg_match( '~<[a-z_:.]~i', $html, $match, PREG_OFFSET_CAPTURE, $offset ) ) ) { // phpcs:ignore Generic.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition -- Loop over matches.
-			$start = $match[0][1];
-			$end   = strpos( $html, '>', $start );
-			$tag   = false === $end ? substr( $html, $start ) : substr( $html, $start, $end - $start + 1 );
-			if ( false !== strpbrk( $tag, '"\'' ) ) {
-				$tag = substr( $html, $start );
+			$start  = $match[0][1];
+			$end    = strpos( $html, '>', $start );
+			$length = ( false === $end ? strlen( $html ) : $end + 1 ) - $start;
+			if ( strcspn( $html, '"\'', $start, $length ) < $length ) {
 				$end = false;
 			}
 
-			$style = preg_match( '~style(?![a-z0-9_:.-])~i', $tag );
-			if ( 0 !== $style || false === $end ) {
-				return 0 !== $style;
+			// The first style name from the tag start, kept until a later tag starts after it.
+			if ( $style < $start ) {
+				$style_found = preg_match( '~style(?![a-z0-9_:.-])~i', $html, $style_match, PREG_OFFSET_CAPTURE, $start );
+				if ( 1 !== $style_found ) {
+					return false === $style_found;
+				}
+				$style = $style_match[0][1];
+			}
+
+			if ( false === $end || $style < $end ) {
+				return true;
 			}
 			$offset = $end + 1;
 		}
