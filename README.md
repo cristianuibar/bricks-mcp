@@ -169,6 +169,7 @@ Run `npm run destroy && npm start` after adding it, then activate the theme.
 | Command | Does |
 |---|---|
 | `npm start` / `npm stop` | Start or stop wp-env. |
+| `npm run logs:watch` | Follow the WordPress debug log (`logs/debug.log`). |
 | `npm run test` | Unit and integration tests inside wp-env. |
 | `npm run test:unit` | Unit tests only. |
 | `npm run lint` / `npm run lint:fix` | PHPCS check or fix. |
