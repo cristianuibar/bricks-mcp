@@ -30,24 +30,6 @@
 			.replace(/>/g, '&gt;');
 	}
 
-	function isNewer(current, remote) {
-		var a = current.split('.').map(Number);
-		var b = remote.split('.').map(Number);
-		var len = Math.max(a.length, b.length);
-
-		for (var i = 0; i < len; i++) {
-			var av = a[i] || 0;
-			var bv = b[i] || 0;
-			if (bv > av) {
-				return true;
-			}
-			if (bv < av) {
-				return false;
-			}
-		}
-		return false;
-	}
-
 	function initDiagnostics() {
 		var runBtn = document.getElementById('bricks-mcp-run-diagnostics');
 		var copyBtn = document.getElementById('bricks-mcp-copy-results');
@@ -185,7 +167,7 @@
 					var currentVersion = bricksMcpUpdates.currentVersion;
 					var html = '<strong>v' + escapeHtml(currentVersion) + '</strong>';
 
-					if (remoteVersion && isNewer(currentVersion, remoteVersion)) {
+					if (remoteVersion && data.data.update_available === true) {
 						html += ' &mdash; <span class="bricks-mcp-update-available">v' +
 							escapeHtml(remoteVersion) + ' available</span> ' +
 							'<a href="' + escapeAttr(bricksMcpUpdates.updateCoreUrl) + '">Update</a>';

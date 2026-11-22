@@ -441,7 +441,9 @@ final class UpdateChecker {
 	/**
 	 * AJAX handler for "Check Now" button.
 	 *
-	 * Clears all caches and forces a fresh update check.
+	 * Clears all caches and forces a fresh update check. Responds with the
+	 * offerable release data plus `update_available`, whether that release
+	 * takes precedence over the installed version.
 	 *
 	 * @return void
 	 */
@@ -463,6 +465,9 @@ final class UpdateChecker {
 
 		// Fetch fresh data; report only a release WordPress can be offered.
 		$data = self::offerable( $this->get_update_data() );
+
+		// Precedence is decided here, with the rule the Settings card and WordPress use, so build metadata never shows an update.
+		$data['update_available'] = isset( $data['version'] ) && self::is_newer_version( BRICKS_MCP_VERSION, (string) $data['version'] );
 
 		wp_send_json_success( $data );
 	}
