@@ -62,6 +62,7 @@ final class BuilderTest extends TestCase {
 		wp_register_ability(
 			'bricks/set-page-elements',
 			[
+				'input_schema'     => [ 'type' => 'object' ],
 				'execute_callback' => function ( array $input ): array|WP_Error {
 					++$this->save_count;
 					$this->assertSame( 42, $input['postId'] );

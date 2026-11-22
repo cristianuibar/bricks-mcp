@@ -83,7 +83,17 @@ namespace BricksMCP\Tests\Support {
 						return $input;
 					}
 
-					$is_valid = $this->apply_safety_filters( 'wp_ability_validate_input', true, $input, $name );
+					// Like core's validate_input(): input without a schema fails before the validate filter runs.
+					if ( empty( $args['input_schema'] ) ) {
+						if ( null !== $input ) {
+							return new WP_Error( 'ability_missing_input_schema' );
+						}
+						$is_valid = true;
+					} else {
+						$is_valid = rest_validate_value_from_schema( $input, $args['input_schema'], 'input' );
+						$is_valid = is_wp_error( $is_valid ) ? new WP_Error( 'ability_invalid_input', $is_valid->get_error_message() ) : true;
+						$is_valid = $this->apply_safety_filters( 'wp_ability_validate_input', $is_valid, $input, $name );
+					}
 					if ( false === $is_valid ) {
 						return new WP_Error( 'ability_invalid_input' );
 					}
