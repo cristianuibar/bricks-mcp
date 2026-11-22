@@ -22,13 +22,16 @@ use function BricksMCP\Tests\Support\make_safety_ability;
 
 final class CssGuardTest extends TestCase {
 
+	// Core validates input only against a declared schema, so fixtures declare a permissive one.
+	private const SCHEMA = [ 'type' => 'object' ];
+
 	private WP_Ability $ability;
 
 	protected function setUp(): void {
 		bricks_mcp_test_reset();
 		$GLOBALS['_bricks_mcp_test_safety_filters'] = [];
 		( new CssGuard() )->init();
-		$this->ability = make_safety_ability( 'bricks/update-page-settings', [ 'execute_callback' => static fn() => 'executed' ] );
+		$this->ability = make_safety_ability( 'bricks/update-page-settings', [ 'input_schema' => self::SCHEMA, 'execute_callback' => static fn() => 'executed' ] );
 	}
 
 	protected function tearDown(): void {
@@ -297,7 +300,7 @@ final class CssGuardTest extends TestCase {
 	}
 
 	public function test_allows_plain_text_with_style_and_less_than_signs(): void {
-		$ability = make_safety_ability( 'bricks-mcp/update-seo', [ 'execute_callback' => static fn() => 'executed' ] );
+		$ability = make_safety_ability( 'bricks-mcp/update-seo', [ 'input_schema' => self::SCHEMA, 'execute_callback' => static fn() => 'executed' ] );
 		$inputs  = [
 			[ 'title' => 'Summer styles < $50', 'description' => 'Find your style in < 10 minutes' ],
 			[ 'title' => 'Find your style in < 10 minutes', 'description' => 'A lifestyle guide to styles that last.' ],
@@ -323,6 +326,7 @@ final class CssGuardTest extends TestCase {
 		$ability = make_safety_ability(
 			'bricks/preview-site-edit-plan',
 			[
+				'input_schema'     => self::SCHEMA,
 				'meta'             => [ 'annotations' => [ 'readonly' => true ] ],
 				'execute_callback' => static fn() => 'previewed',
 			]
@@ -376,6 +380,16 @@ final class CssGuardTest extends TestCase {
 		self::assertSame( [ 'status' => 400, 'path' => 'settings.customCss', 'pattern' => 'size' ], $result->get_error_data() );
 	}
 
+	public function test_input_without_a_schema_is_rejected_before_the_guard(): void {
+		$ability = make_safety_ability( 'bricks/update-page-settings', [ 'execute_callback' => static fn() => 'executed' ] );
+		\BricksMCP\Safety\add_filter( 'wp_ability_normalize_input', static fn( $input ) => [ 'settings' => [ 'customCss' => str_repeat( ' ', 102401 ) ] ] + $input, PHP_INT_MAX, 1 );
+
+		$result = $ability->execute( [ 'postId' => 42 ] );
+
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( 'ability_missing_input_schema', $result->get_error_code() );
+	}
+
 	public function test_scans_input_an_earlier_validate_filter_passes_with_an_empty_error(): void {
 		\BricksMCP\Safety\add_filter( 'wp_ability_validate_input', static fn() => new WP_Error(), 10, 1 );
 
@@ -386,7 +400,7 @@ final class CssGuardTest extends TestCase {
 	}
 
 	public function test_skips_only_unchanged_stored_elements_while_a_move_saves_them(): void {
-		$save   = make_safety_ability( 'bricks/set-page-elements', [ 'execute_callback' => static fn() => 'saved' ] );
+		$save   = make_safety_ability( 'bricks/set-page-elements', [ 'input_schema' => self::SCHEMA, 'execute_callback' => static fn() => 'saved' ] );
 		$stored = [
 			[ 'id' => 'parent', 'name' => 'div', 'parent' => 0, 'children' => [ 'styled' ] ],
 			[ 'id' => 'styled', 'name' => 'text', 'parent' => 'parent', 'children' => [], 'settings' => [ '_cssCustom' => '@import "example.css";' ] ],
