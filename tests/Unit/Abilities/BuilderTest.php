@@ -276,8 +276,11 @@ final class BuilderTest extends TestCase {
 		update_option( 'bricks_global_classes_categories', $stored );
 		$ability = wp_get_ability( 'bricks-mcp/create-global-class-category' );
 
-		$too_long = $ability->execute( [ 'name' => str_repeat( 'ș', 101 ) ] );
+		$rejected = $ability->execute( [ 'name' => str_repeat( 'ș', 101 ) ] );
+		$too_long = $ability->get_args()['execute_callback']( [ 'name' => str_repeat( 'ș', 101 ) ] );
 
+		$this->assertInstanceOf( WP_Error::class, $rejected );
+		$this->assertSame( 'ability_invalid_input', $rejected->get_error_code() );
 		$this->assertInstanceOf( WP_Error::class, $too_long );
 		$this->assertSame( 'bricks_mcp_category_name_too_long', $too_long->get_error_code() );
 		$this->assertSame( 400, $too_long->get_error_data()['status'] );
@@ -289,10 +292,12 @@ final class BuilderTest extends TestCase {
 	}
 
 	public function test_category_creation_counts_name_length_in_utf8_under_another_internal_encoding(): void {
+		// Core's schema check counts in the internal encoding (WordPress sets it to the blog charset), so call the callback directly.
+		$create   = wp_get_ability( 'bricks-mcp/create-global-class-category' )->get_args()['execute_callback'];
 		$encoding = mb_internal_encoding();
 		mb_internal_encoding( 'ISO-8859-1' );
 		try {
-			$category = wp_get_ability( 'bricks-mcp/create-global-class-category' )->execute( [ 'name' => str_repeat( 'é', 100 ) ] );
+			$category = $create( [ 'name' => str_repeat( 'é', 100 ) ] );
 		} finally {
 			mb_internal_encoding( $encoding );
 		}

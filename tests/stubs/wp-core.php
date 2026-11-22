@@ -203,6 +203,12 @@ if ( ! class_exists( 'WP_Ability' ) ) {
 
 		public function execute( mixed $input = null ): mixed {
 			$GLOBALS['_bricks_mcp_test_ability_calls'][] = [ $this->name, $input ];
+			if ( is_array( $input ) && isset( $this->args['input_schema'] ) ) {
+				$valid = rest_validate_value_from_schema( $input, $this->args['input_schema'], 'input' );
+				if ( is_wp_error( $valid ) ) {
+					return new WP_Error( 'ability_invalid_input', sprintf( 'Ability "%s" has invalid input. Reason: %s', $this->name, $valid->get_error_message() ) );
+				}
+			}
 			if ( isset( $this->args['permission_callback'] ) ) {
 				$allowed = call_user_func( $this->args['permission_callback'], $input );
 				if ( true !== $allowed ) {
@@ -232,5 +238,47 @@ if ( ! function_exists( 'wp_register_ability_category' ) ) {
 if ( ! function_exists( 'wp_get_ability' ) ) {
 	function wp_get_ability( string $name ): ?WP_Ability {
 		return $GLOBALS['_bricks_mcp_test_abilities'][ $name ] ?? null;
+	}
+}
+
+if ( ! function_exists( 'rest_validate_value_from_schema' ) ) {
+	/**
+	 * Subset of core's schema validation that WP_Ability::execute() runs before the callbacks: object
+	 * required/additionalProperties/properties and string minLength/maxLength (counted like core, with mb_strlen).
+	 * Other keywords are not checked, so the stub only ever rejects input core rejects too.
+	 *
+	 * @param mixed                $value Value to validate.
+	 * @param array<string, mixed> $args  Schema.
+	 * @param string               $param Parameter name for messages.
+	 * @return true|WP_Error
+	 */
+	function rest_validate_value_from_schema( mixed $value, array $args, string $param = '' ): bool|WP_Error {
+		if ( is_array( $value ) && 'object' === ( $args['type'] ?? null ) ) {
+			foreach ( (array) ( $args['required'] ?? [] ) as $name ) {
+				if ( ! array_key_exists( $name, $value ) ) {
+					return new WP_Error( 'rest_property_required', sprintf( '%s is a required property of %s.', $name, $param ) );
+				}
+			}
+			$properties = $args['properties'] ?? [];
+			foreach ( $value as $name => $property ) {
+				if ( isset( $properties[ $name ] ) ) {
+					$valid = rest_validate_value_from_schema( $property, $properties[ $name ], $param . '[' . $name . ']' );
+					if ( is_wp_error( $valid ) ) {
+						return $valid;
+					}
+				} elseif ( false === ( $args['additionalProperties'] ?? true ) ) {
+					return new WP_Error( 'rest_additional_properties_forbidden', sprintf( '%s is not a valid property of Object.', $name ) );
+				}
+			}
+		}
+		if ( is_string( $value ) && 'string' === ( $args['type'] ?? null ) ) {
+			if ( isset( $args['minLength'] ) && mb_strlen( $value ) < $args['minLength'] ) {
+				return new WP_Error( 'rest_too_short', sprintf( '%s must be at least %d characters long.', $param, $args['minLength'] ) );
+			}
+			if ( isset( $args['maxLength'] ) && mb_strlen( $value ) > $args['maxLength'] ) {
+				return new WP_Error( 'rest_too_long', sprintf( '%s must be at most %d characters long.', $param, $args['maxLength'] ) );
+			}
+		}
+		return true;
 	}
 }
