@@ -31,6 +31,9 @@ $GLOBALS['_bricks_mcp_test_settings']         = [];
 $GLOBALS['_bricks_mcp_test_ext_object_cache'] = true;
 $GLOBALS['_bricks_mcp_test_transients']       = [];
 $GLOBALS['_bricks_mcp_test_options']          = [];
+// Frozen clock (Unix seconds); when set, transients expire against it.
+$GLOBALS['_bricks_mcp_test_now']                = null;
+$GLOBALS['_bricks_mcp_test_transient_expiries'] = [];
 
 // ---------------------------------------------------------------------------
 // WP_Error class.
@@ -192,6 +195,11 @@ if ( ! function_exists( 'wp_using_ext_object_cache' ) ) {
 // ---------------------------------------------------------------------------
 if ( ! function_exists( 'get_transient' ) ) {
 	function get_transient( string $transient ): mixed {
+		$now    = $GLOBALS['_bricks_mcp_test_now'] ?? null;
+		$expiry = $GLOBALS['_bricks_mcp_test_transient_expiries'][ $transient ] ?? null;
+		if ( null !== $now && null !== $expiry && $now >= $expiry ) {
+			delete_transient( $transient );
+		}
 		return $GLOBALS['_bricks_mcp_test_transients'][ $transient ] ?? false;
 	}
 }
@@ -199,13 +207,19 @@ if ( ! function_exists( 'get_transient' ) ) {
 if ( ! function_exists( 'set_transient' ) ) {
 	function set_transient( string $transient, mixed $value, int $expiration = 0 ): bool {
 		$GLOBALS['_bricks_mcp_test_transients'][ $transient ] = $value;
+		$now = $GLOBALS['_bricks_mcp_test_now'] ?? null;
+		if ( null !== $now && $expiration > 0 ) {
+			$GLOBALS['_bricks_mcp_test_transient_expiries'][ $transient ] = $now + $expiration;
+		} else {
+			unset( $GLOBALS['_bricks_mcp_test_transient_expiries'][ $transient ] );
+		}
 		return true;
 	}
 }
 
 if ( ! function_exists( 'delete_transient' ) ) {
 	function delete_transient( string $transient ): bool {
-		unset( $GLOBALS['_bricks_mcp_test_transients'][ $transient ] );
+		unset( $GLOBALS['_bricks_mcp_test_transients'][ $transient ], $GLOBALS['_bricks_mcp_test_transient_expiries'][ $transient ] );
 		return true;
 	}
 }
