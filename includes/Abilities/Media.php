@@ -39,6 +39,10 @@ final class Media implements Module {
 
 	private const UNSPLASH_META_KEY = '_unsplash_photo_id';
 
+	private const UNSPLASH_PHOTOGRAPHER_META_KEY = '_unsplash_photographer';
+
+	private const UNSPLASH_PHOTOGRAPHER_URL_META_KEY = '_unsplash_photographer_url';
+
 	private const GLOBAL_SETTINGS_OPTION = 'bricks_global_settings';
 
 	private const ADOBE_FONTS_OPTION = 'bricks_adobe_fonts';
@@ -322,6 +326,10 @@ final class Media implements Module {
 				]
 			);
 		}
+
+		// Kept so a duplicate import can return the same attribution; the caption may be edited later.
+		update_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, $photographer );
+		update_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, $photographer_url );
 
 		if ( $post_id > 0 ) {
 			$attached = $this->attach_to_post( $attachment_id, $post_id );
@@ -646,8 +654,14 @@ final class Media implements Module {
 					'height'          => [ 'type' => 'integer' ],
 					'postId'          => [ 'type' => 'integer' ],
 					'unsplashPhotoId' => [ 'type' => 'string' ],
-					'photographer'    => [ 'type' => 'string' ],
-					'photographerUrl' => [ 'type' => 'string' ],
+					'photographer'    => [
+						'type'        => [ 'string', 'null' ],
+						'description' => __( 'Photographer name; null when a duplicate attachment predates stored attribution.', 'bricks-mcp' ),
+					],
+					'photographerUrl' => [
+						'type'        => [ 'string', 'null' ],
+						'description' => __( 'Photographer profile URL; null when a duplicate attachment predates stored attribution.', 'bricks-mcp' ),
+					],
 					'duplicate'       => [ 'type' => 'boolean' ],
 				],
 			],
@@ -1041,9 +1055,21 @@ final class Media implements Module {
 	 * @return array<string, mixed>
 	 */
 	private function format_existing_attachment( int $attachment_id, string $photo_id ): array {
-		$post = get_post( $attachment_id );
-		$url  = wp_get_attachment_url( $attachment_id );
-		$alt  = get_post_meta( $attachment_id, '_wp_attachment_image_alt', true );
+		$post     = get_post( $attachment_id );
+		$url      = wp_get_attachment_url( $attachment_id );
+		$alt      = get_post_meta( $attachment_id, '_wp_attachment_image_alt', true );
+		$metadata = wp_get_attachment_metadata( $attachment_id );
+		$metadata = is_array( $metadata ) ? $metadata : [];
+
+		// Attachments imported before attribution meta existed have no stored URL: report them as unknown (null).
+		$photographer     = null;
+		$photographer_url = get_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
+		if ( is_string( $photographer_url ) && '' !== $photographer_url ) {
+			$name         = get_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, true );
+			$photographer = is_string( $name ) ? $name : '';
+		} else {
+			$photographer_url = null;
+		}
 
 		return [
 			'attachmentId'    => $attachment_id,
@@ -1052,12 +1078,12 @@ final class Media implements Module {
 			'alt'             => is_string( $alt ) ? $alt : '',
 			'caption'         => $post ? (string) ( $post->post_excerpt ?? '' ) : '',
 			'mimeType'        => $post ? (string) ( $post->post_mime_type ?? '' ) : '',
-			'width'           => 0,
-			'height'          => 0,
+			'width'           => (int) ( $metadata['width'] ?? 0 ),
+			'height'          => (int) ( $metadata['height'] ?? 0 ),
 			'postId'          => $post ? (int) ( $post->post_parent ?? 0 ) : 0,
 			'unsplashPhotoId' => $photo_id,
-			'photographer'    => '',
-			'photographerUrl' => '',
+			'photographer'    => $photographer,
+			'photographerUrl' => $photographer_url,
 			'duplicate'       => true,
 		];
 	}

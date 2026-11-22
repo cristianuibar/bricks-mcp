@@ -191,6 +191,10 @@ final class MediaTest extends TestCase {
 			[
 				'_unsplash_photo_id'       => 'dup_99',
 				'_wp_attachment_image_alt' => 'Existing alt',
+				'_wp_attachment_metadata'  => [
+					'width'  => 1600,
+					'height' => 900,
+				],
 			]
 		);
 		$GLOBALS['_bricks_mcp_test_get_posts_return'] = [ 42 ];
@@ -216,8 +220,113 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 'Existing alt', $result['alt'] );
 		$this->assertSame( 'Photo by Jane Doe on Unsplash', $result['caption'] );
 		$this->assertSame( 7, $result['postId'] );
+		$this->assertSame( 1600, $result['width'] );
+		$this->assertSame( 900, $result['height'] );
+		// Imported before attribution meta was stored: unknown, not a silent empty string.
+		$this->assertNull( $result['photographer'] );
+		$this->assertNull( $result['photographerUrl'] );
 		$this->assertFalse( $upload_called );
 		$this->assertEmpty( $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] );
+	}
+
+	/**
+	 * Importing the same photo twice returns the same sizing and attribution on the duplicate call (#49).
+	 *
+	 * @return void
+	 */
+	public function test_import_unsplash_twice_returns_same_dimensions_and_attribution(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'        => 15,
+				'post_type' => 'page',
+			]
+		);
+		bricks_mcp_test_add_post(
+			[
+				'ID'             => 17,
+				'post_type'      => 'attachment',
+				'post_status'    => 'inherit',
+				'post_mime_type' => 'image/jpeg',
+				'post_parent'    => 0,
+			]
+		);
+
+		$image_url = 'https://images.unsplash.com/photo-alpine?w=1080';
+
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url ): array {
+			if ( 'https://api.unsplash.com/photos/Tr-faG4v38w' === $url ) {
+				return [
+					'response' => [ 'code' => 200 ],
+					'headers'  => [ 'content-type' => 'application/json' ],
+					'body'     => (string) wp_json_encode(
+						[
+							'id'    => 'Tr-faG4v38w',
+							'urls'  => [ 'regular' => $image_url ],
+							'user'  => [
+								'name'  => 'Sam Peak',
+								'links' => [ 'html' => 'https://unsplash.com/@sampeak' ],
+							],
+							'links' => [ 'download_location' => 'https://api.unsplash.com/photos/Tr-faG4v38w/download' ],
+						]
+					),
+				];
+			}
+
+			return [
+				'response' => [ 'code' => 200 ],
+				'headers'  => [ 'content-type' => 'image/jpeg' ],
+				'body'     => "\xFF\xD8\xFF\xE0alpine",
+			];
+		};
+
+		wp_register_ability(
+			'bricks/upload-media',
+			[
+				'execute_callback' => static function ( array $input ): array {
+					// WordPress stores the generated image sizes as attachment metadata on upload.
+					update_post_meta(
+						17,
+						'_wp_attachment_metadata',
+						[
+							'width'  => 1080,
+							'height' => 540,
+						]
+					);
+					return [
+						'id'       => 17,
+						'url'      => 'https://example.test/uploads/17.jpg',
+						'title'    => $input['title'],
+						'mimeType' => 'image/jpeg',
+						'width'    => 1080,
+						'height'   => 540,
+					];
+				},
+			]
+		);
+
+		$input = [
+			'photoId' => 'Tr-faG4v38w',
+			'postId'  => 15,
+		];
+		$first = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( $input );
+
+		$this->assertIsArray( $first );
+		$this->assertFalse( $first['duplicate'] );
+
+		$GLOBALS['_bricks_mcp_test_get_posts_return'] = [ 17 ];
+		$second = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( $input );
+
+		$this->assertIsArray( $second );
+		$this->assertTrue( $second['duplicate'] );
+		$this->assertSame( 17, $second['attachmentId'] );
+		foreach ( [ 'width', 'height', 'photographer', 'photographerUrl' ] as $field ) {
+			$this->assertSame( $first[ $field ], $second[ $field ], $field );
+		}
+		$this->assertSame( 1080, $second['width'] );
+		$this->assertSame( 540, $second['height'] );
+		$this->assertSame( 'Sam Peak', $second['photographer'] );
+		$this->assertSame( 'https://unsplash.com/@sampeak?utm_source=bricks_mcp&utm_medium=referral', $second['photographerUrl'] );
 	}
 
 	/**
