@@ -20,22 +20,56 @@ use PHPUnit\Framework\TestCase;
 final class HttpsCheckTest extends TestCase {
 
 	/**
-	 * Reset stubs before each test.
+	 * Markers of the hosting providers HostingProviderCheck tries before Pantheon.
+	 *
+	 * @var array<string>
+	 */
+	private const OTHER_HOSTING_MARKERS = [ 'IS_WP_ENGINE', 'KINSTA_CACHE_ZONE', 'FLYWHEEL_CONFIG_DIR', 'cw_allowed_ip', 'GD_SYSTEM_PLUGIN_DIR', 'SG_Security' ];
+
+	/**
+	 * Hosting markers inherited from the process, restored after each test.
+	 *
+	 * @var array<string, array{server: mixed, env: string|false}>
+	 */
+	private array $inherited_markers = [];
+
+	/**
+	 * Reset stubs and hide inherited hosting markers before each test.
 	 *
 	 * @return void
 	 */
 	protected function setUp(): void {
 		bricks_mcp_test_reset_admin();
 		unset( $_SERVER['HTTP_X_FORWARDED_PROTO'], $_SERVER['PANTHEON_ENVIRONMENT'] );
+
+		// A marker in the runner's environment would make the check select another provider.
+		$this->inherited_markers = [];
+		foreach ( self::OTHER_HOSTING_MARKERS as $marker ) {
+			$this->inherited_markers[ $marker ] = [
+				'server' => $_SERVER[ $marker ] ?? null,
+				'env'    => getenv( $marker ),
+			];
+			unset( $_SERVER[ $marker ] );
+			putenv( $marker );
+		}
 	}
 
 	/**
-	 * Clean up request globals.
+	 * Clean up request globals and restore inherited hosting markers.
 	 *
 	 * @return void
 	 */
 	protected function tearDown(): void {
 		unset( $_SERVER['HTTP_X_FORWARDED_PROTO'], $_SERVER['PANTHEON_ENVIRONMENT'] );
+
+		foreach ( $this->inherited_markers as $marker => $saved ) {
+			if ( null !== $saved['server'] ) {
+				$_SERVER[ $marker ] = $saved['server'];
+			}
+			if ( false !== $saved['env'] ) {
+				putenv( $marker . '=' . $saved['env'] );
+			}
+		}
 	}
 
 	/**
