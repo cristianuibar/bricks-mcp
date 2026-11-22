@@ -22,6 +22,19 @@ namespace {
 		}
 	}
 
+	if ( ! function_exists( 'wp_get_attachment_metadata' ) ) {
+		/**
+		 * Return attachment metadata from `_wp_attachment_metadata`, as WordPress core does.
+		 *
+		 * @param int $attachment_id Attachment post ID.
+		 * @return array<string, mixed>|false
+		 */
+		function wp_get_attachment_metadata( int $attachment_id = 0 ): array|false {
+			$metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+			return is_array( $metadata ) ? $metadata : false;
+		}
+	}
+
 	if ( ! function_exists( 'wp_max_upload_size' ) ) {
 		/**
 		 * Return configurable site max upload size for unit tests.
