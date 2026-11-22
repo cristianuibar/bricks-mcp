@@ -15,6 +15,8 @@ logs/*
 .phpunit.cache/
 .phpunit.result.cache
 coverage/
+# DebugLogAccessTest probe, left only if PHPUnit dies before requesting it
+bricks-mcp-log-probe-*.php
 
 # IDE
 .idea/

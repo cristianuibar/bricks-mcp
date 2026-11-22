@@ -25,31 +25,18 @@ final class DebugLogAccessTest extends TestCase {
 	private const SERVER = 'tests-wordpress';
 
 	/**
-	 * Logs a canary through the requesting site's WordPress and reports where it went, or takes it back out.
+	 * Logs a canary through the requesting site's WordPress and reports where it went.
 	 *
 	 * Both sites serve the plugin checkout, so each one runs it with its own wp-config.php.
+	 * It deletes itself before doing anything, so it runs once, and it only appends
+	 * to the log: the canary line stays there like any other notice.
 	 */
 	private const PROBE = <<<'PHP'
 <?php
+unlink( __FILE__ );
 require dirname( __DIR__, 3 ) . '/wp-load.php';
 
-$log = (string) ini_get( 'error_log' );
-
-if ( isset( $_GET['before'], $_GET['after'] ) ) {
-	clearstatcache( true, $log );
-	if ( is_file( $log ) && filesize( $log ) === (int) $_GET['after'] ) {
-		if ( '' === $_GET['before'] ) {
-			unlink( $log );
-		} else {
-			$handle = fopen( $log, 'r+' );
-			ftruncate( $handle, (int) $_GET['before'] );
-			fclose( $handle );
-		}
-	}
-	exit;
-}
-
-$before  = is_file( $log ) ? filesize( $log ) : '';
+$log     = (string) ini_get( 'error_log' );
 $written = error_log( CANARY );
 clearstatcache( true, $log );
 
@@ -57,9 +44,8 @@ echo PHP_EOL, wp_json_encode(
 	[
 		'log'     => $log,
 		'root'    => ABSPATH,
+		'file'    => is_file( $log ),
 		'written' => $written,
-		'before'  => $before,
-		'after'   => is_file( $log ) ? filesize( $log ) : '',
 	]
 );
 PHP;
@@ -86,7 +72,7 @@ PHP;
 	 * @dataProvider sites
 	 */
 	public function test_visitor_cannot_read_configured_debug_log( string $server ): void {
-		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
+		$canary = 'DebugLogAccessTest diagnostic canary ' . bin2hex( random_bytes( 8 ) );
 		$probe  = 'bricks-mcp-log-probe-' . bin2hex( random_bytes( 8 ) ) . '.php';
 		$file   = dirname( __DIR__, 2 ) . '/' . $probe;
 		$url    = '/wp-content/plugins/bricks-mcp/' . $probe;
@@ -100,18 +86,16 @@ PHP;
 			$site  = json_decode( (string) end( $lines ), true );
 			$this->assertIsArray( $site, "Unexpected probe output on {$server}:\n{$body}" );
 
-			try {
-				if ( ! is_int( $site['after'] ) || ! str_starts_with( $site['log'], $site['root'] ) ) {
-					$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
-				}
-
-				$this->assertTrue( $site['written'], "WordPress on {$server} could not write {$site['log']}." );
-				$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
-			} finally {
-				$this->get( $server, $url . '?' . http_build_query( [ 'before' => $site['before'], 'after' => $site['after'] ] ) );
+			if ( ! $site['file'] || ! str_starts_with( $site['log'], $site['root'] ) ) {
+				$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
 			}
+
+			$this->assertTrue( $site['written'], "WordPress on {$server} could not write {$site['log']}." );
+			$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
 		} finally {
-			unlink( $file );
+			if ( file_exists( $file ) ) {
+				unlink( $file );
+			}
 		}
 	}
 
