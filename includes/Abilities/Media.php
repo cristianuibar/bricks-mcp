@@ -326,13 +326,16 @@ final class Media implements Module {
 			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
 			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
 			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
+				// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
+				$error_data = [ 'status' => 500 ];
+				if ( ! wp_delete_attachment( $attachment_id, true ) ) {
+					$error_data['attachmentId'] = $attachment_id;
+				}
+
 				return new \WP_Error(
 					'bricks_mcp_unsplash_meta_failed',
 					__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
-					[
-						'status'       => 500,
-						'attachmentId' => $attachment_id,
-					]
+					$error_data
 				);
 			}
 		}

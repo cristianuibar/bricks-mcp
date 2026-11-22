@@ -109,6 +109,23 @@ namespace BricksMCP\Abilities {
 		}
 	}
 
+	if ( ! function_exists( __NAMESPACE__ . '\wp_delete_attachment' ) ) {
+		/**
+		 * Allow Media tests to simulate a failed attachment delete without affecting other tests.
+		 *
+		 * @param int  $post_id      Attachment ID.
+		 * @param bool $force_delete Whether to bypass the trash.
+		 * @return \WP_Post|false|null
+		 */
+		function wp_delete_attachment( int $post_id, bool $force_delete = false ): \WP_Post|false|null {
+			if ( ! empty( $GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] ) ) {
+				return false;
+			}
+
+			return \wp_delete_attachment( $post_id, $force_delete );
+		}
+	}
+
 	if ( ! function_exists( __NAMESPACE__ . '\wp_update_post' ) ) {
 		/**
 		 * Allow Media tests to simulate failed post updates without affecting other tests.
