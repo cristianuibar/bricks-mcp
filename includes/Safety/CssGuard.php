@@ -101,29 +101,36 @@ final class CssGuard {
 	/**
 	 * Register the CSS guard filter.
 	 *
-	 * Runs last on the normalized input, so schema defaults and values added by other
-	 * normalize filters are checked before validation, permission checks and execution.
+	 * Validation receives the input after every normalize filter, whatever its priority, so
+	 * schema defaults and values added by those filters are checked before permission checks
+	 * and execution.
 	 *
 	 * @return void
 	 */
 	public function init(): void {
-		add_filter( 'wp_ability_normalize_input', [ $this, 'check' ], PHP_INT_MAX, 3 );
+		add_filter( 'wp_ability_validate_input', [ $this, 'check' ], PHP_INT_MAX, 3 );
 	}
 
 	/**
 	 * Validate CSS in the normalized ability input.
 	 *
-	 * @param mixed       $input Normalized ability input, or an error from an earlier filter.
-	 * @param string      $name Ability name.
-	 * @param \WP_Ability $ability Ability being executed.
-	 * @return mixed
+	 * @param mixed  $is_valid Validation result so far.
+	 * @param mixed  $input Normalized ability input.
+	 * @param string $name Ability name.
+	 * @return mixed Validation result, or the CSS error.
 	 */
-	public function check( mixed $input, string $name, \WP_Ability $ability ): mixed {
-		if ( is_wp_error( $input ) || ! Options::get()['css_guard'] || true === ( $ability->get_meta()['annotations']['readonly'] ?? null ) ) {
-			return $input;
+	public function check( mixed $is_valid, mixed $input, string $name ): mixed {
+		// Core rejects only false and a WP_Error holding errors, so any other result is scanned.
+		if ( false === $is_valid || ( is_wp_error( $is_valid ) && $is_valid->has_errors() ) || ! Options::get()['css_guard'] ) {
+			return $is_valid;
 		}
 
-		return $this->scan_input( 'bricks/set-page-elements' === $name ? $this->without_stored_elements( $input ) : $input ) ?? $input;
+		$ability = wp_get_ability( $name );
+		if ( null !== $ability && true === ( $ability->get_meta()['annotations']['readonly'] ?? null ) ) {
+			return $is_valid;
+		}
+
+		return $this->scan_input( 'bricks/set-page-elements' === $name ? $this->without_stored_elements( $input ) : $input ) ?? $is_valid;
 	}
 
 	/**

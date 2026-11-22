@@ -63,7 +63,7 @@ namespace BricksMCP\Tests\Support {
 
 	if ( ! function_exists( __NAMESPACE__ . '\make_safety_ability' ) ) {
 		function make_safety_ability( string $name, array $args ): WP_Ability {
-			return new class( $name, $args ) extends WP_Ability {
+			$ability = new class( $name, $args ) extends WP_Ability {
 				public function execute( mixed $input = null ): mixed {
 					$name = $this->get_name();
 					do_action( 'wp_ability_invoked', $name, $input, $this );
@@ -81,6 +81,14 @@ namespace BricksMCP\Tests\Support {
 					$input = $this->apply_safety_filters( 'wp_ability_normalize_input', $input, $name, $this );
 					if ( is_wp_error( $input ) ) {
 						return $input;
+					}
+
+					$is_valid = $this->apply_safety_filters( 'wp_ability_validate_input', true, $input, $name );
+					if ( false === $is_valid ) {
+						return new WP_Error( 'ability_invalid_input' );
+					}
+					if ( is_wp_error( $is_valid ) && $is_valid->has_errors() ) {
+						return $is_valid;
 					}
 
 					if ( isset( $args['permission_callback'] ) && true !== $args['permission_callback']( $input ) ) {
@@ -108,6 +116,9 @@ namespace BricksMCP\Tests\Support {
 					return $value;
 				}
 			};
+
+			$GLOBALS['_bricks_mcp_test_abilities'][ $name ] = $ability;
+			return $ability;
 		}
 	}
 }

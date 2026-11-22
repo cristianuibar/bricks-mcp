@@ -53,7 +53,7 @@ Long building sessions can make many calls. Raise the limit for trusted users if
 
 ## CSS guard
 
-A filter on `wp_ability_normalize_input` scans ability inputs before they are validated and run. It runs at the last priority, so it sees schema defaults and values that other normalize filters add. It is on by default and can be switched off under Bricks > Bricks MCP Extensions.
+A filter on `wp_ability_validate_input` scans ability inputs before permission checks and execution. Validation receives the input after every `wp_ability_normalize_input` filter, whatever its priority, so the guard sees schema defaults and values that normalize filters add. An earlier validation error is passed through. It is on by default and can be switched off under Bricks > Bricks MCP Extensions.
 
 - It applies to every ability that writes, including the Bricks abilities. Abilities annotated read-only are skipped.
 - It checks every string below the fields `customCss` and `_cssCustom` (including their `:breakpoint` and pseudo-class variants), `css`, `cssCode` and `stylesheet`, at any depth.
