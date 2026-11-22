@@ -859,7 +859,7 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
-	 * Clearing the last Slim SEO field keeps a record saved after the clear read it.
+	 * Clearing the last Slim SEO field keeps a record saved after the clear read it, up to the delete itself.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
@@ -873,18 +873,24 @@ final class ContentTest extends TestCase {
 			'noindex'        => 1,
 			'facebook_image' => 'https://example.com/fb.jpg',
 		];
-		// Slim SEO's editor saves the post between the clear's read and its delete.
-		add_filter(
-			'delete_post_metadata',
-			static function ( mixed $check, int $object_id, string $meta_key ) use ( $saved ): mixed {
-				if ( 'slim_seo' === $meta_key ) {
-					update_metadata( 'post', $object_id, 'slim_seo', $saved );
-				}
-				return $check;
-			},
-			10,
-			3
-		);
+		// Slim SEO's editor saves the post after the clear has read and matched the row, just before the row is deleted.
+		$GLOBALS['wpdb'] = new class( $saved ) extends \wpdb {
+			/**
+			 * @param array<string, mixed> $saved Record the editor saves.
+			 */
+			public function __construct( private array $saved ) {}
+
+			/**
+			 * @param string               $table  Table name.
+			 * @param array<string, mixed> $where  Column values.
+			 * @param string[]|null        $format Formats.
+			 * @return int|false
+			 */
+			public function delete( string $table, array $where, ?array $format = null ): int|false {
+				update_metadata( 'post', (int) $where['post_id'], 'slim_seo', $this->saved );
+				return parent::delete( $table, $where, $format );
+			}
+		};
 
 		$result = $this->call(
 			'bricks-mcp/update-seo',

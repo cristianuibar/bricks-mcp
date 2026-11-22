@@ -123,23 +123,58 @@ if ( ! function_exists( 'update_metadata' ) ) {
 if ( ! function_exists( 'delete_metadata' ) ) {
 	function delete_metadata( string $meta_type, int $object_id, string $meta_key, mixed $meta_value = '', bool $delete_all = false ): bool {
 		$meta_value = wp_unslash( $meta_value );
-		// Like WordPress, a callback on this filter runs after the caller's read and can short-circuit the delete.
-		$check = bricks_mcp_test_run_filter( "delete_{$meta_type}_metadata", null, $object_id, $meta_key, $meta_value, $delete_all );
-		if ( null !== $check ) {
-			return (bool) $check;
-		}
-		$meta = $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ?? [];
+		$meta       = $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ?? [];
 		if ( ! array_key_exists( $meta_key, $meta ) ) {
 			return false;
 		}
-		// Like WordPress, a given value deletes the row only while its stored, serialized value still matches.
-		$stored = static fn( mixed $value ): string => is_array( $value ) || is_object( $value ) ? serialize( $value ) : (string) $value;
-		if ( '' !== $meta_value && null !== $meta_value && false !== $meta_value && $stored( $meta_value ) !== $stored( $meta[ $meta_key ] ) ) {
+		// Like WordPress, a given value selects the row only while its stored, serialized value matches.
+		if ( '' !== $meta_value && null !== $meta_value && false !== $meta_value && (string) maybe_serialize( $meta_value ) !== (string) maybe_serialize( $meta[ $meta_key ] ) ) {
 			return false;
 		}
-		unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ][ $meta_key ] );
-		return true;
+		// Then, like WordPress, it deletes the selected row by ID, whatever the row holds by now.
+		return (bool) $GLOBALS['wpdb']->delete(
+			$GLOBALS['wpdb']->postmeta,
+			[
+				'post_id'  => $object_id,
+				'meta_key' => $meta_key,
+			]
+		);
 	}
+}
+
+if ( ! class_exists( 'wpdb' ) ) {
+	/**
+	 * Minimal wpdb stub: delete() removes a post meta row from the in-memory store.
+	 */
+	class wpdb {
+		/** @var string */
+		public string $postmeta = 'wp_postmeta';
+
+		/**
+		 * Delete the post meta row whose post_id, meta_key and serialized meta_value all match, in one step like one DELETE statement.
+		 *
+		 * @param string               $table  Table name.
+		 * @param array<string, mixed> $where  Column values.
+		 * @param string[]|null        $format Formats.
+		 * @return int|false Rows deleted.
+		 */
+		public function delete( string $table, array $where, ?array $format = null ): int|false {
+			$post_id = (int) $where['post_id'];
+			$meta    = $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] ?? [];
+			if ( $this->postmeta !== $table || ! array_key_exists( $where['meta_key'], $meta ) ) {
+				return 0;
+			}
+			if ( array_key_exists( 'meta_value', $where ) && (string) $where['meta_value'] !== (string) maybe_serialize( $meta[ $where['meta_key'] ] ) ) {
+				return 0;
+			}
+			unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $where['meta_key'] ] );
+			return 1;
+		}
+	}
+}
+
+if ( ! isset( $GLOBALS['wpdb'] ) ) {
+	$GLOBALS['wpdb'] = new wpdb();
 }
 
 if ( ! function_exists( 'update_post_meta' ) ) {

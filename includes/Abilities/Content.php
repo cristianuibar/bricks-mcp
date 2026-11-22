@@ -877,7 +877,7 @@ final class Content implements Module {
 	 *
 	 * Like Slim SEO's own editor, a cleared field drops its key, noindex is stored as 1, and an empty array deletes the meta.
 	 * The metadata functions keep a revision's write on the revision; the post meta ones would redirect it to the parent.
-	 * The delete matches the value read, so a record saved after the read is kept.
+	 * The delete matches the value read in one statement, so a record saved after the read is kept.
 	 *
 	 * @param int                        $post_id Post ID.
 	 * @param array<string, string|bool> $fields  Fields to write.
@@ -902,9 +902,36 @@ final class Content implements Module {
 		if ( array() !== $slim ) {
 			update_metadata( 'post', $post_id, 'slim_seo', $slim );
 		} elseif ( '' !== $stored && false !== $stored ) {
-			// delete_metadata() unslashes the value it matches.
-			delete_metadata( 'post', $post_id, 'slim_seo', wp_slash( $stored ) );
+			$this->delete_post_meta_if_unchanged( $post_id, 'slim_seo', $stored );
 		}
+	}
+
+	/**
+	 * Delete a post meta row only while it still holds the given value.
+	 *
+	 * WordPress's delete_metadata() selects the matching row IDs and then deletes those IDs, so a save between the two is lost.
+	 * One DELETE that matches the value cannot remove a newer save.
+	 *
+	 * @param int    $post_id  Post ID; a revision keeps its own row.
+	 * @param string $meta_key Meta key.
+	 * @param mixed  $value    Value read before the delete.
+	 * @return void
+	 */
+	private function delete_post_meta_if_unchanged( int $post_id, string $meta_key, mixed $value ): void {
+		global $wpdb;
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.SlowDBQuery -- delete_metadata() cannot match the value in its DELETE; the meta cache is cleared below.
+		$wpdb->delete(
+			$wpdb->postmeta,
+			[
+				'post_id'    => $post_id,
+				'meta_key'   => $meta_key,
+				'meta_value' => maybe_serialize( $value ),
+			],
+			[ '%d', '%s', '%s' ]
+		);
+		// phpcs:enable
+		wp_cache_delete( $post_id, 'post_meta' );
 	}
 
 	/**
