@@ -597,24 +597,32 @@ final class Quality implements Module {
 	 * @return array<int, array<string, mixed>>
 	 */
 	private function lint_children( string $id, array $element, array $ids ): array {
-		$issues = [];
+		$issues   = [];
+		$numbered = [];
 
 		foreach ( array_values( (array) ( $element['children'] ?? [] ) ) as $position => $child ) {
 			if ( ! is_scalar( $child ) || ! isset( $ids[ (string) $child ] ) ) {
 				$child = $this->printable_id( $child );
 				// The placeholder is not in the tree, so the fix names the entry by its position instead.
-				$entry    = self::INVALID_ID === $child ? sprintf( 'entry %d', $position + 1 ) : sprintf( '"%s"', $child );
-				$issues[] = $this->issue(
+				$entry = self::INVALID_ID === $child ? sprintf( 'entry %d', $position + 1 ) : sprintf( '"%s"', $child );
+				$issue = $this->issue(
 					$id,
 					'error',
 					'orphaned_child',
 					sprintf( 'Element %s lists child "%s" that does not exist.', $id, $child ),
 					sprintf( 'Read the complete tree with bricks/get-page-elements and keep its documentDigest. In that tree remove %2$s from the children of %1$s and change nothing else. Send the complete tree back to bricks/set-page-elements with expectedDocumentDigest set to that digest. set-page-elements replaces the whole page, so never send only the repaired section.', $id, $entry )
 				);
+
+				if ( self::INVALID_ID === $child ) {
+					$numbered[] = $issue;
+				} else {
+					$issues[] = $issue;
+				}
 			}
 		}
 
-		return $issues;
+		// Each removal renumbers the entries after it, so numbered fixes come first and last entry first.
+		return array_merge( array_reverse( $numbered ), $issues );
 	}
 
 	/**
@@ -761,8 +769,9 @@ final class Quality implements Module {
 			return [];
 		}
 
-		$used   = is_array( $settings['_cssGlobalClasses'] ) ? $settings['_cssGlobalClasses'] : array_filter( explode( ' ', (string) $settings['_cssGlobalClasses'] ), 'strlen' );
-		$issues = [];
+		$used     = is_array( $settings['_cssGlobalClasses'] ) ? $settings['_cssGlobalClasses'] : array_filter( explode( ' ', (string) $settings['_cssGlobalClasses'] ), 'strlen' );
+		$issues   = [];
+		$numbered = [];
 
 		foreach ( array_values( $used ) as $position => $stored ) {
 			$class_id = is_scalar( $stored ) ? trim( (string) $stored ) : $stored;
@@ -770,7 +779,7 @@ final class Quality implements Module {
 			if ( '' !== $class_id && ( ! is_string( $class_id ) || ! isset( $class_ids[ $class_id ] ) ) ) {
 				// Print the stored value, not the trimmed one, so the message names the id that is really there.
 				$class_id = $this->printable_id( $stored );
-				$issues[] = $this->issue(
+				$issue    = $this->issue(
 					$id,
 					'warning',
 					'missing_global_class',
@@ -779,10 +788,17 @@ final class Quality implements Module {
 						? sprintf( 'Remove entry %1$d of _cssGlobalClasses with bricks/update-element for %2$s. It is not a plain id, so no global class can be created for it.', $position + 1, $id )
 						: sprintf( 'Create it with bricks/create-global-class, or remove "%1$s" from _cssGlobalClasses with bricks/update-element for %2$s.', $class_id, $id )
 				);
+
+				if ( self::INVALID_ID === $class_id ) {
+					$numbered[] = $issue;
+				} else {
+					$issues[] = $issue;
+				}
 			}
 		}
 
-		return $issues;
+		// Each removal renumbers the entries after it, so numbered fixes come first and last entry first.
+		return array_merge( array_reverse( $numbered ), $issues );
 	}
 
 	/**

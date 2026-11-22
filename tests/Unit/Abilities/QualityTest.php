@@ -457,11 +457,82 @@ final class QualityTest extends TestCase {
 			}
 		}
 
-		$this->assertStringContainsString( 'remove "ghost1" from the children of sec001', $fixes['orphaned_child'][0] );
-		$this->assertStringContainsString( 'remove entry 2 from the children of sec001', $fixes['orphaned_child'][1] );
+		$this->assertStringContainsString( 'remove entry 2 from the children of sec001', $fixes['orphaned_child'][0] );
+		$this->assertStringContainsString( 'remove "ghost1" from the children of sec001', $fixes['orphaned_child'][1] );
 		$this->assertSame(
 			[ 'Remove entry 2 of _cssGlobalClasses with bricks/update-element for sec001. It is not a plain id, so no global class can be created for it.' ],
 			$fixes['missing_global_class']
+		);
+	}
+
+	public function test_following_every_removal_fix_in_report_order_keeps_the_valid_entries(): void {
+		$stored = [
+			'sec001' => [
+				'children'          => [ 'bad 1', 'bad 2', 'kid001' ],
+				'_cssGlobalClasses' => [ 'bad 1', 'bad 2', 'known' ],
+			],
+			'box001' => [
+				'children'          => [ 'ghost1', 'bad 3', 'kid002' ],
+				'_cssGlobalClasses' => [ 'gone_1', 'bad 3', 'known' ],
+			],
+		];
+		$elements = [];
+		foreach ( $stored as $id => $lists ) {
+			$elements[] = [
+				'id'       => $id,
+				'name'     => 'section',
+				'parent'   => 0,
+				'children' => $lists['children'],
+				'settings' => [ '_cssGlobalClasses' => $lists['_cssGlobalClasses'] ],
+			];
+		}
+		foreach ( [ 'kid001' => 'sec001', 'kid002' => 'box001' ] as $kid => $parent ) {
+			$elements[] = [
+				'id'       => $kid,
+				'name'     => 'heading',
+				'parent'   => $parent,
+				'children' => [],
+				'settings' => [],
+			];
+		}
+		$this->fake_elements( $elements );
+
+		// Apply each fix as an agent would, one at a time, to the list as it is after the earlier fixes.
+		foreach ( $this->diagnose()['issues'] as $issue ) {
+			$list = [
+				'orphaned_child'       => 'children',
+				'missing_global_class' => '_cssGlobalClasses',
+			][ $issue['type'] ] ?? null;
+
+			if ( null === $list ) {
+				continue;
+			}
+
+			$current = &$stored[ $issue['elementId'] ][ $list ];
+
+			if ( 1 === preg_match( '/[Rr]emove entry (\d+) (?:of|from)/', $issue['fix'], $match ) ) {
+				array_splice( $current, (int) $match[1] - 1, 1 );
+			} elseif ( 1 === preg_match( '/remove "([^"]+)" from/', $issue['fix'], $match ) ) {
+				$current = array_values( array_diff( $current, [ $match[1] ] ) );
+			} else {
+				$this->fail( 'Fix names no entry to remove: ' . $issue['fix'] );
+			}
+
+			unset( $current );
+		}
+
+		$this->assertSame(
+			[
+				'sec001' => [
+					'children'          => [ 'kid001' ],
+					'_cssGlobalClasses' => [ 'known' ],
+				],
+				'box001' => [
+					'children'          => [ 'kid002' ],
+					'_cssGlobalClasses' => [ 'known' ],
+				],
+			],
+			$stored
 		);
 	}
 
