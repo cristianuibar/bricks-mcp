@@ -478,8 +478,13 @@ final class UpdateCheckerTest extends TestCase {
 				'body'     => hash( 'sha256', $content ) . "  bricks-mcp.zip\n",
 			],
 		];
+		// WordPress still serves a transient at its exact expiry second.
 		$GLOBALS['_bricks_mcp_test_now'] += 5 * MINUTE_IN_SECONDS;
+		$at_expiry                        = $this->verify_on_fresh_instance();
+		$this->assertInstanceOf( \WP_Error::class, $at_expiry );
+		$this->assertSame( 'checksum_missing', $at_expiry->get_error_code() );
 
+		++$GLOBALS['_bricks_mcp_test_now'];
 		$this->assertSame( $GLOBALS['_bricks_mcp_test_download_url_return'], $this->verify_on_fresh_instance() );
 
 		// Once the checksum is read, the release stays cached for the full TTL.
