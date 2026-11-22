@@ -60,6 +60,8 @@ final class UpdateCheckerTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls']  = [];
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = null;
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'] = [];
+		$GLOBALS['_bricks_mcp_test_now']                = null;
+		$GLOBALS['_bricks_mcp_test_transient_expiries'] = [];
 		bricks_mcp_test_reset_admin();
 		$GLOBALS['_bricks_mcp_test_hooks'] = [];
 	}
@@ -84,6 +86,8 @@ final class UpdateCheckerTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls']  = [];
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = null;
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'] = [];
+		$GLOBALS['_bricks_mcp_test_now']                = null;
+		$GLOBALS['_bricks_mcp_test_transient_expiries'] = [];
 		bricks_mcp_test_reset_admin();
 	}
 
@@ -426,6 +430,62 @@ final class UpdateCheckerTest extends TestCase {
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'checksum_missing', $result->get_error_code() );
+	}
+
+	/**
+	 * Test: a checksum published minutes after the release unblocks the install,
+	 * instead of the first check caching the missing checksum for 12 hours.
+	 *
+	 * @return void
+	 */
+	public function test_verify_download_accepts_checksum_published_after_first_check(): void {
+		$content = 'release zip uploaded before its checksum';
+		$GLOBALS['_bricks_mcp_test_download_url_return'] = $this->make_temp_file( $content );
+		$GLOBALS['_bricks_mcp_test_now']                 = 1_700_000_000;
+
+		$checksum_url = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/bricks-mcp.zip.sha256';
+		$assets       = [
+			[
+				'name'                 => 'bricks-mcp.zip',
+				'browser_download_url' => self::PACKAGE_URL,
+			],
+		];
+		$this->stub_release(
+			[
+				'tag_name' => 'v99.0.0',
+				'assets'   => $assets,
+			]
+		);
+
+		$first = $this->verify_on_fresh_instance();
+		$this->assertInstanceOf( \WP_Error::class, $first );
+		$this->assertSame( 'checksum_missing', $first->get_error_code() );
+
+		// The release workflow uploads the checksum shortly after the ZIP.
+		$assets[] = [
+			'name'                 => 'bricks-mcp.zip.sha256',
+			'browser_download_url' => $checksum_url,
+		];
+		$this->stub_release(
+			[
+				'tag_name' => 'v99.0.0',
+				'assets'   => $assets,
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_responses'] = [
+			$checksum_url => [
+				'response' => [ 'code' => 200 ],
+				'body'     => hash( 'sha256', $content ) . "  bricks-mcp.zip\n",
+			],
+		];
+		$GLOBALS['_bricks_mcp_test_now'] += 5 * MINUTE_IN_SECONDS;
+
+		$this->assertSame( $GLOBALS['_bricks_mcp_test_download_url_return'], $this->verify_on_fresh_instance() );
+
+		// Once the checksum is read, the release stays cached for the full TTL.
+		$GLOBALS['_bricks_mcp_test_now'] += 11 * HOUR_IN_SECONDS;
+		$this->assertSame( $GLOBALS['_bricks_mcp_test_download_url_return'], $this->verify_on_fresh_instance() );
+		$this->assertCount( 2, $GLOBALS['_bricks_mcp_test_wp_remote_get_calls'] );
 	}
 
 	/**

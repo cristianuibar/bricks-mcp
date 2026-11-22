@@ -251,7 +251,8 @@ final class UpdateChecker {
 			'sha256_package' => '' !== $sha256 ? $package : '',
 		];
 
-		set_transient( self::TRANSIENT_KEY, $data, self::CACHE_TTL );
+		// A release without its checksum yet is cached briefly, so a checksum uploaded after the ZIP is picked up soon.
+		set_transient( self::TRANSIENT_KEY, $data, '' !== $sha256 ? self::CACHE_TTL : 5 * MINUTE_IN_SECONDS );
 
 		return $data;
 	}
