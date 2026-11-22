@@ -2,7 +2,7 @@
 /**
  * Tests that the wp-env debug log is not served over HTTP.
  *
- * Runs in wp-env (`npm run test:integration`) against the tests site's Apache.
+ * Runs in wp-env (`npm run test:integration`) against both sites' Apache.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
@@ -24,6 +24,46 @@ final class DebugLogAccessTest extends TestCase {
 	 */
 	private const SERVER = 'tests-wordpress';
 
+	/**
+	 * Logs a canary through the requesting site's WordPress and reports where it went, or takes it back out.
+	 *
+	 * Both sites serve the plugin checkout, so each one runs it with its own wp-config.php.
+	 */
+	private const PROBE = <<<'PHP'
+<?php
+require dirname( __DIR__, 3 ) . '/wp-load.php';
+
+$log = (string) ini_get( 'error_log' );
+
+if ( isset( $_GET['before'], $_GET['after'] ) ) {
+	clearstatcache( true, $log );
+	if ( is_file( $log ) && filesize( $log ) === (int) $_GET['after'] ) {
+		if ( '' === $_GET['before'] ) {
+			unlink( $log );
+		} else {
+			$handle = fopen( $log, 'r+' );
+			ftruncate( $handle, (int) $_GET['before'] );
+			fclose( $handle );
+		}
+	}
+	exit;
+}
+
+$before  = is_file( $log ) ? filesize( $log ) : '';
+$written = error_log( CANARY );
+clearstatcache( true, $log );
+
+echo PHP_EOL, wp_json_encode(
+	[
+		'log'     => $log,
+		'root'    => ABSPATH,
+		'written' => $written,
+		'before'  => $before,
+		'after'   => is_file( $log ) ? filesize( $log ) : '',
+	]
+);
+PHP;
+
 	protected function setUp(): void {
 		if ( gethostbyname( self::SERVER ) === self::SERVER ) {
 			$this->markTestSkipped( 'Needs the wp-env tests site: run npm run test:integration.' );
@@ -31,24 +71,47 @@ final class DebugLogAccessTest extends TestCase {
 	}
 
 	/**
-	 * The file the development site logs to under WP_DEBUG_LOG, at its web root URL on the tests site.
+	 * @return array<string, array{string}>
 	 */
-	public function test_visitor_cannot_read_configured_debug_log(): void {
-		$site = $this->debug_log_path();
-		$this->assertNotSame( '', $site['log'], 'WordPress does not log: set WP_DEBUG_LOG.' );
+	public static function sites(): array {
+		return [
+			'development site' => [ 'wordpress' ],
+			'tests site'       => [ self::SERVER ],
+		];
+	}
 
-		if ( ! str_starts_with( $site['log'], $site['root'] ) ) {
-			$this->markTestSkipped( $site['log'] . ' is outside the web root ' . $site['root'] . ', so Apache does not serve it.' );
-		}
-
-		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) ) . "\n";
-		$size   = file_exists( $site['log'] ) ? filesize( $site['log'] ) : null;
-		$this->assertNotFalse( file_put_contents( $site['log'], $canary, FILE_APPEND ), 'Cannot write ' . $site['log'] . '.' );
+	/**
+	 * The file a site's WordPress logs to under its WP_DEBUG_LOG, at its web root URL on that site.
+	 *
+	 * @dataProvider sites
+	 */
+	public function test_visitor_cannot_read_configured_debug_log( string $server ): void {
+		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
+		$probe  = 'bricks-mcp-log-probe-' . bin2hex( random_bytes( 8 ) ) . '.php';
+		$file   = dirname( __DIR__, 2 ) . '/' . $probe;
+		$url    = '/wp-content/plugins/bricks-mcp/' . $probe;
+		file_put_contents( $file, str_replace( 'CANARY', var_export( $canary, true ), self::PROBE ) );
 
 		try {
-			$this->assert_denied( '/' . substr( $site['log'], strlen( $site['root'] ) ), trim( $canary ) );
+			[ $status, $body ] = $this->get( $server, $url );
+			$this->assertSame( 200, $status, "The probe failed on {$server}:\n{$body}" );
+
+			$lines = explode( "\n", trim( $body ) );
+			$site  = json_decode( (string) end( $lines ), true );
+			$this->assertIsArray( $site, "Unexpected probe output on {$server}:\n{$body}" );
+
+			try {
+				if ( ! is_int( $site['after'] ) || ! str_starts_with( $site['log'], $site['root'] ) ) {
+					$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
+				}
+
+				$this->assertTrue( $site['written'], "WordPress on {$server} could not write {$site['log']}." );
+				$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
+			} finally {
+				$this->get( $server, $url . '?' . http_build_query( [ 'before' => $site['before'], 'after' => $site['after'] ] ) );
+			}
 		} finally {
-			$this->remove_canary( $site['log'], $size, $canary );
+			unlink( $file );
 		}
 	}
 
@@ -61,62 +124,29 @@ final class DebugLogAccessTest extends TestCase {
 		file_put_contents( $file, $canary . "\n" );
 
 		try {
-			$this->assert_denied( '/wp-content/plugins/bricks-mcp/logs/bricks-mcp-access-test.log', $canary );
+			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/logs/bricks-mcp-access-test.log', $canary );
 		} finally {
 			unlink( $file );
 		}
 	}
 
-	private function assert_denied( string $path, string $canary ): void {
+	private function assert_denied( string $server, string $path, string $canary ): void {
+		[ $status, $body ] = $this->get( $server, $path );
+
+		$this->assertSame( 403, $status, $server . $path );
+		$this->assertStringNotContainsString( $canary, $body, $server . $path );
+	}
+
+	/**
+	 * @return array{int, string}
+	 */
+	private function get( string $server, string $path ): array {
 		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => 10 ] ] );
-		$body    = file_get_contents( 'http://' . self::SERVER . $path, false, $context );
-		$this->assertNotFalse( $body, 'The tests site did not answer.' );
+		$body    = file_get_contents( 'http://' . $server . $path, false, $context );
+		$this->assertNotFalse( $body, "{$server} did not answer." );
 
 		preg_match( '#^HTTP/\S+ (\d{3})#', $http_response_header[0], $matches );
 
-		$this->assertSame( 403, (int) $matches[1], $path );
-		$this->assertStringNotContainsString( $canary, $body, $path );
-	}
-
-	/**
-	 * Where wp_debug_mode() sends PHP errors with the tests site's WP_DEBUG_LOG.
-	 *
-	 * wp-env forces WP_DEBUG off on the tests site only, so it is turned back on
-	 * here as the development site has it; both sites share WP_DEBUG_LOG, the
-	 * wp-content layout and the logs mapping.
-	 *
-	 * @return array{log: string, root: string}
-	 */
-	private function debug_log_path(): array {
-		$exec = 'define( "WP_DEBUG", true );';
-		$code = 'echo PHP_EOL, wp_json_encode( [ "log" => (string) ini_get( "error_log" ), "root" => ABSPATH ] );';
-
-		exec( 'wp --exec=' . escapeshellarg( $exec ) . ' eval ' . escapeshellarg( $code ) . ' 2>&1', $output, $status );
-		$this->assertSame( 0, $status, "wp eval failed:\n" . implode( "\n", $output ) );
-
-		$site = json_decode( (string) end( $output ), true );
-		$this->assertIsArray( $site, "Unexpected wp eval output:\n" . implode( "\n", $output ) );
-
-		return $site;
-	}
-
-	/**
-	 * Takes the canary back out of the log unless something was logged after it.
-	 */
-	private function remove_canary( string $log, ?int $size, string $canary ): void {
-		clearstatcache( true, $log );
-
-		if ( null === $size ) {
-			if ( file_get_contents( $log ) === $canary ) {
-				unlink( $log );
-			}
-			return;
-		}
-
-		if ( filesize( $log ) === $size + strlen( $canary ) ) {
-			$handle = fopen( $log, 'r+' );
-			ftruncate( $handle, $size );
-			fclose( $handle );
-		}
+		return [ (int) $matches[1], $body ];
 	}
 }
