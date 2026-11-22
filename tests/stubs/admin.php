@@ -110,6 +110,18 @@ if ( ! function_exists( 'wp_unslash' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_slash' ) ) {
+	/**
+	 * Stub wp_slash.
+	 *
+	 * @param mixed $value Value to slash.
+	 * @return mixed
+	 */
+	function wp_slash( mixed $value ): mixed {
+		return is_string( $value ) ? addslashes( $value ) : $value;
+	}
+}
+
 if ( ! function_exists( 'wp_create_nonce' ) ) {
 	/**
 	 * Stub wp_create_nonce.
