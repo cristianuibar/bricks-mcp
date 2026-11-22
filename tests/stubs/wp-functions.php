@@ -197,7 +197,8 @@ if ( ! function_exists( 'get_transient' ) ) {
 	function get_transient( string $transient ): mixed {
 		$now    = $GLOBALS['_bricks_mcp_test_now'] ?? null;
 		$expiry = $GLOBALS['_bricks_mcp_test_transient_expiries'][ $transient ] ?? null;
-		if ( null !== $now && null !== $expiry && $now >= $expiry ) {
+		// Like core's `$timeout < time()`: still served at the expiry second.
+		if ( null !== $now && null !== $expiry && $now > $expiry ) {
 			delete_transient( $transient );
 		}
 		return $GLOBALS['_bricks_mcp_test_transients'][ $transient ] ?? false;
