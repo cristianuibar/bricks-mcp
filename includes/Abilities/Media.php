@@ -355,7 +355,7 @@ final class Media implements Module {
 			'height'          => (int) ( $uploaded['height'] ?? 0 ),
 			'postId'          => $post_id,
 			'unsplashPhotoId' => $photo_id,
-			'photographer'    => $photographer,
+			'photographer'    => '' !== $photographer ? $photographer : null,
 			'photographerUrl' => $photographer_url,
 			'duplicate'       => false,
 		];
@@ -662,7 +662,7 @@ final class Media implements Module {
 					'unsplashPhotoId' => [ 'type' => 'string' ],
 					'photographer'    => [
 						'type'        => [ 'string', 'null' ],
-						'description' => __( 'Photographer name; null when a duplicate attachment predates stored attribution.', 'bricks-mcp' ),
+						'description' => __( 'Photographer name; null when Unsplash returned no name or a duplicate attachment predates stored attribution.', 'bricks-mcp' ),
 					],
 					'photographerUrl' => [
 						'type'        => [ 'string', 'null' ],
@@ -1067,12 +1067,13 @@ final class Media implements Module {
 		$metadata = wp_get_attachment_metadata( $attachment_id );
 		$metadata = is_array( $metadata ) ? $metadata : [];
 
-		// Attachments imported before attribution meta existed have no stored URL: report them as unknown (null).
+		// Attachments imported before attribution meta existed have no stored URL, and a photo without a
+		// user name stores an empty one: report either as unknown (null).
 		$photographer     = null;
 		$photographer_url = get_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
 		if ( is_string( $photographer_url ) && '' !== $photographer_url ) {
 			$name         = get_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, true );
-			$photographer = is_string( $name ) ? $name : '';
+			$photographer = is_string( $name ) && '' !== $name ? $name : null;
 		} else {
 			$photographer_url = null;
 		}
