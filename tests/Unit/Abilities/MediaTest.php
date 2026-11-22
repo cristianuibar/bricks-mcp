@@ -12,6 +12,7 @@ namespace BricksMCP\Tests\Unit\Abilities;
 
 use BricksMCP\Abilities\Media;
 use BricksMCP\Abilities\Registrar;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -230,11 +231,33 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
-	 * Importing the same photo twice returns the same sizing and attribution on the duplicate call (#49), backslashes included (#172).
+	 * Unsplash user payloads with the photographer name both imports should report.
 	 *
+	 * @return array<string, array{0: array<string, mixed>, 1: string|null}>
+	 */
+	public static function unsplash_users(): array {
+		return [
+			'named, with a backslash' => [
+				[
+					'name'  => 'North\\West Studio',
+					'links' => [ 'html' => 'https://unsplash.com/@sampeak' ],
+				],
+				'North\\West Studio',
+			],
+			'profile URL but no name' => [ [ 'links' => [ 'html' => 'https://unsplash.com/@sampeak' ] ], null ],
+		];
+	}
+
+	/**
+	 * Importing the same photo twice returns the same sizing and attribution on the duplicate call (#49), backslashes included (#172),
+	 * and a missing photographer name is reported as unknown (null), never "" (#174).
+	 *
+	 * @param array<string, mixed> $user                  Unsplash `user` payload.
+	 * @param string|null          $expected_photographer Photographer both imports should report.
 	 * @return void
 	 */
-	public function test_import_unsplash_twice_returns_same_dimensions_and_attribution(): void {
+	#[DataProvider( 'unsplash_users' )]
+	public function test_import_unsplash_twice_returns_same_dimensions_and_attribution( array $user, ?string $expected_photographer ): void {
 		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
 		bricks_mcp_test_add_post(
 			[
@@ -254,7 +277,7 @@ final class MediaTest extends TestCase {
 
 		$image_url = 'https://images.unsplash.com/photo-alpine?w=1080';
 
-		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url ): array {
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, $user ): array {
 			if ( 'https://api.unsplash.com/photos/Tr-faG4v38w' === $url ) {
 				return [
 					'response' => [ 'code' => 200 ],
@@ -263,10 +286,7 @@ final class MediaTest extends TestCase {
 						[
 							'id'    => 'Tr-faG4v38w',
 							'urls'  => [ 'regular' => $image_url ],
-							'user'  => [
-								'name'  => 'North\\West Studio',
-								'links' => [ 'html' => 'https://unsplash.com/@sampeak' ],
-							],
+							'user'  => $user,
 							'links' => [ 'download_location' => 'https://api.unsplash.com/photos/Tr-faG4v38w/download' ],
 						]
 					),
@@ -325,7 +345,7 @@ final class MediaTest extends TestCase {
 		}
 		$this->assertSame( 1080, $second['width'] );
 		$this->assertSame( 540, $second['height'] );
-		$this->assertSame( 'North\\West Studio', $second['photographer'] );
+		$this->assertSame( $expected_photographer, $second['photographer'] );
 		$this->assertSame( 'https://unsplash.com/@sampeak?utm_source=bricks_mcp&utm_medium=referral', $second['photographerUrl'] );
 	}
 
