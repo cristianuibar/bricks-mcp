@@ -123,7 +123,8 @@ final class UpdateChecker {
 			return $update;
 		}
 
-		$remote = $this->get_update_data();
+		// Offer only a trusted package with a valid checksum, so WordPress never caches an update that installs unverified.
+		$remote = self::offerable( $this->get_update_data() );
 
 		if ( empty( $remote['version'] ) ) {
 			return $update;
@@ -131,11 +132,6 @@ final class UpdateChecker {
 
 		// Only return update data if remote version is newer.
 		if ( version_compare( $plugin_data['Version'], $remote['version'], '>=' ) ) {
-			return $update;
-		}
-
-		// Offer only a trusted package with a valid checksum, so WordPress never caches an update that installs unverified.
-		if ( ! self::is_release_asset_url( $remote['package'] ?? null ) || '' === self::release_sha256( $remote ) ) {
 			return $update;
 		}
 
@@ -365,6 +361,17 @@ final class UpdateChecker {
 	}
 
 	/**
+	 * The release data when WordPress can be offered it: a trusted package with a
+	 * checksum read for that package. Otherwise [], so nothing advertises it.
+	 *
+	 * @param array<string,mixed> $remote Release data from get_update_data().
+	 * @return array<string,mixed>
+	 */
+	private static function offerable( array $remote ): array {
+		return self::is_release_asset_url( $remote['package'] ?? null ) && '' !== self::release_sha256( $remote ) ? $remote : [];
+	}
+
+	/**
 	 * Whether a URL is a release asset download of this repository on github.com over https.
 	 *
 	 * @param mixed $url Candidate URL from the release JSON or the update transient.
@@ -405,12 +412,12 @@ final class UpdateChecker {
 	 *
 	 * Used by the Settings page version card to display update status.
 	 *
-	 * @return array<string,mixed> Cached update data, or empty array if no cache.
+	 * @return array<string,mixed> Cached update data, or empty array if no cache or WordPress cannot be offered the release.
 	 */
 	public function get_cached_update_data(): array {
 		$cached = get_transient( self::TRANSIENT_KEY );
 
-		return false !== $cached ? $cached : [];
+		return is_array( $cached ) ? self::offerable( $cached ) : [];
 	}
 
 	/**
@@ -436,8 +443,8 @@ final class UpdateChecker {
 		// Force WordPress to re-check all plugin updates.
 		wp_update_plugins();
 
-		// Fetch fresh data.
-		$data = $this->get_update_data();
+		// Fetch fresh data; report only a release WordPress can be offered.
+		$data = self::offerable( $this->get_update_data() );
 
 		wp_send_json_success( $data );
 	}

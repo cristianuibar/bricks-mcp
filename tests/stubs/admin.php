@@ -283,6 +283,15 @@ if ( ! function_exists( 'wp_is_application_passwords_available' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_update_plugins' ) ) {
+	/**
+	 * Stub wp_update_plugins: no remote plugin update check in unit tests.
+	 *
+	 * @return void
+	 */
+	function wp_update_plugins(): void {}
+}
+
 if ( ! function_exists( 'wp_send_json_success' ) ) {
 	/**
 	 * Stub wp_send_json_success.
