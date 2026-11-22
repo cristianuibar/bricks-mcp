@@ -46,6 +46,7 @@ Issue types:
 - `missing_wp_reset_postdata`: a code element runs `WP_Query` without `wp_reset_postdata()`.
 - `orphaned_child`: an element lists a child that does not exist. `bricks/set-page-elements` replaces the whole page, so read the complete tree with `bricks/get-page-elements`, remove only the dangling id, and send the complete tree back with `expectedDocumentDigest` from that read.
 - `phantom_content`: a header or footer template also has content in the page content meta; Bricks ignores it.
+- `multiple_seo_plugins`, `bricks_seo_output`, `bricks_opengraph_output`, `bricks_seo_stale_values`, `bricks_opengraph_stale_values`: the page prints SEO or Open Graph tags next to the active SEO plugin's own, as `bricks-mcp/get-seo` warns. Checked for pages, not header or footer templates.
 
 Not checked, because Bricks rejects them on every write: unknown element types, invalid parent ids, duplicate ids, circular references and malformed query, image or link settings.
 
@@ -61,7 +62,9 @@ Arguments: `postId`, optional `focus` (`all`, `seo`, `accessibility`, `performan
 
 Read and write SEO fields through the active SEO plugin (Yoast SEO, Rank Math, SEOPress, Slim SEO), or through Bricks page settings when none is active. `get-seo` takes `postId` and returns `source`, `supportedFields`, the fields and an audit. `update-seo` takes `postId` and a `seo` object with only the fields to change (`title`, `description`, `noindex`, `nofollow`, `canonical`, `ogTitle`, `ogDescription`, `ogImage`, `twitterTitle`, `twitterDescription`, `twitterImage`, `focusKeyword`). An empty string clears a field.
 
-- Always call `get-seo` first. With an SEO plugin active, Bricks page settings such as `documentTitle` and `metaDescription` are ignored by the rendered page, so never write SEO through `bricks/set-page-settings` in that case.
+- Always call `get-seo` first. With an SEO plugin active, write SEO through `update-seo`, never through `bricks/set-page-settings`.
+- With several SEO plugins active, the source is the first of Yoast SEO, Rank Math, SEOPress and Slim SEO. `audit.activeSeoPlugins` lists them all, and a `multiple_seo_plugins` warning says the others still print their own tags.
+- Bricks prints its own title, description, robots and Open Graph tags from page settings next to an SEO plugin unless `disableSeo` and `disableOpenGraph` are on in Bricks > Settings > General. With an SEO plugin active, `audit.warnings` (and `warnings` in the `update-seo` result) has `bricks_seo_output` or `bricks_opengraph_output` for each output that is still on, and `bricks_seo_stale_values` or `bricks_opengraph_stale_values` with the Bricks page settings it prints in `staleValues`. A stale Bricks `noindex` or `nofollow` is an `error`, since crawlers may drop the page. The check reads only the two settings: a `bricks/frontend/disable_seo` or `bricks/frontend/disable_opengraph` filter answers per page request, so confirm one in the published page head rather than dismissing the warning. Report the setting to the site owner; never change global Bricks settings. Stale values can be cleared with `bricks/set-page-settings` by sending each key as `null`.
 - Fields the source cannot store come back in `unsupported`. Slim SEO stores title, description, noindex, canonical, ogImage and twitterImage.
 - Aim for titles of 30-60 characters, descriptions of 120-160, and an Open Graph image of 1200x630.
 

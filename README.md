@@ -61,8 +61,8 @@ Every ability is registered with the WordPress Abilities API and marked public, 
 
 | Ability | What it does | Type |
 |---|---|---|
-| `bricks-mcp/get-seo` | Reads SEO fields from Yoast SEO, Rank Math, SEOPress or Slim SEO, or from Bricks page settings when none is active. | Read |
-| `bricks-mcp/update-seo` | Writes SEO fields to the same sources. Fields the source cannot store are reported as unsupported. | Write |
+| `bricks-mcp/get-seo` | Reads SEO fields from Yoast SEO, Rank Math, SEOPress or Slim SEO, or from Bricks page settings when none is active. Warns when the page also prints Bricks SEO or Open Graph tags, or tags from a second SEO plugin. | Read |
+| `bricks-mcp/update-seo` | Writes SEO fields to the same sources. Fields the source cannot store are reported as unsupported. Returns the same warnings as `get-seo`. | Write |
 | `bricks-mcp/set-post-status` | Sets publish, draft, pending, private or future (scheduled). Publishing Bricks templates needs this, since Bricks creates them as drafts. | Write |
 | `bricks-mcp/set-featured-image` | Sets or removes the featured image with a media library attachment. | Write |
 | `bricks-mcp/set-editor-mode` | Chooses whether Bricks or the WordPress editor renders a post. Element data is kept. | Write |
@@ -74,7 +74,7 @@ Every ability is registered with the WordPress Abilities API and marked public, 
 | `bricks-mcp/import-unsplash-photo` | Imports an Unsplash photo into the media library through `bricks/upload-media`, with attribution. | Write |
 | `bricks-mcp/list-adobe-fonts` | Lists cached Adobe Fonts families and the Bricks font-loading settings. | Read |
 | `bricks-mcp/update-font-settings` | Updates `disableGoogleFonts`, `webfontLoading`, `customFontsPreload` and `googleFontsFilesystem`. | Write |
-| `bricks-mcp/diagnose-page` | Lints the stored element data of a page, header or footer and names the Bricks ability that fixes each problem. | Read |
+| `bricks-mcp/diagnose-page` | Lints the stored element data of a page, header or footer and names the Bricks ability that fixes each problem. Also reports the Bricks SEO and Open Graph tags `get-seo` warns about. | Read |
 | `bricks-mcp/audit-page` | MCP prompt that guides a pre-publish audit. Findings only. | Read (prompt) |
 | `bricks-mcp/get-guide` | Markdown guide to these abilities, also an MCP resource at `bricks-mcp://guide`. | Read (resource) |
 
@@ -90,6 +90,12 @@ Each ability has a `permission_callback` that mirrors Bricks:
 - Unsplash search and import need `upload_files`. Importing with a `postId` also needs `edit_post` for that post.
 - Setting a status of publish, future or private also needs the post type's publish capability.
 - The guide needs `edit_posts`.
+
+### SEO plugins and Bricks SEO output
+
+When more than one SEO plugin is active, the SEO abilities read and write the first of Yoast SEO, Rank Math, SEOPress and Slim SEO. The others still print their own tags, and `get-seo` lists them in `audit.activeSeoPlugins` with a `multiple_seo_plugins` warning.
+
+Bricks prints its own title, meta description, robots and Open Graph tags from page settings next to an SEO plugin unless **Disable Bricks SEO meta tags** (`disableSeo`) and **Disable Bricks Open Graph meta tags** (`disableOpenGraph`) are on in Bricks > Settings > General, or the `bricks/frontend/disable_seo` and `bricks/frontend/disable_opengraph` filters return true on the page request. With an SEO plugin active, `get-seo`, `update-seo` and `diagnose-page` warn about each output that is still on (`bricks_seo_output`, `bricks_opengraph_output`) and about Bricks page settings of the post it prints (`bricks_seo_stale_values`, `bricks_opengraph_stale_values`, with the values in `staleValues`). Those filters run per page request and cannot be evaluated from an MCP request, so the checks read the two settings only; a site that turns the output off with a filter still gets the warnings. A stale Bricks `noindex` or `nofollow`, for example one written through the Bricks fallback while no SEO plugin was active, is an `error`: crawlers may follow it whatever the SEO plugin says. The plugin never changes the global Bricks settings.
 
 ## Settings
 

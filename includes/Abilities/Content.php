@@ -101,6 +101,53 @@ final class Content implements Module {
 
 	private const BRICKS_IMAGE_SETTING = 'sharingImage';
 
+	private const SEO_PLUGIN_NAMES = [
+		'yoast'    => 'Yoast SEO',
+		'rankmath' => 'Rank Math',
+		'seopress' => 'SEOPress',
+		'slimseo'  => 'Slim SEO',
+	];
+
+	/**
+	 * Bricks switches in `bricks_global_settings` that turn its own head tags off, the filter that can also turn them off
+	 * on a page request (and so cannot be evaluated from an MCP request), and the page settings Bricks prints while on.
+	 */
+	private const BRICKS_SEO_OUTPUTS = [
+		'disableSeo'       => [
+			'type'     => 'seo',
+			'kind'     => 'SEO',
+			'label'    => 'Disable Bricks SEO meta tags',
+			'filter'   => 'bricks/frontend/disable_seo',
+			'settings' => [ 'documentTitle', 'metaDescription', 'metaKeywords', 'metaRobots' ],
+		],
+		'disableOpenGraph' => [
+			'type'     => 'opengraph',
+			'kind'     => 'Open Graph',
+			'label'    => 'Disable Bricks Open Graph meta tags',
+			'filter'   => 'bricks/frontend/disable_opengraph',
+			'settings' => [ 'sharingTitle', 'sharingDescription', 'sharingImage' ],
+		],
+	];
+
+	private const ROBOTS_BLOCKING_DIRECTIVES = [ 'noindex', 'nofollow', 'none' ];
+
+	private const SEO_WARNINGS_SCHEMA = [
+		'type'  => 'array',
+		'items' => [
+			'type'       => 'object',
+			'properties' => [
+				'severity'    => [
+					'type' => 'string',
+					'enum' => [ 'error', 'warning' ],
+				],
+				'type'        => [ 'type' => 'string' ],
+				'message'     => [ 'type' => 'string' ],
+				'fix'         => [ 'type' => 'string' ],
+				'staleValues' => [ 'type' => 'object' ],
+			],
+		],
+	];
+
 	private const POST_STATUSES = [ 'publish', 'draft', 'pending', 'private', 'future' ];
 
 	private const POST_STATUSES_NEEDING_PUBLISH_CAP = [ 'publish', 'future', 'private' ];
@@ -128,7 +175,7 @@ final class Content implements Module {
 	private function get_seo_definition(): array {
 		return [
 			'label'               => __( 'Get SEO', 'bricks-mcp' ),
-			'description'         => __( 'Read the SEO fields of a post or page from the active SEO plugin (Yoast SEO, Rank Math, SEOPress or Slim SEO), or from the Bricks page settings when none is active. Returns title, description, noindex, nofollow, canonical, Open Graph, Twitter and focus keyword fields the source supports, `source`, `supportedFields`, and an audit with title and description length warnings. Use update-seo to change them.', 'bricks-mcp' ),
+			'description'         => __( 'Read the SEO fields of a post or page from the active SEO plugin (Yoast SEO, Rank Math, SEOPress or Slim SEO), or from the Bricks page settings when none is active. When several SEO plugins are active, the first of Yoast SEO, Rank Math, SEOPress and Slim SEO is the source. Returns title, description, noindex, nofollow, canonical, Open Graph, Twitter and focus keyword fields the source supports, `source`, `supportedFields`, and an audit with title and description length warnings, `activeSeoPlugins` and `warnings`. With an SEO plugin active, `warnings` lists tags the page prints next to it: other active SEO plugins, Bricks SEO or Open Graph output that is still on, and the Bricks page settings (such as a stale metaRobots noindex) it prints. Use update-seo to change the fields.', 'bricks-mcp' ),
 			'category'            => self::CATEGORY,
 			'input_schema'        => [
 				'type'                 => 'object',
@@ -155,7 +202,16 @@ final class Content implements Module {
 						'items' => [ 'type' => 'string' ],
 					],
 					'fields'          => [ 'type' => 'object' ],
-					'audit'           => [ 'type' => 'object' ],
+					'audit'           => [
+						'type'       => 'object',
+						'properties' => [
+							'activeSeoPlugins' => [
+								'type'  => 'array',
+								'items' => [ 'type' => 'string' ],
+							],
+							'warnings'         => self::SEO_WARNINGS_SCHEMA,
+						],
+					],
 				],
 			],
 			'execute_callback'    => fn( $input ) => $this->get_seo( (int) $input['postId'] ),
@@ -179,7 +235,7 @@ final class Content implements Module {
 
 		return [
 			'label'               => __( 'Update SEO', 'bricks-mcp' ),
-			'description'         => __( 'Write SEO fields of a post or page to the active SEO plugin (Yoast SEO, Rank Math, SEOPress or Slim SEO), or to the Bricks page settings when none is active. Send only the fields to change; an empty string clears a text or URL field. Fields the source cannot store are listed in `unsupported` and ignored. Returns the fields before and after. Run get-seo first to see which fields the source supports.', 'bricks-mcp' ),
+			'description'         => __( 'Write SEO fields of a post or page to the active SEO plugin (Yoast SEO, Rank Math, SEOPress or Slim SEO), or to the Bricks page settings when none is active. Send only the fields to change; an empty string clears a text or URL field. Fields the source cannot store are listed in `unsupported` and ignored. Returns the fields before and after, and the same `warnings` as get-seo. Run get-seo first to see which fields the source supports.', 'bricks-mcp' ),
 			'category'            => self::CATEGORY,
 			'input_schema'        => [
 				'type'                 => 'object',
@@ -227,6 +283,7 @@ final class Content implements Module {
 					],
 					'before'      => [ 'type' => 'object' ],
 					'after'       => [ 'type' => 'object' ],
+					'warnings'    => self::SEO_WARNINGS_SCHEMA,
 				],
 			],
 			'execute_callback'    => fn( $input ) => $this->update_seo( (int) $input['postId'], (array) $input['seo'] ),
@@ -444,7 +501,10 @@ final class Content implements Module {
 			'source'          => $source,
 			'supportedFields' => $this->supported_seo_fields( $source ),
 			'fields'          => $fields,
-			'audit'           => $this->audit_seo( $fields ),
+			'audit'           => $this->audit_seo( $fields ) + [
+				'activeSeoPlugins' => $this->active_seo_plugins(),
+				'warnings'         => $this->seo_output_warnings( $post_id ),
+			],
 		];
 	}
 
@@ -478,6 +538,7 @@ final class Content implements Module {
 			'unsupported' => $unsupported,
 			'before'      => $before,
 			'after'       => $this->read_seo_fields( $post_id, $source ),
+			'warnings'    => $this->seo_output_warnings( $post_id ),
 		];
 	}
 
@@ -509,23 +570,147 @@ final class Content implements Module {
 	 * @return string
 	 */
 	private function detect_seo_source(): string {
-		if ( class_exists( 'WPSEO_Options' ) ) {
-			return 'yoast';
+		return $this->active_seo_plugins()[0] ?? 'bricks';
+	}
+
+	/**
+	 * Active SEO plugins, the one bricks-mcp reads and writes first.
+	 *
+	 * @return string[]
+	 */
+	private function active_seo_plugins(): array {
+		$active = [
+			'yoast'    => class_exists( 'WPSEO_Options' ),
+			'rankmath' => class_exists( 'RankMath' ),
+			'seopress' => class_exists( 'SeoPress_Seo_Metabox' ) || function_exists( 'seopress_init' ),
+			'slimseo'  => class_exists( 'SlimSEO\MetaTags\Title' ),
+		];
+
+		return array_keys( array_filter( $active ) );
+	}
+
+	/**
+	 * Tags the page prints next to the active SEO plugin's own: other active SEO plugins, Bricks SEO or Open Graph
+	 * output that is still on, and the Bricks page settings of the post that output prints. Empty without an SEO plugin.
+	 *
+	 * Global Bricks settings are only reported, never changed.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return array<int, array<string, mixed>> Each with `severity`, `type`, `message`, `fix`, and `staleValues` for stale page settings.
+	 */
+	public function seo_output_warnings( int $post_id ): array {
+		$plugins = $this->active_seo_plugins();
+
+		if ( array() === $plugins ) {
+			return [];
 		}
 
-		if ( class_exists( 'RankMath' ) ) {
-			return 'rankmath';
+		$source   = self::SEO_PLUGIN_NAMES[ $plugins[0] ];
+		$warnings = [];
+
+		if ( count( $plugins ) > 1 ) {
+			$names      = array_map( static fn( string $plugin ): string => self::SEO_PLUGIN_NAMES[ $plugin ], $plugins );
+			$warnings[] = $this->seo_warning(
+				'warning',
+				'multiple_seo_plugins',
+				/* translators: 1: active SEO plugins, 2: SEO plugin bricks-mcp uses */
+				sprintf( __( 'More than one SEO plugin is active (%1$s). bricks-mcp reads and writes %2$s only; the others still print their own tags.', 'bricks-mcp' ), implode( ', ', $names ), $source ),
+				sprintf( 'Ask the site owner to deactivate %s so the page prints one set of SEO tags.', implode( ', ', array_slice( $names, 1 ) ) )
+			);
 		}
 
-		if ( class_exists( 'SeoPress_Seo_Metabox' ) || function_exists( 'seopress_init' ) ) {
-			return 'seopress';
+		$global = get_option( 'bricks_global_settings', [] );
+		$global = is_array( $global ) ? $global : [];
+		$page   = $this->bricks_page_settings( $post_id );
+
+		foreach ( self::BRICKS_SEO_OUTPUTS as $switch => $output ) {
+			if ( ! empty( $global[ $switch ] ) ) {
+				continue;
+			}
+
+			$turn_off   = sprintf( 'turn on "%1$s" (%2$s) in Bricks > Settings > General', $output['label'], $switch );
+			$warnings[] = $this->seo_warning(
+				'warning',
+				'bricks_' . $output['type'] . '_output',
+				/* translators: 1: SEO or Open Graph, 2: SEO plugin name */
+				sprintf( __( 'Bricks still prints its own %1$s tags next to %2$s, so the page can carry two sets.', 'bricks-mcp' ), $output['kind'], $source ),
+				sprintf( 'Ask the site owner to %1$s. bricks-mcp never changes global Bricks settings. A %2$s filter that turns the output off only answers on a page request, so this check reads the setting alone; confirm such a filter in the published page head.', $turn_off, $output['filter'] )
+			);
+
+			$stale = $this->bricks_stale_seo_values( $page, $output['settings'] );
+
+			if ( array() === $stale ) {
+				continue;
+			}
+
+			$keys     = implode( ', ', array_keys( $stale ) );
+			$blocking = array_values( array_intersect( self::ROBOTS_BLOCKING_DIRECTIVES, (array) ( $stale[ self::BRICKS_ROBOTS_SETTING ] ?? [] ) ) );
+			/* translators: 1: Bricks page setting keys, 2: SEO plugin name */
+			$message = sprintf( __( 'The Bricks page settings of this post still hold %1$s, which Bricks prints next to %2$s.', 'bricks-mcp' ), $keys, $source );
+
+			if ( array() !== $blocking ) {
+				/* translators: %s: robots directives */
+				$message .= ' ' . sprintf( __( 'Its robots tag says %s whatever the SEO plugin says, so crawlers may drop the page.', 'bricks-mcp' ), implode( ', ', $blocking ) );
+			}
+
+			$warnings[] = $this->seo_warning(
+				array() !== $blocking ? 'error' : 'warning',
+				'bricks_' . $output['type'] . '_stale_values',
+				$message,
+				sprintf( 'Clear %1$s with bricks/set-page-settings by sending each as null, or ask the site owner to %2$s.', $keys, $turn_off )
+			) + [ 'staleValues' => $stale ];
 		}
 
-		if ( class_exists( 'SlimSEO\MetaTags\Title' ) ) {
-			return 'slimseo';
+		return $warnings;
+	}
+
+	/**
+	 * One SEO output warning.
+	 *
+	 * @param string $severity `error` or `warning`.
+	 * @param string $type     Warning type.
+	 * @param string $message  What the page prints.
+	 * @param string $fix      How to stop it.
+	 * @return array<string, string>
+	 */
+	private function seo_warning( string $severity, string $type, string $message, string $fix ): array {
+		return [
+			'severity' => $severity,
+			'type'     => $type,
+			'message'  => $message,
+			'fix'      => $fix,
+		];
+	}
+
+	/**
+	 * Non-empty Bricks page settings among the given keys, robots as a directive list and the sharing image as its URL or dynamic tag.
+	 *
+	 * @param array<string, mixed> $page Page settings.
+	 * @param string[]             $keys Setting keys.
+	 * @return array<string, string|string[]>
+	 */
+	private function bricks_stale_seo_values( array $page, array $keys ): array {
+		$stale = [];
+
+		foreach ( $keys as $key ) {
+			$value = $page[ $key ] ?? null;
+
+			if ( self::BRICKS_ROBOTS_SETTING === $key ) {
+				$value = $this->bricks_robots( $page );
+			} elseif ( self::BRICKS_IMAGE_SETTING === $key ) {
+				$value = is_array( $value ) ? ( empty( $value['url'] ) ? ( $value['useDynamicData'] ?? null ) : $value['url'] ) : null;
+			}
+
+			if ( ! is_array( $value ) ) {
+				$value = is_scalar( $value ) ? trim( (string) $value ) : '';
+			}
+
+			if ( '' !== $value && array() !== $value ) {
+				$stale[ $key ] = $value;
+			}
 		}
 
-		return 'bricks';
+		return $stale;
 	}
 
 	/**
