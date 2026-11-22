@@ -1036,4 +1036,55 @@ final class UpdateCheckerTest extends TestCase {
 			$this->assertSame( 'untrusted_package', $result->get_error_code(), $package );
 		}
 	}
+
+	/**
+	 * Test: Check Now reports a newer release only when WordPress is offered it, so the
+	 * Settings card shows no Update link for a release without a matching checksum.
+	 *
+	 * @return void
+	 */
+	public function test_check_now_reports_only_a_release_wordpress_is_offered(): void {
+		$base   = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/';
+		$zip    = [
+			'name'                 => 'bricks-mcp.zip',
+			'browser_download_url' => $base . 'bricks-mcp.zip',
+		];
+		$sha256 = [
+			'name'                 => 'bricks-mcp.zip.sha256',
+			'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
+		];
+		$other  = [
+			'name'                 => 'other.zip.sha256',
+			'browser_download_url' => $base . 'other.zip.sha256',
+		];
+
+		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
+			'response' => [ 'code' => 200 ],
+			'body'     => hash( 'sha256', 'zip' ) . "  bricks-mcp.zip\n",
+		];
+		$_REQUEST['nonce'] = wp_create_nonce( 'bricks_mcp_settings_nonce' );
+
+		$cases = [
+			'no checksum'               => [ [ $zip ], null ],
+			'checksum for another file' => [ [ $zip, $other ], null ],
+			'matching checksum'         => [ [ $zip, $sha256 ], '2.1.0' ],
+		];
+
+		foreach ( $cases as $label => [ $assets, $expected ] ) {
+			$this->stub_release(
+				[
+					'tag_name' => 'v2.1.0',
+					'assets'   => $assets,
+				]
+			);
+
+			$this->checker->ajax_check_update();
+
+			$this->assertTrue( $GLOBALS['_bricks_mcp_test_json_response']['success'] ?? null, $label );
+			$this->assertSame( $expected, $GLOBALS['_bricks_mcp_test_json_response']['data']['version'] ?? null, $label );
+			$this->assertSame( null !== $expected, is_array( $this->run_check_update() ), $label );
+		}
+
+		unset( $_REQUEST['nonce'] );
+	}
 }

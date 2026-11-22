@@ -134,6 +134,39 @@ final class SettingsTest extends TestCase {
 	}
 
 	/**
+	 * Test that the Updates card links to an update only when WordPress is offered it:
+	 * a newer release without a checksum bound to its ZIP is not advertised.
+	 *
+	 * @return void
+	 */
+	public function test_updates_card_advertises_only_an_offered_release(): void {
+		$package = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/bricks-mcp.zip';
+		$hash    = hash( 'sha256', 'zip' );
+
+		$cases = [
+			'no checksum'          => [ [ 'sha256' => '', 'sha256_package' => '' ], false ],
+			'checksum not for zip' => [ [ 'sha256' => $hash, 'sha256_package' => '' ], false ],
+			'bound checksum'       => [ [ 'sha256' => $hash, 'sha256_package' => $package ], true ],
+		];
+
+		foreach ( $cases as $label => [ $checksum, $advertised ] ) {
+			$GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = [
+				'version' => '2.1.0',
+				'package' => $package,
+				'url'     => 'https://github.com/cristianuibar/bricks-mcp/releases/tag/v2.1.0',
+			] + $checksum;
+
+			ob_start();
+			( new Settings() )->render_settings_page();
+			$html = (string) ob_get_clean();
+
+			$this->assertSame( $advertised, str_contains( $html, 'v2.1.0 available' ), $label );
+			$this->assertSame( $advertised, str_contains( $html, 'href="http://localhost/wp-admin/update-core.php"' ), $label );
+			$this->assertSame( ! $advertised, str_contains( $html, 'up to date' ), $label );
+		}
+	}
+
+	/**
 	 * Parse the rendered options.php form, serialize inputs as a browser does, and run Options::sanitize().
 	 *
 	 * @param string                $html            Rendered page HTML.
