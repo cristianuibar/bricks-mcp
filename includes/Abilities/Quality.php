@@ -68,7 +68,7 @@ final class Quality implements Module {
 	private function diagnose_page_definition(): array {
 		return [
 			'label'               => __( 'Diagnose Bricks page', 'bricks-mcp' ),
-			'description'         => __( 'Lint the stored element data of one page, header or footer template and list problems with the element id, severity, message and the Bricks ability that fixes it. Run it before editing an existing page and again after a large write. Catches %root% in custom CSS, wrong setting keys (_maxWidth, _textAlign, _animation), hex colors that duplicate a palette color or variable, missing script tags, references to global classes that do not exist, unknown breakpoint keys, missing mobile padding, WP_Query code without wp_reset_postdata(), children that point to missing elements and header or footer content stored in the page content meta. A check whose reference data could not be read completely (global classes, breakpoints) is skipped and reported as an info note instead of guessing. Read-only: apply fixes with bricks/update-element, bricks/update-element-interactions, bricks/create-global-class or bricks/set-page-settings. Structure errors that Bricks rejects on write (unknown element types, invalid parents, duplicate ids) are not repeated here.', 'bricks-mcp' ),
+			'description'         => __( 'Lint the stored element data of one page, header or footer template and list problems with the element id, severity, message and the Bricks ability that fixes it. Run it before editing an existing page and again after a large write. Catches %root% in custom CSS, wrong setting keys (_maxWidth, _textAlign, _animation), hex colors that duplicate a palette color or variable, missing script tags, references to global classes that do not exist, unknown breakpoint keys, missing mobile padding, SEO or Open Graph tags Bricks prints next to the active SEO plugin (including stale Bricks robots values), WP_Query code without wp_reset_postdata(), children that point to missing elements and header or footer content stored in the page content meta. A check whose reference data could not be read completely (global classes, breakpoints) is skipped and reported as an info note instead of guessing. Read-only: apply fixes with bricks/update-element, bricks/update-element-interactions, bricks/create-global-class or bricks/set-page-settings. Structure errors that Bricks rejects on write (unknown element types, invalid parents, duplicate ids) are not repeated here.', 'bricks-mcp' ),
 			'category'            => 'bricks-mcp-qa',
 			'input_schema'        => [
 				'type'                 => 'object',
@@ -217,6 +217,7 @@ final class Quality implements Module {
 		$issues   = array_merge(
 			$this->lint_area_meta( $post_id, $area ),
 			$this->lint_page_settings( $post_id ),
+			$this->lint_seo_output( $post_id, $area ),
 			$this->lint_elements( $elements, $context ),
 			$this->skipped_checks( $context, $elements )
 		);
@@ -556,6 +557,24 @@ final class Quality implements Module {
 		}
 
 		return $issues;
+	}
+
+	/**
+	 * SEO and Open Graph tags a page prints next to the active SEO plugin's own, as reported by bricks-mcp/get-seo.
+	 *
+	 * @param int    $post_id Post ID.
+	 * @param string $area    Area of the post.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function lint_seo_output( int $post_id, string $area ): array {
+		if ( 'content' !== $area ) {
+			return [];
+		}
+
+		return array_map(
+			fn( array $warning ): array => $this->issue( null, $warning['severity'], $warning['type'], $warning['message'], $warning['fix'] ),
+			( new Content() )->seo_output_warnings( $post_id )
+		);
 	}
 
 	/**

@@ -142,6 +142,7 @@ final class ContentTest extends TestCase {
 		$this->assertSame( [ 'noarchive', 'noindex' ], $settings['metaRobots'] );
 		$this->assertTrue( $result['after']['noindex'] );
 		$this->assertFalse( $result['before']['noindex'] );
+		$this->assertSame( [], $result['warnings'] );
 	}
 
 	/**
@@ -221,6 +222,99 @@ final class ContentTest extends TestCase {
 		$this->assertSame( 'too_short', $read['audit']['titleIssue'] );
 		$this->assertSame( 'too_long', $read['audit']['descriptionIssue'] );
 		$this->assertFalse( $read['audit']['hasOgImage'] );
+	}
+
+	/**
+	 * With SEOPress active, Bricks output that is still on and a noindex left by the Bricks fallback are reported until
+	 * the Bricks SEO and Open Graph output is turned off.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_seo_plugin_reports_bricks_output_and_stale_bricks_robots(): void {
+		eval( 'function seopress_init() {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin function in this separate test process only.
+		update_post_meta(
+			self::POST_ID,
+			'_bricks_page_settings',
+			[
+				'metaRobots'      => [ 'noindex', 'nofollow' ],
+				'metaDescription' => 'Old Bricks description',
+				'sharingImage'    => [ 'useDynamicData' => '{featured_image}' ],
+			]
+		);
+
+		$read   = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+		$write  = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'title' => 'Roofing in Cluj' ],
+			]
+		);
+		$issues = array_column( $read['audit']['warnings'], null, 'type' );
+
+		$this->assertSame( 'seopress', $read['source'] );
+		$this->assertFalse( $read['fields']['noindex'] );
+		$this->assertSame( [ 'seopress' ], $read['audit']['activeSeoPlugins'] );
+		$this->assertSame( [ 'bricks_seo_output', 'bricks_seo_stale_values', 'bricks_opengraph_output', 'bricks_opengraph_stale_values' ], array_keys( $issues ) );
+		$this->assertSame( 'error', $issues['bricks_seo_stale_values']['severity'] );
+		$this->assertSame(
+			[
+				'metaDescription' => 'Old Bricks description',
+				'metaRobots'      => [ 'noindex', 'nofollow' ],
+			],
+			$issues['bricks_seo_stale_values']['staleValues']
+		);
+		$this->assertStringContainsString( 'noindex, nofollow', $issues['bricks_seo_stale_values']['message'] );
+		$this->assertStringContainsString( 'disableSeo', $issues['bricks_seo_output']['fix'] );
+		$this->assertSame( 'warning', $issues['bricks_opengraph_stale_values']['severity'] );
+		$this->assertSame( [ 'sharingImage' => '{featured_image}' ], $issues['bricks_opengraph_stale_values']['staleValues'] );
+		$this->assertStringContainsString( 'disableOpenGraph', $issues['bricks_opengraph_output']['fix'] );
+		$this->assertSame( $read['audit']['warnings'], $write['warnings'] );
+
+		update_option( 'bricks_global_settings', [ 'disableSeo' => true ] );
+		$seo_off = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+
+		update_option(
+			'bricks_global_settings',
+			[
+				'disableSeo'       => true,
+				'disableOpenGraph' => true,
+			]
+		);
+		$both_off = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+
+		$this->assertSame( [ 'bricks_opengraph_output', 'bricks_opengraph_stale_values' ], array_column( $seo_off['audit']['warnings'], 'type' ) );
+		$this->assertSame( [], $both_off['audit']['warnings'] );
+		$this->assertSame( [ 'disableSeo' => true, 'disableOpenGraph' => true ], get_option( 'bricks_global_settings' ) );
+	}
+
+	/**
+	 * With two SEO plugins active the one bricks-mcp uses is named and the other is reported as still printing tags.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_second_active_seo_plugin_is_reported(): void {
+		eval( 'namespace { final class WPSEO_Options {} } namespace SlimSEO\MetaTags { final class Title {} }' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares fake plugin classes in this separate test process only.
+		update_option(
+			'bricks_global_settings',
+			[
+				'disableSeo'       => true,
+				'disableOpenGraph' => true,
+			]
+		);
+
+		$read = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+
+		$this->assertSame( 'yoast', $read['source'] );
+		$this->assertSame( [ 'yoast', 'slimseo' ], $read['audit']['activeSeoPlugins'] );
+		$this->assertSame( [ 'multiple_seo_plugins' ], array_column( $read['audit']['warnings'], 'type' ) );
+		$this->assertSame( 'More than one SEO plugin is active (Yoast SEO, Slim SEO). bricks-mcp reads and writes Yoast SEO only; the others still print their own tags.', $read['audit']['warnings'][0]['message'] );
 	}
 
 	/**

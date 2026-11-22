@@ -254,6 +254,29 @@ final class QualityTest extends TestCase {
 		$this->assertSame( 'Home', $report['title'] );
 	}
 
+	/**
+	 * A Bricks noindex left next to an active SEO plugin is a page-level error.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_stale_bricks_robots_next_to_an_seo_plugin_is_reported(): void {
+		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_option( 'bricks_global_settings', [ 'disableOpenGraph' => true ] );
+		update_post_meta( 7, '_bricks_page_settings', [ 'metaRobots' => [ 'noindex' ] ] );
+		$this->fake_elements( [] );
+
+		$report = $this->diagnose();
+
+		$this->assertSame( 'errors', $report['status'] );
+		$this->assertSame( [ 'bricks_seo_output', 'bricks_seo_stale_values' ], array_column( $report['issues'], 'type' ) );
+		$this->assertSame( [ 'warning', 'error' ], array_column( $report['issues'], 'severity' ) );
+		$this->assertSame( [ null, null ], array_column( $report['issues'], 'elementId' ) );
+		$this->assertStringContainsString( 'bricks/set-page-settings', $report['issues'][1]['fix'] );
+	}
+
 	public function test_unreadable_class_list_skips_the_missing_class_check_and_says_so(): void {
 		wp_register_ability( 'bricks/list-global-classes', [ 'execute_callback' => static fn() => new \WP_Error( 'down', 'down' ) ] );
 		$this->fake_elements( [ $this->heading_with_classes( [ 'gone' ] ) ] );
