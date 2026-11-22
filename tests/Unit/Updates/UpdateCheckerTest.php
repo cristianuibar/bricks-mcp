@@ -948,6 +948,57 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	/**
+	 * Test: build metadata has no update precedence, so a site is offered only a release with a newer version core.
+	 *
+	 * @return void
+	 */
+	public function test_check_update_ignores_build_metadata_for_precedence(): void {
+		$base = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0%2Bbuild.7/';
+		$cases = [
+			'2.1.0+build.6' => false,
+			'2.1.0+build.7' => false,
+			'2.1.0+build.8' => false,
+			'2.1.0'         => false,
+			'2.0.0+build.9' => true,
+		];
+
+		foreach ( $cases as $installed => $offered ) {
+			$GLOBALS['_bricks_mcp_test_transients'] = [];
+			$this->stub_release(
+				[
+					'tag_name' => 'v2.1.0+build.7',
+					'assets'   => [
+						[
+							'name'                 => 'bricks-mcp.zip',
+							'browser_download_url' => $base . 'bricks-mcp.zip',
+						],
+						[
+							'name'                 => 'bricks-mcp.zip.sha256',
+							'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
+						],
+					],
+				]
+			);
+			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
+				'response' => [ 'code' => 200 ],
+				'body'     => hash( 'sha256', 'zip' ) . "  bricks-mcp.zip\n",
+			];
+
+			$result = $this->checker->check_update(
+				false,
+				[
+					'Version'   => (string) $installed,
+					'UpdateURI' => 'https://github.com/cristianuibar/bricks-mcp',
+				],
+				'bricks-mcp/bricks-mcp.php',
+				[]
+			);
+
+			$this->assertSame( $offered ? '2.1.0+build.7' : null, false === $result ? null : $result['version'], (string) $installed );
+		}
+	}
+
+	/**
 	 * Test: a published checksum that is malformed, truncated or unreachable blocks the update instead of skipping verification.
 	 *
 	 * @return void
