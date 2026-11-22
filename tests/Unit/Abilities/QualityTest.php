@@ -436,6 +436,35 @@ final class QualityTest extends TestCase {
 		);
 	}
 
+	public function test_fixes_for_entries_that_are_not_plain_ids_point_to_their_position_not_the_placeholder(): void {
+		$this->fake_elements(
+			[
+				[
+					'id'       => 'sec001',
+					'name'     => 'section',
+					'parent'   => 0,
+					'children' => [ 'ghost1', 'old child' ],
+					'settings' => [ '_cssGlobalClasses' => [ 'known', "gone\n" ] ],
+				],
+			]
+		);
+
+		$fixes = [];
+		foreach ( $this->diagnose()['issues'] as $issue ) {
+			if ( in_array( $issue['type'], [ 'orphaned_child', 'missing_global_class' ], true ) ) {
+				$fixes[ $issue['type'] ][] = $issue['fix'];
+				$this->assertStringNotContainsString( '(invalid id)', $issue['fix'] );
+			}
+		}
+
+		$this->assertStringContainsString( 'remove "ghost1" from the children of sec001', $fixes['orphaned_child'][0] );
+		$this->assertStringContainsString( 'remove entry 2 from the children of sec001', $fixes['orphaned_child'][1] );
+		$this->assertSame(
+			[ 'Remove entry 2 of _cssGlobalClasses with bricks/update-element for sec001. It is not a plain id, so no global class can be created for it.' ],
+			$fixes['missing_global_class']
+		);
+	}
+
 	public function test_missing_class_id_with_surrounding_whitespace_is_not_printed_as_its_trimmed_form(): void {
 		$letters = str_repeat( 'a', 64 );
 		$this->fake_elements( [ $this->heading_with_classes( [ $letters . "\n", ' known ' ] ) ] );
