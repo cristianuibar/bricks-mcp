@@ -154,7 +154,7 @@ npm install
 npm start
 ```
 
-`.wp-env.json` starts WordPress 7.1 with PHP 8.2, installs `mcp-adapter` 0.7.2 from WordPress.org, maps `mu-plugins/` and activates both plugins. Local site: http://localhost:8888 (admin / password).
+`.wp-env.json` starts WordPress 7.1 with PHP 8.2, installs `mcp-adapter` 0.7.2 from WordPress.org, maps `mu-plugins/`, writes the WordPress debug log to `logs/debug.log` and activates both plugins. Local site: http://localhost:8888 (admin / password).
 
 Bricks is a paid theme and is not in the repository. Add it with a `.wp-env.override.json` next to `.wp-env.json` that points to a local copy:
 
@@ -169,6 +169,7 @@ Run `npm run destroy && npm start` after adding it, then activate the theme.
 | Command | Does |
 |---|---|
 | `npm start` / `npm stop` | Start or stop wp-env. |
+| `npm run logs:watch` | Follow the WordPress debug log (`logs/debug.log`). |
 | `npm run test` | Unit and integration tests inside wp-env. |
 | `npm run test:unit` | Unit tests only. |
 | `npm run lint` / `npm run lint:fix` | PHPCS check or fix. |
