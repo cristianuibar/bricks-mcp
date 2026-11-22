@@ -109,8 +109,8 @@ final class Content implements Module {
 	];
 
 	/**
-	 * Bricks switches in `bricks_global_settings` that turn its own head tags off, the filter that can override each,
-	 * and the page settings Bricks prints while the switch is off.
+	 * Bricks switches in `bricks_global_settings` that turn its own head tags off, the filter that can also turn them off
+	 * on a page request (and so cannot be evaluated from an MCP request), and the page settings Bricks prints while on.
 	 */
 	private const BRICKS_SEO_OUTPUTS = [
 		'disableSeo'       => [
@@ -624,7 +624,7 @@ final class Content implements Module {
 		$page   = $this->bricks_page_settings( $post_id );
 
 		foreach ( self::BRICKS_SEO_OUTPUTS as $switch => $output ) {
-			if ( apply_filters( $output['filter'], ! empty( $global[ $switch ] ) ) ) {
+			if ( ! empty( $global[ $switch ] ) ) {
 				continue;
 			}
 
@@ -634,7 +634,7 @@ final class Content implements Module {
 				'bricks_' . $output['type'] . '_output',
 				/* translators: 1: SEO or Open Graph, 2: SEO plugin name */
 				sprintf( __( 'Bricks still prints its own %1$s tags next to %2$s, so the page can carry two sets.', 'bricks-mcp' ), $output['kind'], $source ),
-				sprintf( 'Ask the site owner to %s. bricks-mcp never changes global Bricks settings.', $turn_off )
+				sprintf( 'Ask the site owner to %1$s. bricks-mcp never changes global Bricks settings. A %2$s filter that turns the output off only answers on a page request, so this check reads the setting alone; confirm such a filter in the published page head.', $turn_off, $output['filter'] )
 			);
 
 			$stale = $this->bricks_stale_seo_values( $page, $output['settings'] );

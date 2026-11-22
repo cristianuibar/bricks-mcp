@@ -292,6 +292,29 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * A Bricks disable filter answers per front-end request, so its answer during an MCP request does not hide a live noindex.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_bricks_disable_filters_do_not_hide_stale_bricks_robots(): void {
+		// Run registered filters for calls from the abilities namespace, as WordPress would, in this separate test process only.
+		eval( 'namespace { final class RankMath {} } namespace BricksMCP\\Abilities { function apply_filters( string $tag, mixed $value, mixed ...$args ): mixed { return \\bricks_mcp_test_run_filter( $tag, $value, ...$args ); } }' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class and filter runner in this separate test process only.
+		// Like `! is_page( 42 )`: true outside the page request, false on the published page.
+		add_filter( 'bricks/frontend/disable_seo', static fn(): bool => true );
+		add_filter( 'bricks/frontend/disable_opengraph', static fn(): bool => true );
+		update_post_meta( self::POST_ID, '_bricks_page_settings', [ 'metaRobots' => [ 'noindex' ] ] );
+
+		$read = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+
+		$this->assertSame( [ 'bricks_seo_output', 'bricks_seo_stale_values', 'bricks_opengraph_output' ], array_column( $read['audit']['warnings'], 'type' ) );
+		$this->assertSame( 'error', $read['audit']['warnings'][1]['severity'] );
+		$this->assertStringContainsString( 'bricks/frontend/disable_seo', $read['audit']['warnings'][0]['fix'] );
+	}
+
+	/**
 	 * With two SEO plugins active the one bricks-mcp uses is named and the other is reported as still printing tags.
 	 *
 	 * @runInSeparateProcess
