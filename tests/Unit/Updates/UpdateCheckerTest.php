@@ -705,6 +705,7 @@ final class UpdateCheckerTest extends TestCase {
 			'https://github.com/cristianuibar/bricks-mcp/releases/download/..%2f..%2f..%2f..%2fsomeone%2fx%2freleases%2fdownload%2fv2.1.0/',
 			'https://github.com/cristianuibar/bricks-mcp/releases/download/..\\..\\..\\..\\someone\\x\\releases\\download\\v2.1.0/',
 			'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/%2e%2e%2f',
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0%2B%2f..%2f..%2f..%2f..%2fsomeone%2fx%2freleases%2fdownload%2fv2.1.0/',
 			'http://127.0.0.1/cristianuibar/bricks-mcp/releases/download/v2.1.0/',
 		];
 
@@ -790,6 +791,64 @@ final class UpdateCheckerTest extends TestCase {
 		$verified = $this->checker->verify_download( false, $result['package'], new \stdClass(), [ 'plugin' => 'bricks-mcp/bricks-mcp.php' ] );
 
 		$this->assertSame( $temp, $verified );
+	}
+
+	/**
+	 * Test: a release tagged with build metadata (v2.1.0+build.7) is offered to a 2.0.0 site and its ZIP verifies.
+	 *
+	 * GitHub percent-encodes "+" in browser_download_url; the literal form is accepted too.
+	 *
+	 * @return void
+	 */
+	public function test_check_update_offers_release_tagged_with_build_metadata(): void {
+		$content = 'fake zip content for build metadata release';
+
+		foreach ( [ 'v2.1.0%2Bbuild.7', 'v2.1.0%2bbuild.7', 'v2.1.0+build.7' ] as $tag_segment ) {
+			$GLOBALS['_bricks_mcp_test_transients']               = [];
+			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] = [];
+
+			$base = 'https://github.com/cristianuibar/bricks-mcp/releases/download/' . $tag_segment . '/';
+			$this->stub_release(
+				[
+					'tag_name' => 'v2.1.0+build.7',
+					'assets'   => [
+						[
+							'name'                 => 'bricks-mcp.zip',
+							'browser_download_url' => $base . 'bricks-mcp.zip',
+						],
+						[
+							'name'                 => 'bricks-mcp.zip.sha256',
+							'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
+						],
+					],
+				]
+			);
+			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
+				'response' => [ 'code' => 200 ],
+				'body'     => hash( 'sha256', $content ) . "  bricks-mcp.zip\n",
+			];
+
+			$result = $this->checker->check_update(
+				false,
+				[
+					'Version'   => '2.0.0',
+					'UpdateURI' => 'https://github.com/cristianuibar/bricks-mcp',
+				],
+				'bricks-mcp/bricks-mcp.php',
+				[]
+			);
+
+			$this->assertIsArray( $result, $tag_segment );
+			$this->assertSame( '2.1.0+build.7', $result['version'], $tag_segment );
+			$this->assertSame( 'bricks-mcp-verified+' . $base . 'bricks-mcp.zip', $result['package'], $tag_segment );
+
+			$temp = $this->make_temp_file( $content );
+			$GLOBALS['_bricks_mcp_test_download_url_return'] = $temp;
+
+			$verified = $this->checker->verify_download( false, $result['package'], new \stdClass(), [ 'plugin' => 'bricks-mcp/bricks-mcp.php' ] );
+
+			$this->assertSame( $temp, $verified, $tag_segment );
+		}
 	}
 
 	/**
