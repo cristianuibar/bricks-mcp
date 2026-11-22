@@ -16,6 +16,7 @@ use Bricks\Database;
 use Bricks\Elements;
 use Bricks\Password_Protection;
 use Bricks\Templates;
+use BricksMCP\Safety\CssGuard;
 use WP_Error;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -309,13 +310,18 @@ final class Builder implements Module {
 			$offsets[ $parent_id ] = $offset + 1;
 		}
 
-		$saved = Access::run_bricks_ability(
-			'bricks/set-page-elements',
-			[
-				'postId'                 => $post_id,
-				'elements'               => $moved,
-				'expectedDocumentDigest' => $digest,
-			]
+		// The move changes only structure keys, so the CSS guard skips CSS already stored in these elements.
+		$saved = CssGuard::with_stored_elements(
+			$post_id,
+			$elements,
+			static fn(): mixed => Access::run_bricks_ability(
+				'bricks/set-page-elements',
+				[
+					'postId'                 => $post_id,
+					'elements'               => $moved,
+					'expectedDocumentDigest' => $digest,
+				]
+			)
 		);
 
 		if ( is_wp_error( $saved ) ) {

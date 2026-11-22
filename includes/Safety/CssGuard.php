@@ -52,6 +52,53 @@ final class CssGuard {
 		. '|(?:[\w\x00\x80-\xff-]|\\\\(?:[0-9a-f]{1,6}(?:\r\n|[ \t\r\n\f])?|[^\r\n\f0-9a-f]))++~is';
 
 	/**
+	 * Element keys a structural move changes.
+	 *
+	 * @var string[]
+	 */
+	private const STRUCTURE_KEYS = [ 'parent', 'children', 'slotChildren' ];
+
+	/**
+	 * Stored elements by post ID and element ID, without their structure keys, while a move saves them.
+	 *
+	 * @var array<int, array<int|string, array<string, mixed>>>
+	 */
+	private static array $stored_elements = [];
+
+	/**
+	 * Run a save that changes only the structure of stored elements.
+	 *
+	 * While the callback runs, `bricks/set-page-elements` for the post skips elements that
+	 * match a stored element apart from their structure keys, so CSS already stored does not
+	 * block the move. Changed and new elements are still checked.
+	 *
+	 * @param int                              $post_id Post ID.
+	 * @param array<int, array<string, mixed>> $elements Stored elements, verified against their document digest.
+	 * @param callable                         $callback Save callback.
+	 * @return mixed Callback result.
+	 */
+	public static function with_stored_elements( int $post_id, array $elements, callable $callback ): mixed {
+		$previous = self::$stored_elements[ $post_id ] ?? null;
+		$stored   = [];
+		foreach ( $elements as $element ) {
+			if ( is_array( $element ) && ( is_string( $element['id'] ?? null ) || is_int( $element['id'] ?? null ) ) ) {
+				$stored[ $element['id'] ] = array_diff_key( $element, array_flip( self::STRUCTURE_KEYS ) );
+			}
+		}
+
+		self::$stored_elements[ $post_id ] = $stored;
+		try {
+			return $callback();
+		} finally {
+			if ( null === $previous ) {
+				unset( self::$stored_elements[ $post_id ] );
+			} else {
+				self::$stored_elements[ $post_id ] = $previous;
+			}
+		}
+	}
+
+	/**
 	 * Register the CSS guard filter.
 	 *
 	 * Runs last on the normalized input, so schema defaults and values added by other
@@ -76,7 +123,29 @@ final class CssGuard {
 			return $input;
 		}
 
-		return $this->scan_input( $input ) ?? $input;
+		return $this->scan_input( 'bricks/set-page-elements' === $name ? $this->without_stored_elements( $input ) : $input ) ?? $input;
+	}
+
+	/**
+	 * Replace elements that match the stored ones apart from their structure with null, keeping their indexes.
+	 *
+	 * @param mixed $input Normalized `bricks/set-page-elements` input.
+	 * @return mixed
+	 */
+	private function without_stored_elements( mixed $input ): mixed {
+		$stored = is_array( $input ) && is_int( $input['postId'] ?? null ) ? self::$stored_elements[ $input['postId'] ] ?? null : null;
+		if ( null === $stored || ! is_array( $input['elements'] ?? null ) ) {
+			return $input;
+		}
+
+		foreach ( $input['elements'] as $index => $element ) {
+			$id = is_array( $element ) ? $element['id'] ?? null : null;
+			if ( ( is_string( $id ) || is_int( $id ) ) && isset( $stored[ $id ] ) && array_diff_key( $element, array_flip( self::STRUCTURE_KEYS ) ) === $stored[ $id ] ) {
+				$input['elements'][ $index ] = null;
+			}
+		}
+
+		return $input;
 	}
 
 	/**
