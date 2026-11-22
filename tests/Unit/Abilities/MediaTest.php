@@ -669,7 +669,7 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
-	 * Import returns an error instead of success when _unsplash_photo_id meta or post_parent update fails.
+	 * Import returns an error instead of success when Unsplash photo ID or attribution meta, or the post_parent update, fails.
 	 *
 	 * @return void
 	 */
@@ -722,16 +722,21 @@ final class MediaTest extends TestCase {
 			]
 		);
 
-		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = true;
-		$meta_error                                              = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute(
-			[
-				'photoId' => 'photo_77',
-				'postId'  => 15,
-			]
-		);
-		$this->assertInstanceOf( \WP_Error::class, $meta_error );
-		$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $meta_error->get_error_code() );
-		$this->assertSame( 500, $meta_error->get_error_data()['status'] );
+		// A failed attribution or photo ID write is an error, and leaves no photo ID for a retry to deduplicate on.
+		foreach ( [ '_unsplash_photographer', '_unsplash_photographer_url', '_unsplash_photo_id' ] as $failing_key ) {
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ $failing_key ];
+			$meta_error = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute(
+				[
+					'photoId' => 'photo_77',
+					'postId'  => 15,
+				]
+			);
+			$this->assertInstanceOf( \WP_Error::class, $meta_error, $failing_key );
+			$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $meta_error->get_error_code(), $failing_key );
+			$this->assertSame( 500, $meta_error->get_error_data()['status'], $failing_key );
+			$this->assertSame( 88, $meta_error->get_error_data()['attachmentId'], $failing_key );
+			$this->assertSame( '', get_post_meta( 88, '_unsplash_photo_id', true ), $failing_key );
+		}
 
 		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
 		$GLOBALS['_bricks_mcp_test_media_wp_update_post_fail']   = true;

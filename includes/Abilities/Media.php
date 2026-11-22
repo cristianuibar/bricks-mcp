@@ -315,22 +315,27 @@ final class Media implements Module {
 			);
 		}
 
-		update_post_meta( $attachment_id, self::UNSPLASH_META_KEY, $photo_id );
-		if ( (string) get_post_meta( $attachment_id, self::UNSPLASH_META_KEY, true ) !== $photo_id ) {
-			return new \WP_Error(
-				'bricks_mcp_unsplash_meta_failed',
-				__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
-				[
-					'status'       => 500,
-					'attachmentId' => $attachment_id,
-				]
-			);
+		// Attribution is kept so a duplicate import can return it; the caption may be edited later.
+		// The photo ID goes last: a retry deduplicates only an attachment whose attribution was saved.
+		$import_meta = [
+			self::UNSPLASH_PHOTOGRAPHER_META_KEY     => $photographer,
+			self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY => $photographer_url,
+			self::UNSPLASH_META_KEY                  => $photo_id,
+		];
+		foreach ( $import_meta as $meta_key => $meta_value ) {
+			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
+			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
+			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
+				return new \WP_Error(
+					'bricks_mcp_unsplash_meta_failed',
+					__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
+					[
+						'status'       => 500,
+						'attachmentId' => $attachment_id,
+					]
+				);
+			}
 		}
-
-		// Kept so a duplicate import can return the same attribution; the caption may be edited later.
-		// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
-		update_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, wp_slash( $photographer ) );
-		update_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, wp_slash( $photographer_url ) );
 
 		if ( $post_id > 0 ) {
 			$attached = $this->attach_to_post( $attachment_id, $post_id );
