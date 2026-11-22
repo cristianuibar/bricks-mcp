@@ -5,8 +5,9 @@ vendor/
 # WordPress environment
 .wp-env/
 
-# Logs
-logs/
+# Logs (logs/.gitkeep keeps the wp-env mount a directory)
+logs/*
+!logs/.gitkeep
 *.log
 
 # PHPUnit
