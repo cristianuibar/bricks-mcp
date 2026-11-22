@@ -775,6 +775,29 @@ final class UpdateCheckerTest extends TestCase {
 
 		$trusted = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.1.0/';
 
+		// A valid checksum from a trusted URL, so only the ZIP URL can refuse the offer.
+		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
+			'response' => [ 'code' => 200 ],
+			'body'     => str_repeat( 'a', 64 ) . "  bricks-mcp.zip\n",
+		];
+		$this->stub_release(
+			[
+				'tag_name' => 'v2.1.0',
+				'assets'   => [
+					[
+						'name'                 => 'bricks-mcp.zip',
+						'browser_download_url' => $trusted . 'bricks-mcp.zip',
+					],
+					[
+						'name'                 => 'bricks-mcp.zip.sha256',
+						'browser_download_url' => $trusted . 'bricks-mcp.zip.sha256',
+					],
+				],
+			]
+		);
+
+		$this->assertIsArray( $this->run_check_update() );
+
 		foreach ( $untrusted as $base ) {
 			$GLOBALS['_bricks_mcp_test_transients'] = [];
 			$this->stub_release(
@@ -784,6 +807,10 @@ final class UpdateCheckerTest extends TestCase {
 						[
 							'name'                 => 'bricks-mcp.zip',
 							'browser_download_url' => $base . 'bricks-mcp.zip',
+						],
+						[
+							'name'                 => 'bricks-mcp.zip.sha256',
+							'browser_download_url' => $trusted . 'bricks-mcp.zip.sha256',
 						],
 					],
 				]
