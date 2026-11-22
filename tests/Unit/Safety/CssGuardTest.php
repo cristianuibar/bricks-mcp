@@ -348,6 +348,24 @@ final class CssGuardTest extends TestCase {
 		self::assertSame( [ 'status' => 400, 'path' => 'css', 'pattern' => 'behaviour' ], $result->get_error_data() );
 	}
 
+	public function test_blocks_css_a_later_last_priority_normalize_filter_adds(): void {
+		\BricksMCP\Safety\add_filter( 'wp_ability_normalize_input', static fn( $input ) => [ 'settings' => [ 'customCss' => str_repeat( ' ', 102401 ) ] ] + $input, PHP_INT_MAX, 1 );
+
+		$result = $this->ability->execute( [ 'postId' => 42 ] );
+
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( [ 'status' => 400, 'path' => 'settings.customCss', 'pattern' => 'size' ], $result->get_error_data() );
+	}
+
+	public function test_scans_input_an_earlier_validate_filter_passes_with_an_empty_error(): void {
+		\BricksMCP\Safety\add_filter( 'wp_ability_validate_input', static fn() => new WP_Error(), 10, 1 );
+
+		$result = $this->ability->execute( [ 'settings' => [ 'customCss' => '@import "example.css";' ] ] );
+
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( [ 'status' => 400, 'path' => 'settings.customCss', 'pattern' => 'import' ], $result->get_error_data() );
+	}
+
 	public function test_skips_only_unchanged_stored_elements_while_a_move_saves_them(): void {
 		$save   = make_safety_ability( 'bricks/set-page-elements', [ 'execute_callback' => static fn() => 'saved' ] );
 		$stored = [

@@ -69,6 +69,9 @@ if ( ! class_exists( 'WP_Error' ) ) {
 		public function get_error_data( string $code = '' ): mixed {
 			return $this->data;
 		}
+		public function has_errors(): bool {
+			return '' !== $this->code;
+		}
 	}
 }
 
