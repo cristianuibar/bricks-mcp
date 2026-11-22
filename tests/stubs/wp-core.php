@@ -142,6 +142,17 @@ if ( ! function_exists( 'delete_post_meta' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_delete_attachment' ) ) {
+	function wp_delete_attachment( int $post_id, bool $force_delete = false ): WP_Post|false|null {
+		$post = get_post( $post_id );
+		if ( ! $post || 'attachment' !== $post->post_type ) {
+			return false;
+		}
+		unset( $GLOBALS['_bricks_mcp_test_posts'][ $post_id ], $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] );
+		return $post;
+	}
+}
+
 if ( ! function_exists( 'wp_update_post' ) ) {
 	function wp_update_post( array|object $postarr = [], bool $wp_error = false ): int|WP_Error {
 		$fields = (array) $postarr;
