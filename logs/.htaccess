@@ -1,0 +1,3 @@
+# wp-env serves this folder at wp-content/logs and inside the plugin checkout.
+# Keep the debug log away from visitors.
+Require all denied
