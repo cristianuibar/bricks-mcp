@@ -142,15 +142,15 @@ final class UpdateCheckerTest extends TestCase {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Test: returns $reply when $reply is not false (already handled by earlier filter).
+	 * Test: another plugin on the github.com update hostname gets no offer from a
+	 * cached release that this plugin is offered.
 	 *
 	 * @return void
 	 */
 	public function test_check_update_ignores_other_github_hosted_plugins(): void {
-		$GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = [
-			'version' => '99.0.0',
-			'package' => 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/bricks-mcp.zip',
-		];
+		$this->cache_release_hash( str_repeat( 'a', 64 ) );
+
+		$this->assertIsArray( $this->run_check_update() );
 
 		$result = $this->checker->check_update(
 			false,
