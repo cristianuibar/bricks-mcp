@@ -762,11 +762,12 @@ final class Quality implements Module {
 		$used   = is_array( $settings['_cssGlobalClasses'] ) ? $settings['_cssGlobalClasses'] : explode( ' ', (string) $settings['_cssGlobalClasses'] );
 		$issues = [];
 
-		foreach ( $used as $class_id ) {
-			$class_id = is_scalar( $class_id ) ? trim( (string) $class_id ) : $class_id;
+		foreach ( $used as $stored ) {
+			$class_id = is_scalar( $stored ) ? trim( (string) $stored ) : $stored;
 
 			if ( '' !== $class_id && ( ! is_string( $class_id ) || ! isset( $class_ids[ $class_id ] ) ) ) {
-				$class_id = $this->printable_id( $class_id );
+				// Print the stored value, not the trimmed one, so the message names the id that is really there.
+				$class_id = $this->printable_id( $stored );
 				$issues[] = $this->issue(
 					$id,
 					'warning',
