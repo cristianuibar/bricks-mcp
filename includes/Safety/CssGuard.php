@@ -172,10 +172,7 @@ final class CssGuard {
 	 * @return \WP_Error|null
 	 */
 	private function scan_html( string $html, string $path ): ?\WP_Error {
-		// A style element or attribute needs a start tag and a `style` name after it. libxml
-		// truncates names at 100 characters, so any character may come before that name.
-		$tag = preg_match( '~<[a-z_:.]~i', $html, $match, PREG_OFFSET_CAPTURE );
-		if ( 0 === $tag || ( 1 === $tag && 0 === preg_match( '~style(?![a-z0-9_:.-])~i', $html, $match, 0, $match[0][1] ) ) ) {
+		if ( ! $this->may_hold_style_markup( $html ) ) {
 			return null;
 		}
 
@@ -213,6 +210,37 @@ final class CssGuard {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Check whether a string may hold a style element or attribute.
+	 *
+	 * Either needs a start tag holding a `style` name. libxml truncates names at 100 characters,
+	 * so any character may come before that name. A start tag ends at its first `>` unless a
+	 * quoted attribute value holds it, so a quote before that `>` extends the tag to the end.
+	 *
+	 * @param string $html String value.
+	 * @return bool True also when the regex fails.
+	 */
+	private function may_hold_style_markup( string $html ): bool {
+		$offset = 0;
+		while ( 1 === ( $found = preg_match( '~<[a-z_:.]~i', $html, $match, PREG_OFFSET_CAPTURE, $offset ) ) ) { // phpcs:ignore Generic.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition -- Loop over matches.
+			$start = $match[0][1];
+			$end   = strpos( $html, '>', $start );
+			$tag   = false === $end ? substr( $html, $start ) : substr( $html, $start, $end - $start + 1 );
+			if ( false !== strpbrk( $tag, '"\'' ) ) {
+				$tag = substr( $html, $start );
+				$end = false;
+			}
+
+			$style = preg_match( '~style(?![a-z0-9_:.-])~i', $tag );
+			if ( 0 !== $style || false === $end ) {
+				return 0 !== $style;
+			}
+			$offset = $end + 1;
+		}
+
+		return false === $found;
 	}
 
 	/**

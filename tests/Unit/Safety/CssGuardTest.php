@@ -267,6 +267,9 @@ final class CssGuardTest extends TestCase {
 			'<p ' . str_repeat( 'a', 100 ) . 'style="color: red">Example</p>',
 			'<' . str_repeat( 'a', 100 ) . 'style="color: red">Example',
 			'Sale < 10 days <p style="color: red">Example</p>',
+			'p<.05 and p>.05 <p style="color: red">Example</p>',
+			'<p title=">" style="color: red">Example</p>',
+			'<p a"b c=">" style="color: red">Example</p>',
 		] as $html ) {
 			$result = $this->ability->execute( [ 'content' => $html ] );
 			self::assertInstanceOf( WP_Error::class, $result, $html );
@@ -280,6 +283,7 @@ final class CssGuardTest extends TestCase {
 			[ 'title' => 'Summer styles < $50', 'description' => 'Find your style in < 10 minutes' ],
 			[ 'title' => 'Find your style in < 10 minutes', 'description' => 'A lifestyle guide to styles that last.' ],
 			[ 'title' => 'Sale < 10 days left', 'description' => 'Prices <$20 & <b>bold</b> picks' ],
+			[ 'title' => 'Report p<.05 and p>.05 in APA style', 'description' => 'Use <b>bold</b> for a stylish title.' ],
 		];
 
 		foreach ( [ false, true ] as $dom_missing ) {
