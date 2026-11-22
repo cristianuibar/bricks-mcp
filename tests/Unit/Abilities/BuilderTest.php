@@ -292,6 +292,22 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ ...$stored, $longest ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
+	public function test_category_name_limit_holds_when_the_runner_uses_another_default_charset(): void {
+		// mbstring's encoding follows default_charset unless set, and the bootstrap runs once per process, so use a fresh one.
+		$output = [];
+		$status = 1;
+		exec( escapeshellarg( PHP_BINARY ) . ' -d default_charset=ISO-8859-1 ' . escapeshellarg( __DIR__ . '/fixtures/category-name-boundary.php' ) . ' 2>&1', $output, $status );
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertSame(
+			[
+				'result'     => str_repeat( 'ș', 100 ),
+				'categories' => [ str_repeat( 'ș', 100 ) ],
+			],
+			json_decode( implode( "\n", $output ), true )
+		);
+	}
+
 	public function test_category_creation_counts_name_length_in_utf8_under_another_internal_encoding(): void {
 		// Core's schema check counts in the internal encoding (WordPress sets it to the blog charset), so call the callback directly.
 		$create   = wp_get_ability( 'bricks-mcp/create-global-class-category' )->get_args()['execute_callback'];
