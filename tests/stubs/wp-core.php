@@ -107,7 +107,8 @@ if ( ! function_exists( 'get_post_meta' ) ) {
 
 if ( ! function_exists( 'update_post_meta' ) ) {
 	function update_post_meta( int $post_id, string $key, mixed $value, mixed $prev_value = '' ): int|bool {
-		$GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $key ] = $value;
+		// WordPress unslashes meta values before storing them.
+		$GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $key ] = wp_unslash( $value );
 		return true;
 	}
 }

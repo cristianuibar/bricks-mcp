@@ -230,7 +230,7 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
-	 * Importing the same photo twice returns the same sizing and attribution on the duplicate call (#49).
+	 * Importing the same photo twice returns the same sizing and attribution on the duplicate call (#49), backslashes included (#172).
 	 *
 	 * @return void
 	 */
@@ -264,7 +264,7 @@ final class MediaTest extends TestCase {
 							'id'    => 'Tr-faG4v38w',
 							'urls'  => [ 'regular' => $image_url ],
 							'user'  => [
-								'name'  => 'Sam Peak',
+								'name'  => 'North\\West Studio',
 								'links' => [ 'html' => 'https://unsplash.com/@sampeak' ],
 							],
 							'links' => [ 'download_location' => 'https://api.unsplash.com/photos/Tr-faG4v38w/download' ],
@@ -325,7 +325,7 @@ final class MediaTest extends TestCase {
 		}
 		$this->assertSame( 1080, $second['width'] );
 		$this->assertSame( 540, $second['height'] );
-		$this->assertSame( 'Sam Peak', $second['photographer'] );
+		$this->assertSame( 'North\\West Studio', $second['photographer'] );
 		$this->assertSame( 'https://unsplash.com/@sampeak?utm_source=bricks_mcp&utm_medium=referral', $second['photographerUrl'] );
 	}
 

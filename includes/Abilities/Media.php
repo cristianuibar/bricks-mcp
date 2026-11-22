@@ -328,8 +328,9 @@ final class Media implements Module {
 		}
 
 		// Kept so a duplicate import can return the same attribution; the caption may be edited later.
-		update_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, $photographer );
-		update_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, $photographer_url );
+		// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
+		update_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, wp_slash( $photographer ) );
+		update_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, wp_slash( $photographer_url ) );
 
 		if ( $post_id > 0 ) {
 			$attached = $this->attach_to_post( $attachment_id, $post_id );
