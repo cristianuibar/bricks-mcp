@@ -122,9 +122,23 @@ if ( ! function_exists( 'update_metadata' ) ) {
 
 if ( ! function_exists( 'delete_metadata' ) ) {
 	function delete_metadata( string $meta_type, int $object_id, string $meta_key, mixed $meta_value = '', bool $delete_all = false ): bool {
-		$existed = isset( $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ) && array_key_exists( $meta_key, $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] );
+		$meta_value = wp_unslash( $meta_value );
+		// Like WordPress, a callback on this filter runs after the caller's read and can short-circuit the delete.
+		$check = bricks_mcp_test_run_filter( "delete_{$meta_type}_metadata", null, $object_id, $meta_key, $meta_value, $delete_all );
+		if ( null !== $check ) {
+			return (bool) $check;
+		}
+		$meta = $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ?? [];
+		if ( ! array_key_exists( $meta_key, $meta ) ) {
+			return false;
+		}
+		// Like WordPress, a given value deletes the row only while its stored, serialized value still matches.
+		$stored = static fn( mixed $value ): string => is_array( $value ) || is_object( $value ) ? serialize( $value ) : (string) $value;
+		if ( '' !== $meta_value && null !== $meta_value && false !== $meta_value && $stored( $meta_value ) !== $stored( $meta[ $meta_key ] ) ) {
+			return false;
+		}
 		unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ][ $meta_key ] );
-		return $existed;
+		return true;
 	}
 }
 

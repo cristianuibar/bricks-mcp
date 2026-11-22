@@ -859,6 +859,75 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Clearing the last Slim SEO field keeps a record saved after the clear read it.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_clear_keeps_a_record_saved_after_it_was_read(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, 'slim_seo', [ 'noindex' => 1 ] );
+		$saved = [
+			'noindex'        => 1,
+			'facebook_image' => 'https://example.com/fb.jpg',
+		];
+		// Slim SEO's editor saves the post between the clear's read and its delete.
+		add_filter(
+			'delete_post_metadata',
+			static function ( mixed $check, int $object_id, string $meta_key ) use ( $saved ): mixed {
+				if ( 'slim_seo' === $meta_key ) {
+					update_metadata( 'post', $object_id, 'slim_seo', $saved );
+				}
+				return $check;
+			},
+			10,
+			3
+		);
+
+		$result = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'noindex' => false ],
+			]
+		);
+
+		$this->assertSame( $saved, get_post_meta( self::POST_ID, 'slim_seo', true ) );
+		$this->assertTrue( $result['after']['noindex'] );
+	}
+
+	/**
+	 * Clearing the last Slim SEO fields deletes a record whose values hold a backslash.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_clear_deletes_a_record_with_a_backslash(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		$GLOBALS['_bricks_mcp_test_post_meta'][ self::POST_ID ]['slim_seo'] = [
+			'title'   => 'AC\\DC tribute',
+			'noindex' => 1,
+		];
+
+		$this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'title'   => '',
+					'noindex' => false,
+				],
+			]
+		);
+
+		$this->assertSame( '', get_post_meta( self::POST_ID, 'slim_seo', true ) );
+	}
+
+	/**
 	 * Clearing Slim SEO fields on a revision changes the revision's own record, not its parent's.
 	 *
 	 * @runInSeparateProcess

@@ -877,13 +877,15 @@ final class Content implements Module {
 	 *
 	 * Like Slim SEO's own editor, a cleared field drops its key, noindex is stored as 1, and an empty array deletes the meta.
 	 * The metadata functions keep a revision's write on the revision; the post meta ones would redirect it to the parent.
+	 * The delete matches the value read, so a record saved after the read is kept.
 	 *
 	 * @param int                        $post_id Post ID.
 	 * @param array<string, string|bool> $fields  Fields to write.
 	 * @return void
 	 */
 	private function write_slim_seo( int $post_id, array $fields ): void {
-		$slim = $this->slim_seo_meta( $post_id );
+		$stored = get_post_meta( $post_id, 'slim_seo', true );
+		$slim   = is_array( $stored ) ? $stored : [];
 
 		foreach ( self::SLIM_SEO_FIELDS as $field => $key ) {
 			if ( ! array_key_exists( $field, $fields ) ) {
@@ -897,10 +899,11 @@ final class Content implements Module {
 			}
 		}
 
-		if ( array() === $slim ) {
-			delete_metadata( 'post', $post_id, 'slim_seo' );
-		} else {
+		if ( array() !== $slim ) {
 			update_metadata( 'post', $post_id, 'slim_seo', $slim );
+		} elseif ( '' !== $stored && false !== $stored ) {
+			// delete_metadata() unslashes the value it matches.
+			delete_metadata( 'post', $post_id, 'slim_seo', wp_slash( $stored ) );
 		}
 	}
 
