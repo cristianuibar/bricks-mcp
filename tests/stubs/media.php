@@ -91,6 +91,7 @@ namespace BricksMCP\Abilities {
 	if ( ! function_exists( __NAMESPACE__ . '\update_post_meta' ) ) {
 		/**
 		 * Allow Media tests to simulate failed post meta writes without affecting other tests.
+		 * The fail flag is true for every key, or a list of the meta keys whose writes fail.
 		 *
 		 * @param int    $post_id    Post ID.
 		 * @param string $key        Meta key.
@@ -99,7 +100,8 @@ namespace BricksMCP\Abilities {
 		 * @return int|bool
 		 */
 		function update_post_meta( int $post_id, string $key, mixed $value, mixed $prev_value = '' ): int|bool {
-			if ( ! empty( $GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] ) ) {
+			$fail = $GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] ?? false;
+			if ( true === $fail || ( is_array( $fail ) && in_array( $key, $fail, true ) ) ) {
 				return false;
 			}
 
