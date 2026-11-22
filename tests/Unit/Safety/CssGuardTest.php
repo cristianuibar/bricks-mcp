@@ -12,6 +12,8 @@ namespace BricksMCP\Tests\Unit\Safety;
 use BricksMCP\Options;
 use BricksMCP\Safety\CssGuard;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use WP_Ability;
 use WP_Error;
@@ -245,6 +247,23 @@ final class CssGuardTest extends TestCase {
 		self::assertSame( 'bricks_mcp_css_blocked', $result->get_error_code() );
 		self::assertSame( [ 'status' => 400, 'path' => 'css', 'pattern' => 'scan_error' ], $result->get_error_data() );
 		self::assertStringContainsString( 'could not be checked', $result->get_error_message() );
+	}
+
+	// A copy of the value exhausts the memory limit, which ends the process, so the test runs alone.
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_blocks_oversized_html_without_copying_it_when_memory_is_short(): void {
+		$input = [ 'content' => 'Intro <p title="a" style="color: red">' . str_repeat( 'x', 4194304 ) . '</p>' ];
+		$limit = ini_get( 'memory_limit' );
+		self::assertNotFalse( ini_set( 'memory_limit', (string) ( memory_get_usage( true ) + 2097152 ) ) );
+		try {
+			$result = $this->ability->execute( $input );
+		} finally {
+			ini_set( 'memory_limit', $limit );
+		}
+
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( [ 'status' => 400, 'path' => 'content', 'pattern' => 'html_size' ], $result->get_error_data() );
 	}
 
 	public function test_blocks_html_with_styles_when_the_dom_extension_is_missing(): void {
