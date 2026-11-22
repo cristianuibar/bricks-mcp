@@ -231,7 +231,8 @@ $GLOBALS['_bricks_mcp_test_site_transients'] = [];
 
 if ( ! function_exists( 'get_site_transient' ) ) {
 	function get_site_transient( string $transient ): mixed {
-		return $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] ?? false;
+		// WordPress filters the stored value through "site_transient_{$transient}".
+		return bricks_mcp_test_run_filter( "site_transient_{$transient}", $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] ?? false, $transient );
 	}
 }
 

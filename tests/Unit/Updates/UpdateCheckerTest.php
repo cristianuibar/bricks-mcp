@@ -573,19 +573,23 @@ final class UpdateCheckerTest extends TestCase {
 
 	/**
 	 * Test: deactivating the plugin drops its cached update offer (an inactive plugin
-	 * loads no verifier) and keeps other plugins' offers.
+	 * loads no verifier) by clearing WordPress's cached updates, so the next update
+	 * check rebuilds them, and never writes back an older copy over offers a
+	 * concurrent cron check stored meanwhile.
 	 *
 	 * Runs bricks-mcp.php in a separate PHP process.
 	 *
 	 * @return void
 	 */
 	public function test_deactivation_removes_cached_update_offer(): void {
-		$output = [];
-		$status = 1;
-		exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/deactivation.php' ) . ' 2>&1', $output, $status );
+		foreach ( [ 'concurrent-refresh', '' ] as $scenario ) {
+			$output = [];
+			$status = 1;
+			exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/deactivation.php' ) . ' ' . escapeshellarg( $scenario ) . ' 2>&1', $output, $status );
 
-		$this->assertSame( 0, $status, implode( "\n", $output ) );
-		$this->assertSame( [ 'offers' => [ 'other/other.php' ] ], json_decode( implode( "\n", $output ), true ) );
+			$this->assertSame( 0, $status, implode( "\n", $output ) );
+			$this->assertSame( [ 'offers' => null ], json_decode( implode( "\n", $output ), true ), "Scenario '{$scenario}' left cached offers." );
+		}
 	}
 
 	/**
