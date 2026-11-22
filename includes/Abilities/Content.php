@@ -877,13 +877,15 @@ final class Content implements Module {
 	 *
 	 * Like Slim SEO's own editor, a cleared field drops its key, noindex is stored as 1, and an empty array deletes the meta.
 	 * The metadata functions keep a revision's write on the revision; the post meta ones would redirect it to the parent.
+	 * The delete matches the value read in one statement, so a record saved after the read is kept.
 	 *
 	 * @param int                        $post_id Post ID.
 	 * @param array<string, string|bool> $fields  Fields to write.
 	 * @return void
 	 */
 	private function write_slim_seo( int $post_id, array $fields ): void {
-		$slim = $this->slim_seo_meta( $post_id );
+		$stored = get_post_meta( $post_id, 'slim_seo', true );
+		$slim   = is_array( $stored ) ? $stored : [];
 
 		foreach ( self::SLIM_SEO_FIELDS as $field => $key ) {
 			if ( ! array_key_exists( $field, $fields ) ) {
@@ -897,11 +899,38 @@ final class Content implements Module {
 			}
 		}
 
-		if ( array() === $slim ) {
-			delete_metadata( 'post', $post_id, 'slim_seo' );
-		} else {
+		if ( array() !== $slim ) {
 			update_metadata( 'post', $post_id, 'slim_seo', $slim );
+		} elseif ( '' !== $stored && false !== $stored ) {
+			$this->delete_post_meta_if_unchanged( $post_id, 'slim_seo', $stored );
 		}
+	}
+
+	/**
+	 * Delete a post meta row only while it still holds the given value.
+	 *
+	 * WordPress's delete_metadata() selects the matching row IDs and then deletes those IDs, so a save between the two is lost.
+	 * One DELETE that matches the value cannot remove a newer save. The value is compared as bytes: the column's collation
+	 * would match a save that only changed letter case or trailing spaces.
+	 *
+	 * @param int    $post_id  Post ID; a revision keeps its own row.
+	 * @param string $meta_key Meta key.
+	 * @param mixed  $value    Value read before the delete.
+	 * @return void
+	 */
+	private function delete_post_meta_if_unchanged( int $post_id, string $meta_key, mixed $value ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- delete_metadata() cannot match the value in its DELETE; the meta cache is cleared below.
+		$wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s AND meta_value = CAST( %s AS BINARY )",
+				$post_id,
+				$meta_key,
+				maybe_serialize( $value )
+			)
+		);
+		wp_cache_delete( $post_id, 'post_meta' );
 	}
 
 	/**

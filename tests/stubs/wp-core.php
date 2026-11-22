@@ -122,10 +122,110 @@ if ( ! function_exists( 'update_metadata' ) ) {
 
 if ( ! function_exists( 'delete_metadata' ) ) {
 	function delete_metadata( string $meta_type, int $object_id, string $meta_key, mixed $meta_value = '', bool $delete_all = false ): bool {
-		$existed = isset( $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ) && array_key_exists( $meta_key, $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] );
-		unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ][ $meta_key ] );
-		return $existed;
+		$meta_value = wp_unslash( $meta_value );
+		$meta       = $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ?? [];
+		if ( ! array_key_exists( $meta_key, $meta ) ) {
+			return false;
+		}
+		// Like WordPress, a given value selects the row only while its stored, serialized value matches.
+		if ( '' !== $meta_value && null !== $meta_value && false !== $meta_value && (string) maybe_serialize( $meta_value ) !== (string) maybe_serialize( $meta[ $meta_key ] ) ) {
+			return false;
+		}
+		// Then, like WordPress, it deletes the selected row by ID, whatever the row holds by now.
+		return (bool) $GLOBALS['wpdb']->delete(
+			$GLOBALS['wpdb']->postmeta,
+			[
+				'post_id'  => $object_id,
+				'meta_key' => $meta_key,
+			]
+		);
 	}
+}
+
+if ( ! class_exists( 'wpdb' ) ) {
+	/**
+	 * Minimal wpdb stub: deletes post meta rows from the in-memory store.
+	 *
+	 * Like MySQL's default utf8mb4 collations, a meta_value comparison ignores letter case and trailing spaces unless it is cast to BINARY.
+	 */
+	class wpdb {
+		/** @var string */
+		public string $postmeta = 'wp_postmeta';
+
+		/**
+		 * Delete the post meta row matching post_id and meta_key, and meta_value when given.
+		 *
+		 * @param string               $table  Table name.
+		 * @param array<string, mixed> $where  Column values.
+		 * @param string[]|null        $format Formats.
+		 * @return int|false Rows deleted.
+		 */
+		public function delete( string $table, array $where, ?array $format = null ): int|false {
+			if ( $this->postmeta !== $table ) {
+				return 0;
+			}
+			return $this->delete_post_meta_row( (int) $where['post_id'], (string) $where['meta_key'], isset( $where['meta_value'] ) ? (string) $where['meta_value'] : null, false );
+		}
+
+		/**
+		 * Replace %d and %s placeholders like wpdb::prepare(), quoting and escaping strings.
+		 *
+		 * @param string $query   Query with placeholders.
+		 * @param mixed  ...$args Values.
+		 * @return string
+		 */
+		public function prepare( string $query, mixed ...$args ): string {
+			return (string) preg_replace_callback(
+				'/%[ds]/',
+				static function ( array $placeholder ) use ( &$args ): string {
+					$arg = array_shift( $args );
+					return '%d' === $placeholder[0] ? (string) (int) $arg : "'" . addslashes( (string) $arg ) . "'";
+				},
+				$query
+			);
+		}
+
+		/**
+		 * Run a post meta DELETE on post_id, meta_key and meta_value; any other query fails the test.
+		 *
+		 * @param string $query Prepared query.
+		 * @return int|false Rows deleted.
+		 */
+		public function query( string $query ): int|false {
+			$quoted = "'((?:[^'\\\\]|\\\\.)*)'";
+			if ( ! preg_match( "/^DELETE FROM {$this->postmeta} WHERE post_id = (\\d+) AND meta_key = {$quoted} AND meta_value = (CAST\\( )?{$quoted}( AS BINARY \\))?$/", $query, $matches ) ) {
+				throw new LogicException( "Unsupported query: {$query}" );
+			}
+			return $this->delete_post_meta_row( (int) $matches[1], stripslashes( $matches[2] ), stripslashes( $matches[4] ), '' !== $matches[3] && '' !== ( $matches[5] ?? '' ) );
+		}
+
+		/**
+		 * Delete one post meta row in one step, like one DELETE statement.
+		 *
+		 * @param int         $post_id  Post ID.
+		 * @param string      $meta_key Meta key.
+		 * @param string|null $value    Serialized value to match, or null for any.
+		 * @param bool        $binary   Whether the value is compared byte for byte.
+		 * @return int Rows deleted.
+		 */
+		protected function delete_post_meta_row( int $post_id, string $meta_key, ?string $value, bool $binary ): int {
+			$meta = $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] ?? [];
+			if ( ! array_key_exists( $meta_key, $meta ) ) {
+				return 0;
+			}
+			$stored  = (string) maybe_serialize( $meta[ $meta_key ] );
+			$collate = static fn( string $text ): string => $binary ? $text : mb_strtolower( rtrim( $text, ' ' ) );
+			if ( null !== $value && $collate( $value ) !== $collate( $stored ) ) {
+				return 0;
+			}
+			unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $meta_key ] );
+			return 1;
+		}
+	}
+}
+
+if ( ! isset( $GLOBALS['wpdb'] ) ) {
+	$GLOBALS['wpdb'] = new wpdb();
 }
 
 if ( ! function_exists( 'update_post_meta' ) ) {

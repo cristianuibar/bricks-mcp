@@ -100,25 +100,25 @@ if ( ! function_exists( 'rest_url' ) ) {
 
 if ( ! function_exists( 'wp_unslash' ) ) {
 	/**
-	 * Stub wp_unslash.
+	 * Stub wp_unslash; like WordPress, it unslashes array values too.
 	 *
 	 * @param mixed $value Value to unslash.
 	 * @return mixed
 	 */
 	function wp_unslash( mixed $value ): mixed {
-		return is_string( $value ) ? stripslashes( $value ) : $value;
+		return is_array( $value ) ? array_map( 'wp_unslash', $value ) : ( is_string( $value ) ? stripslashes( $value ) : $value );
 	}
 }
 
 if ( ! function_exists( 'wp_slash' ) ) {
 	/**
-	 * Stub wp_slash.
+	 * Stub wp_slash; like WordPress, it slashes array values too.
 	 *
 	 * @param mixed $value Value to slash.
 	 * @return mixed
 	 */
 	function wp_slash( mixed $value ): mixed {
-		return is_string( $value ) ? addslashes( $value ) : $value;
+		return is_array( $value ) ? array_map( 'wp_slash', $value ) : ( is_string( $value ) ? addslashes( $value ) : $value );
 	}
 }
 

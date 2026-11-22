@@ -174,6 +174,15 @@ if ( ! function_exists( 'wp_cache_incr' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_cache_delete' ) ) {
+	function wp_cache_delete( int|string $key, string $group = '' ): bool {
+		$full_key = $group . ':' . $key;
+		$existed  = array_key_exists( $full_key, $GLOBALS['_bricks_mcp_test_cache'] );
+		unset( $GLOBALS['_bricks_mcp_test_cache'][ $full_key ] );
+		return $existed;
+	}
+}
+
 if ( ! function_exists( 'wp_cache_flush' ) ) {
 	function wp_cache_flush(): bool {
 		$GLOBALS['_bricks_mcp_test_cache'] = [];

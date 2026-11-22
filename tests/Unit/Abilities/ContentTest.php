@@ -11,6 +11,9 @@ declare(strict_types=1);
 namespace BricksMCP\Tests\Unit\Abilities;
 
 use BricksMCP\Abilities\Content;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -851,6 +854,92 @@ final class ContentTest extends TestCase {
 				'seo'    => [
 					'noindex'      => false,
 					'twitterImage' => '',
+				],
+			]
+		);
+
+		$this->assertSame( '', get_post_meta( self::POST_ID, 'slim_seo', true ) );
+	}
+
+	/**
+	 * Slim SEO records an editor saves while a clear empties the record, and the clear's fields.
+	 *
+	 * @return array<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: array<string, string|bool>}>
+	 */
+	public static function slim_seo_saves_during_a_clear(): array {
+		return [
+			'a new image'                     => [ [ 'noindex' => 1 ], [ 'noindex' => 1, 'facebook_image' => 'https://example.com/fb.jpg' ], [ 'noindex' => false ] ],
+			'an image that only changes case' => [ [ 'facebook_image' => 'https://example.com/Hero.jpg' ], [ 'facebook_image' => 'https://example.com/hero.jpg' ], [ 'ogImage' => '' ] ],
+		];
+	}
+
+	/**
+	 * Clearing the last Slim SEO field keeps a record saved after the clear read it, up to the delete itself.
+	 *
+	 * @param array<string, mixed>       $record Record the clear reads.
+	 * @param array<string, mixed>       $saved  Record the editor saves.
+	 * @param array<string, string|bool> $seo    Fields the clear empties.
+	 * @return void
+	 */
+	#[DataProvider( 'slim_seo_saves_during_a_clear' )]
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_slim_seo_clear_keeps_a_record_saved_after_it_was_read( array $record, array $saved, array $seo ): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, 'slim_seo', $record );
+		// Slim SEO's editor saves the post after the clear has read and matched the row, just before the row is deleted.
+		$GLOBALS['wpdb'] = new class( $saved ) extends \wpdb {
+			/**
+			 * @param array<string, mixed> $saved Record the editor saves.
+			 */
+			public function __construct( private array $saved ) {}
+
+			/**
+			 * @param int         $post_id  Post ID.
+			 * @param string      $meta_key Meta key.
+			 * @param string|null $value    Serialized value to match, or null for any.
+			 * @param bool        $binary   Whether the value is compared byte for byte.
+			 * @return int
+			 */
+			protected function delete_post_meta_row( int $post_id, string $meta_key, ?string $value, bool $binary ): int {
+				update_metadata( 'post', $post_id, 'slim_seo', $this->saved );
+				return parent::delete_post_meta_row( $post_id, $meta_key, $value, $binary );
+			}
+		};
+
+		$this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => $seo,
+			]
+		);
+
+		$this->assertSame( $saved, get_post_meta( self::POST_ID, 'slim_seo', true ) );
+	}
+
+	/**
+	 * Clearing the last Slim SEO fields deletes a record whose values hold a backslash.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_clear_deletes_a_record_with_a_backslash(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		$GLOBALS['_bricks_mcp_test_post_meta'][ self::POST_ID ]['slim_seo'] = [
+			'title'   => 'AC\\DC tribute',
+			'noindex' => 1,
+		];
+
+		$this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'title'   => '',
+					'noindex' => false,
 				],
 			]
 		);
