@@ -38,10 +38,12 @@ final class UpdateChecker {
 	 *
 	 * Tag and asset segments allow only RFC 3986 unreserved characters, so no
 	 * percent-encoded or backslash form of a dot segment or separator can pass.
+	 * The tag also allows "+" and its encoded "%2B" for semver build metadata
+	 * (v2.1.0+build.7), which GitHub percent-encodes in download URLs.
 	 *
 	 * @var string
 	 */
-	private const RELEASE_ASSET_URL_PATTERN = '#^https://github\.com/cristianuibar/bricks-mcp/releases/download/(?!\.\.?/)[A-Za-z0-9._~-]+/(?!\.\.?\z)[A-Za-z0-9._~-]+\z#';
+	private const RELEASE_ASSET_URL_PATTERN = '#^https://github\.com/cristianuibar/bricks-mcp/releases/download/(?!\.\.?/)(?:[A-Za-z0-9._~+-]|%2[Bb])+/(?!\.\.?\z)[A-Za-z0-9._~-]+\z#';
 
 	/**
 	 * Prefix on the package URL offered to WordPress.
