@@ -2,15 +2,18 @@
 /**
  * Loads the unit test bootstrap and creates a category whose name is exactly at the length limit.
  *
- * Executed in its own PHP process by BuilderTest with another default_charset, because
- * the bootstrap sets the mbstring encoding once per process. Prints a JSON result with
- * the ability reply and the stored categories.
+ * Executed in its own PHP process by BuilderTest, because the bootstrap sets the mbstring
+ * encoding once per process. Prints a JSON result with the ability reply and the stored
+ * categories.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
  */
 
 declare(strict_types=1);
+
+// Start in a non-UTF-8 encoding even when the runner's ini sets internal_encoding to UTF-8, so only the bootstrap can fix it.
+mb_internal_encoding( 'ISO-8859-1' );
 
 require dirname( __DIR__, 3 ) . '/bootstrap-simple.php';
 

@@ -292,11 +292,19 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ ...$stored, $longest ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
-	public function test_category_name_limit_holds_when_the_runner_uses_another_default_charset(): void {
-		// mbstring's encoding follows default_charset unless set, and the bootstrap runs once per process, so use a fresh one.
+	public static function runner_encodings(): array {
+		return [
+			'another default_charset'     => [ '-d default_charset=ISO-8859-1' ],
+			'UTF-8 internal_encoding ini' => [ '-d internal_encoding=UTF-8' ],
+		];
+	}
+
+	#[DataProvider( 'runner_encodings' )]
+	public function test_category_name_limit_holds_whatever_encoding_the_runner_ini_sets( string $ini ): void {
+		// The bootstrap runs once per process, so use a fresh one; the fixture starts it in ISO-8859-1 whatever the runner's ini says.
 		$output = [];
 		$status = 1;
-		exec( escapeshellarg( PHP_BINARY ) . ' -d default_charset=ISO-8859-1 ' . escapeshellarg( __DIR__ . '/fixtures/category-name-boundary.php' ) . ' 2>&1', $output, $status );
+		exec( escapeshellarg( PHP_BINARY ) . ' ' . $ini . ' ' . escapeshellarg( __DIR__ . '/fixtures/category-name-boundary.php' ) . ' 2>&1', $output, $status );
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertSame(
