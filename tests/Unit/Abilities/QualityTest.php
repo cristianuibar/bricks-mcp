@@ -436,6 +436,22 @@ final class QualityTest extends TestCase {
 		);
 	}
 
+	public function test_missing_class_id_with_surrounding_whitespace_is_not_printed_as_its_trimmed_form(): void {
+		$letters = str_repeat( 'a', 64 );
+		$this->fake_elements( [ $this->heading_with_classes( [ $letters . "\n", ' known ' ] ) ] );
+
+		$messages = [];
+		foreach ( $this->diagnose()['issues'] as $issue ) {
+			if ( 'missing_global_class' === $issue['type'] ) {
+				$messages[] = $issue['message'] . ' ' . $issue['fix'];
+			}
+		}
+
+		$this->assertCount( 1, $messages );
+		$this->assertStringContainsString( 'references global class "(invalid id)"', $messages[0] );
+		$this->assertStringNotContainsString( $letters, $messages[0] );
+	}
+
 	public function test_root_placeholder_fix_resends_the_css_through_update_element_without_a_hand_written_selector(): void {
 		$this->fake_elements(
 			[
