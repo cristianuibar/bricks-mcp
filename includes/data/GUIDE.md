@@ -62,7 +62,7 @@ Arguments: `postId`, optional `focus` (`all`, `seo`, `accessibility`, `performan
 Read and write SEO fields through the active SEO plugin (Yoast SEO, Rank Math, SEOPress, Slim SEO), or through Bricks page settings when none is active. `get-seo` takes `postId` and returns `source`, `supportedFields`, the fields and an audit. `update-seo` takes `postId` and a `seo` object with only the fields to change (`title`, `description`, `noindex`, `nofollow`, `canonical`, `ogTitle`, `ogDescription`, `ogImage`, `twitterTitle`, `twitterDescription`, `twitterImage`, `focusKeyword`). An empty string clears a field.
 
 - Always call `get-seo` first. With an SEO plugin active, Bricks page settings such as `documentTitle` and `metaDescription` are ignored by the rendered page, so never write SEO through `bricks/set-page-settings` in that case.
-- Fields the source cannot store come back in `unsupported`. Slim SEO only stores title, description and canonical.
+- Fields the source cannot store come back in `unsupported`. Slim SEO stores title, description, noindex, canonical, ogImage and twitterImage.
 - Aim for titles of 30-60 characters, descriptions of 120-160, and an Open Graph image of 1200x630.
 
 ### bricks-mcp/set-post-status

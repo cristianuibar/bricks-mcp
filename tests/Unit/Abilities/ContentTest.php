@@ -662,6 +662,86 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Slim SEO noindex, Facebook image and Twitter image are read, set and cleared in its settings array.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_reads_sets_and_clears_noindex_and_images(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta(
+			self::POST_ID,
+			'slim_seo',
+			[
+				'title'          => 'Roofing',
+				'noindex'        => 1,
+				'facebook_image' => 'https://example.com/fb.jpg',
+				'twitter_image'  => 'https://example.com/tw.jpg',
+			]
+		);
+
+		$read = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+
+		$this->assertSame( 'slimseo', $read['source'] );
+		$this->assertEqualsCanonicalizing( [ 'title', 'description', 'canonical', 'noindex', 'ogImage', 'twitterImage' ], $read['supportedFields'] );
+		$this->assertTrue( $read['fields']['noindex'] );
+		$this->assertSame( 'https://example.com/fb.jpg', $read['fields']['ogImage'] );
+		$this->assertSame( 'https://example.com/tw.jpg', $read['fields']['twitterImage'] );
+		$this->assertTrue( $read['audit']['hasOgImage'] );
+
+		$cleared = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'noindex'      => false,
+					'ogImage'      => '',
+					'twitterImage' => '',
+				],
+			]
+		);
+
+		$this->assertSame( [], $cleared['unsupported'] );
+		$this->assertSame( [ 'title' => 'Roofing' ], get_post_meta( self::POST_ID, 'slim_seo', true ) );
+		$this->assertFalse( $cleared['after']['noindex'] );
+
+		$this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'title'        => '',
+					'noindex'      => true,
+					'twitterImage' => 'https://example.com/new.jpg',
+				],
+			]
+		);
+
+		$this->assertSame(
+			[
+				'noindex'       => 1,
+				'twitter_image' => 'https://example.com/new.jpg',
+			],
+			get_post_meta( self::POST_ID, 'slim_seo', true )
+		);
+
+		$this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'noindex'      => false,
+					'twitterImage' => '',
+				],
+			]
+		);
+
+		$this->assertSame( '', get_post_meta( self::POST_ID, 'slim_seo', true ) );
+	}
+
+	/**
 	 * Without Bricks builder access an editor can still change status and featured image, but not the editor mode.
 	 *
 	 * @return void

@@ -81,7 +81,14 @@ final class Content implements Module {
 		'nofollow' => 'follow',
 	];
 
-	private const SLIM_SEO_FIELDS = [ 'title', 'description', 'canonical' ];
+	private const SLIM_SEO_FIELDS = [
+		'title'        => 'title',
+		'description'  => 'description',
+		'canonical'    => 'canonical',
+		'noindex'      => 'noindex',
+		'ogImage'      => 'facebook_image',
+		'twitterImage' => 'twitter_image',
+	];
 
 	private const BRICKS_SEO_SETTINGS = [
 		'title'         => 'documentTitle',
@@ -529,7 +536,7 @@ final class Content implements Module {
 	 */
 	private function supported_seo_fields( string $source ): array {
 		return match ( $source ) {
-			'slimseo' => self::SLIM_SEO_FIELDS,
+			'slimseo' => array_keys( self::SLIM_SEO_FIELDS ),
 			'bricks'  => array_merge( array_keys( self::BRICKS_SEO_SETTINGS ), [ 'ogImage' ], self::SEO_ROBOTS_FIELDS ),
 			default   => array_merge( array_keys( self::SEO_META_KEYS[ $source ] ), self::SEO_ROBOTS_FIELDS ),
 		};
@@ -548,12 +555,14 @@ final class Content implements Module {
 		}
 
 		if ( 'slimseo' === $source ) {
-			$slim = $this->slim_seo_meta( $post_id );
+			$slim   = $this->slim_seo_meta( $post_id );
+			$fields = [];
 
-			return array_map(
-				static fn( string $field ): string => (string) ( $slim[ $field ] ?? '' ),
-				array_combine( self::SLIM_SEO_FIELDS, self::SLIM_SEO_FIELDS )
-			);
+			foreach ( self::SLIM_SEO_FIELDS as $field => $key ) {
+				$fields[ $field ] = in_array( $field, self::SEO_ROBOTS_FIELDS, true ) ? (bool) ( $slim[ $key ] ?? false ) : (string) ( $slim[ $key ] ?? '' );
+			}
+
+			return $fields;
 		}
 
 		$fields = [];
@@ -605,7 +614,7 @@ final class Content implements Module {
 		}
 
 		if ( 'slimseo' === $source ) {
-			update_post_meta( $post_id, 'slim_seo', array_merge( $this->slim_seo_meta( $post_id ), $fields ) );
+			$this->write_slim_seo( $post_id, $fields );
 
 			return true;
 		}
@@ -676,6 +685,37 @@ final class Content implements Module {
 		$slim = get_post_meta( $post_id, 'slim_seo', true );
 
 		return is_array( $slim ) ? $slim : [];
+	}
+
+	/**
+	 * Merge fields into Slim SEO's per-post settings array.
+	 *
+	 * Like Slim SEO's own editor, a cleared field drops its key, noindex is stored as 1, and an empty array deletes the meta.
+	 *
+	 * @param int                        $post_id Post ID.
+	 * @param array<string, string|bool> $fields  Fields to write.
+	 * @return void
+	 */
+	private function write_slim_seo( int $post_id, array $fields ): void {
+		$slim = $this->slim_seo_meta( $post_id );
+
+		foreach ( self::SLIM_SEO_FIELDS as $field => $key ) {
+			if ( ! array_key_exists( $field, $fields ) ) {
+				continue;
+			}
+
+			if ( '' === $fields[ $field ] || false === $fields[ $field ] ) {
+				unset( $slim[ $key ] );
+			} else {
+				$slim[ $key ] = true === $fields[ $field ] ? 1 : $fields[ $field ];
+			}
+		}
+
+		if ( array() === $slim ) {
+			delete_post_meta( $post_id, 'slim_seo' );
+		} else {
+			update_post_meta( $post_id, 'slim_seo', $slim );
+		}
 	}
 
 	/**
