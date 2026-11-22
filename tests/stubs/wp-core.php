@@ -105,19 +105,40 @@ if ( ! function_exists( 'get_post_meta' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_is_post_revision' ) ) {
+	function wp_is_post_revision( mixed $post ): int|false {
+		$found = get_post( $post );
+		return $found && 'revision' === $found->post_type ? (int) ( $found->post_parent ?? 0 ) : false;
+	}
+}
+
+if ( ! function_exists( 'update_metadata' ) ) {
+	function update_metadata( string $meta_type, int $object_id, string $meta_key, mixed $meta_value, mixed $prev_value = '' ): int|bool {
+		// WordPress unslashes meta values before storing them.
+		$GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ][ $meta_key ] = wp_unslash( $meta_value );
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_metadata' ) ) {
+	function delete_metadata( string $meta_type, int $object_id, string $meta_key, mixed $meta_value = '', bool $delete_all = false ): bool {
+		$existed = isset( $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ) && array_key_exists( $meta_key, $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] );
+		unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ][ $meta_key ] );
+		return $existed;
+	}
+}
+
 if ( ! function_exists( 'update_post_meta' ) ) {
 	function update_post_meta( int $post_id, string $key, mixed $value, mixed $prev_value = '' ): int|bool {
-		// WordPress unslashes meta values before storing them.
-		$GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $key ] = wp_unslash( $value );
-		return true;
+		// Like WordPress, write a revision's meta to its parent.
+		return update_metadata( 'post', wp_is_post_revision( $post_id ) ?: $post_id, $key, $value, $prev_value );
 	}
 }
 
 if ( ! function_exists( 'delete_post_meta' ) ) {
 	function delete_post_meta( int $post_id, string $key, mixed $value = '' ): bool {
-		$existed = isset( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] ) && array_key_exists( $key, $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] );
-		unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $key ] );
-		return $existed;
+		// Like WordPress, delete a revision's meta from its parent.
+		return delete_metadata( 'post', wp_is_post_revision( $post_id ) ?: $post_id, $key, $value );
 	}
 }
 
