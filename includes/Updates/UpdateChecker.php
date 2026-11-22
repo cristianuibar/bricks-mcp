@@ -387,14 +387,18 @@ final class UpdateChecker {
 	 * Runs on plugin deactivation: an inactive plugin loads no verifier, so a
 	 * cached offer must not stay installable.
 	 *
+	 * The cached updates are deleted, not rewritten without the offer: writing back
+	 * the copy read here would replace offers a concurrent update check stored in
+	 * the meantime with older ones. WordPress checks all plugins again on its next
+	 * update check (the Plugins screen deactivation returns to runs one).
+	 *
 	 * @return void
 	 */
 	public static function forget_update_offer(): void {
 		$updates = get_site_transient( 'update_plugins' );
 
 		if ( is_object( $updates ) && isset( $updates->response[ BRICKS_MCP_PLUGIN_BASENAME ] ) ) {
-			unset( $updates->response[ BRICKS_MCP_PLUGIN_BASENAME ] );
-			set_site_transient( 'update_plugins', $updates );
+			delete_site_transient( 'update_plugins' );
 		}
 	}
 
