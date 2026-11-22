@@ -288,6 +288,19 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ ...$stored, $longest ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
+	public function test_category_creation_counts_name_length_in_utf8_under_another_internal_encoding(): void {
+		$encoding = mb_internal_encoding();
+		mb_internal_encoding( 'ISO-8859-1' );
+		try {
+			$category = wp_get_ability( 'bricks-mcp/create-global-class-category' )->execute( [ 'name' => str_repeat( 'é', 100 ) ] );
+		} finally {
+			mb_internal_encoding( $encoding );
+		}
+
+		$this->assertSame( [ $category ], get_option( 'bricks_global_classes_categories' ) );
+		$this->assertSame( str_repeat( 'é', 100 ), $category['name'] );
+	}
+
 	public function test_category_creation_skips_stored_names_that_are_not_strings(): void {
 		$stored = [ [ 'id' => 'broken', 'name' => [ 'Layout' ] ], [ 'id' => 'number', 'name' => 7 ], [ 'id' => 'legacy', 'name' => 'Existing' ] ];
 		update_option( 'bricks_global_classes_categories', $stored );

@@ -506,7 +506,7 @@ final class Builder implements Module {
 		if ( '' === $name ) {
 			return new WP_Error( 'bricks_mcp_empty_category_name', __( 'Category name is required.', 'bricks-mcp' ), [ 'status' => 400 ] );
 		}
-		if ( mb_strlen( $name ) > self::CATEGORY_NAME_MAX_LENGTH ) {
+		if ( mb_strlen( $name, 'UTF-8' ) > self::CATEGORY_NAME_MAX_LENGTH ) {
 			return new WP_Error( 'bricks_mcp_category_name_too_long', __( 'Category name is too long.', 'bricks-mcp' ), [ 'status' => 400 ] );
 		}
 
