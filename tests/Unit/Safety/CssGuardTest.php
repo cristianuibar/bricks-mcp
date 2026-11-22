@@ -348,6 +348,40 @@ final class CssGuardTest extends TestCase {
 		self::assertSame( [ 'status' => 400, 'path' => 'css', 'pattern' => 'behaviour' ], $result->get_error_data() );
 	}
 
+	public function test_skips_only_unchanged_stored_elements_while_a_move_saves_them(): void {
+		$save   = make_safety_ability( 'bricks/set-page-elements', [ 'execute_callback' => static fn() => 'saved' ] );
+		$stored = [
+			[ 'id' => 'parent', 'name' => 'div', 'parent' => 0, 'children' => [ 'styled' ] ],
+			[ 'id' => 'styled', 'name' => 'text', 'parent' => 'parent', 'children' => [], 'settings' => [ '_cssCustom' => '@import "example.css";' ] ],
+		];
+		$moved  = [
+			[ 'id' => 'parent', 'name' => 'div', 'parent' => 0, 'children' => [] ],
+			[ 'id' => 'styled', 'name' => 'text', 'parent' => 0, 'settings' => [ '_cssCustom' => '@import "example.css";' ] ],
+		];
+		$changed = $moved;
+		$added   = $moved;
+		$added[] = [ 'id' => 'addedx', 'name' => 'text', 'parent' => 0, 'settings' => [ 'css' => '@import "example.css";' ] ];
+
+		$changed[0]['settings']['_cssCustom'] = '.x { behavior: none; }';
+
+		$results = CssGuard::with_stored_elements(
+			42,
+			$stored,
+			static fn(): array => [
+				$save->execute( [ 'postId' => 42, 'elements' => $moved ] ),
+				$save->execute( [ 'postId' => 42, 'elements' => $changed ] ),
+				$save->execute( [ 'postId' => 42, 'elements' => $added ] ),
+				$save->execute( [ 'postId' => 43, 'elements' => $moved ] ),
+			]
+		);
+
+		self::assertSame( 'saved', $results[0] );
+		self::assertSame( [ 'status' => 400, 'path' => 'elements.0.settings._cssCustom', 'pattern' => 'behaviour' ], $results[1]->get_error_data() );
+		self::assertSame( [ 'status' => 400, 'path' => 'elements.2.settings.css', 'pattern' => 'import' ], $results[2]->get_error_data() );
+		self::assertSame( [ 'status' => 400, 'path' => 'elements.1.settings._cssCustom', 'pattern' => 'import' ], $results[3]->get_error_data() );
+		self::assertSame( [ 'status' => 400, 'path' => 'elements.1.settings._cssCustom', 'pattern' => 'import' ], $save->execute( [ 'postId' => 42, 'elements' => $moved ] )->get_error_data() );
+	}
+
 	public function test_allows_css_when_guard_is_disabled(): void {
 		update_option( Options::OPTION, [ 'css_guard' => false ] );
 

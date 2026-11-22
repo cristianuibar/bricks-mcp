@@ -13,10 +13,13 @@ use Bricks\Abilities\Design;
 use Bricks\Abilities\Design_Option_Store;
 use Bricks\Abilities\Save_Pipeline;
 use BricksMCP\Abilities\Builder;
+use BricksMCP\Safety\CssGuard;
 use BricksMCP\Tests\Support\BuilderDatabase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use WP_Error;
+
+use function BricksMCP\Tests\Support\make_safety_ability;
 
 final class BuilderTest extends TestCase {
 
@@ -92,6 +95,7 @@ final class BuilderTest extends TestCase {
 		BuilderDatabase::$matches          = [];
 		BuilderDatabase::$resolved         = [];
 		BuilderDatabase::$query_context    = [];
+		unset( $GLOBALS['_bricks_mcp_test_safety_filters'] );
 		bricks_mcp_test_reset();
 		parent::tearDown();
 	}
@@ -127,6 +131,33 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ 'deeper' ], $elements['firstt']['children'] );
 		$this->assertSame( 'firstt', $elements['deeper']['parent'] );
 		$this->assertSame( [ 'text' => 'Keep this' ], $elements['deeper']['settings'] );
+	}
+
+	public function test_move_saves_unrelated_stored_css_the_guard_blocks(): void {
+		$this->saved_elements[3]['settings'] = [ 'text' => '<p style="behavior: url(example.htc)">Stored</p>' ];
+		$GLOBALS['_bricks_mcp_test_safety_filters'] = [];
+		( new CssGuard() )->init();
+		$save = make_safety_ability( 'bricks/set-page-elements', wp_get_ability( 'bricks/set-page-elements' )->get_args() );
+		$GLOBALS['_bricks_mcp_test_abilities']['bricks/set-page-elements'] = $save;
+
+		$result   = $this->move( 'firstt', 'target' );
+		$elements = array_column( $this->saved_elements, null, 'id' );
+
+		$this->assertNotInstanceOf( WP_Error::class, $result, $result instanceof WP_Error ? $result->get_error_message() : '' );
+		$this->assertSame( 'target', $result['newParentId'] );
+		$this->assertSame( [ 'leafxx', 'firstt' ], $elements['target']['children'] );
+		$this->assertSame( '<p style="behavior: url(example.htc)">Stored</p>', $elements['second']['settings']['text'] );
+
+		$direct = $save->execute(
+			[
+				'postId'                 => 42,
+				'elements'               => $this->saved_elements,
+				'expectedDocumentDigest' => Save_Pipeline::document_digest( $this->saved_elements ),
+			]
+		);
+		$this->assertInstanceOf( WP_Error::class, $direct );
+		$this->assertSame( 'elements.3.settings.text.styleAttribute.0', $direct->get_error_data()['path'] );
+		$this->assertSame( 1, $this->save_count );
 	}
 
 	public function test_move_out_of_a_component_clears_the_slot_reference(): void {
