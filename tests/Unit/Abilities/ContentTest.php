@@ -742,6 +742,48 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Clearing Slim SEO fields on a revision changes the revision's own record, not its parent's.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_write_to_a_revision_keeps_the_parent_record(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		$parent = [
+			'title'   => 'Roofing',
+			'noindex' => 1,
+		];
+		update_post_meta( self::POST_ID, 'slim_seo', $parent );
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 30,
+				'post_type'   => 'revision',
+				'post_parent' => self::POST_ID,
+			]
+		);
+
+		$this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => 30,
+				'seo'    => [ 'noindex' => false ],
+			]
+		);
+		$this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => 30,
+				'seo'    => [ 'twitterImage' => 'https://example.com/tw.jpg' ],
+			]
+		);
+
+		$this->assertSame( $parent, get_post_meta( self::POST_ID, 'slim_seo', true ) );
+		$this->assertSame( [ 'twitter_image' => 'https://example.com/tw.jpg' ], get_post_meta( 30, 'slim_seo', true ) );
+	}
+
+	/**
 	 * Without Bricks builder access an editor can still change status and featured image, but not the editor mode.
 	 *
 	 * @return void

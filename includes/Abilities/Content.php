@@ -691,6 +691,7 @@ final class Content implements Module {
 	 * Merge fields into Slim SEO's per-post settings array.
 	 *
 	 * Like Slim SEO's own editor, a cleared field drops its key, noindex is stored as 1, and an empty array deletes the meta.
+	 * The metadata functions keep a revision's write on the revision; the post meta ones would redirect it to the parent.
 	 *
 	 * @param int                        $post_id Post ID.
 	 * @param array<string, string|bool> $fields  Fields to write.
@@ -712,9 +713,9 @@ final class Content implements Module {
 		}
 
 		if ( array() === $slim ) {
-			delete_post_meta( $post_id, 'slim_seo' );
+			delete_metadata( 'post', $post_id, 'slim_seo' );
 		} else {
-			update_post_meta( $post_id, 'slim_seo', $slim );
+			update_metadata( 'post', $post_id, 'slim_seo', $slim );
 		}
 	}
 
