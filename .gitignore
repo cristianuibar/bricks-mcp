@@ -5,9 +5,10 @@ vendor/
 # WordPress environment
 .wp-env/
 
-# Logs (logs/.gitkeep keeps the wp-env mount a directory)
+# Logs (logs/.gitkeep keeps the wp-env mount a directory; logs/.htaccess denies HTTP access)
 logs/*
 !logs/.gitkeep
+!logs/.htaccess
 *.log
 
 # PHPUnit
