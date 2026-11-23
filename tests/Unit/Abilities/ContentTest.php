@@ -295,6 +295,35 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * The fix for a stale Bricks noindex drops only the blocking directives, so a nosnippet next to it is kept.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_stale_bricks_robots_fix_keeps_other_directives(): void {
+		eval( 'function seopress_init() {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin function in this separate test process only.
+		update_option( 'bricks_global_settings', [ 'disableOpenGraph' => true ] );
+		update_post_meta(
+			self::POST_ID,
+			'_bricks_page_settings',
+			[
+				'metaRobots'      => [ 'noindex', 'nosnippet', 'none' ],
+				'metaDescription' => 'Old Bricks description',
+			]
+		);
+		$mixed = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'][1];
+
+		update_post_meta( self::POST_ID, '_bricks_page_settings', [ 'metaRobots' => [ 'noindex' ] ] );
+		$blocking_only = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'][1];
+
+		$this->assertSame( 'bricks_seo_stale_values', $mixed['type'] );
+		$this->assertSame( 'Clear metaDescription by sending each as null and send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops noindex, none and keeps the other robots directives, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $mixed['fix'] );
+		$this->assertSame( 'Clear metaRobots with bricks/set-page-settings by sending each as null, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $blocking_only['fix'] );
+	}
+
+	/**
 	 * A Bricks disable filter answers per front-end request, so its answer during an MCP request does not hide a live noindex.
 	 *
 	 * @runInSeparateProcess
