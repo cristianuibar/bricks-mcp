@@ -344,15 +344,18 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ ...$stored, $category ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
-	public function test_category_creation_fails_closed_when_a_stored_name_cannot_be_compared(): void {
-		$stored = [ [ 'id' => 'broken', 'name' => "Lay\xC3out" ] ];
+	public function test_category_creation_skips_stored_names_that_are_not_valid_utf8(): void {
+		$stored = [ [ 'id' => 'broken', 'name' => "Lay\xC3out" ], [ 'id' => 'legacy', 'name' => 'Existing' ] ];
 		update_option( 'bricks_global_classes_categories', $stored );
+		$ability = wp_get_ability( 'bricks-mcp/create-global-class-category' );
 
-		$result = wp_get_ability( 'bricks-mcp/create-global-class-category' )->execute( [ 'name' => 'Layout' ] );
+		$duplicate = $ability->execute( [ 'name' => 'EXISTING' ] );
+		$category  = $ability->execute( [ 'name' => 'Layout' ] );
 
-		$this->assertInstanceOf( WP_Error::class, $result );
-		$this->assertSame( 'bricks_mcp_category_compare_failed', $result->get_error_code() );
-		$this->assertSame( $stored, get_option( 'bricks_global_classes_categories' ) );
+		$this->assertInstanceOf( WP_Error::class, $duplicate );
+		$this->assertSame( 'bricks_mcp_duplicate_category', $duplicate->get_error_code() );
+		$this->assertSame( 'Layout', $category['name'] );
+		$this->assertSame( [ ...$stored, $category ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
 	public function test_category_deletion_uncategorizes_its_classes(): void {

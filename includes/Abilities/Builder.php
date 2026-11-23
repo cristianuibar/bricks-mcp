@@ -525,7 +525,8 @@ final class Builder implements Module {
 		$name_pattern = '/\A' . preg_quote( $name, '/' ) . '\z/iu';
 
 		foreach ( array_column( $categories, 'name' ) as $existing ) {
-			if ( ! is_string( $existing ) ) {
+			// A legacy name with invalid UTF-8 cannot equal the sanitized name, and the u pattern cannot read it.
+			if ( ! is_string( $existing ) || ! mb_check_encoding( $existing, 'UTF-8' ) ) {
 				continue;
 			}
 			$match = preg_match( $name_pattern, $existing );
