@@ -155,6 +155,31 @@ if ( ! function_exists( 'delete_transient' ) ) {
 	}
 }
 
+if ( ! function_exists( 'get_site_transient' ) ) {
+	function get_site_transient( string $transient ): mixed {
+		return $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] ?? false;
+	}
+}
+
+if ( ! function_exists( 'delete_site_transient' ) ) {
+	function delete_site_transient( string $transient ): bool {
+		unset( $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] );
+		return true;
+	}
+}
+
+if ( ! function_exists( 'is_multisite' ) ) {
+	function is_multisite(): bool {
+		return (bool) ( $GLOBALS['_bricks_mcp_test_is_multisite'] ?? false );
+	}
+}
+
+if ( ! function_exists( 'is_plugin_active_for_network' ) ) {
+	function is_plugin_active_for_network( string $plugin ): bool {
+		return in_array( $plugin, $GLOBALS['_bricks_mcp_test_network_active_plugins'] ?? [], true );
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Error / sanitization / i18n helpers.
 // ---------------------------------------------------------------------------

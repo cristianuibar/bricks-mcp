@@ -191,6 +191,7 @@ register_deactivation_hook( __FILE__, 'bricks_mcp_deactivate' );
 function bricks_mcp_init(): void {
 	if ( ! bricks_mcp_check_bricks_version() ) {
 		add_action( 'admin_notices', 'bricks_mcp_bricks_version_notice' );
+		( new BricksMCP\Updates\UpdateChecker() )->init();
 		return;
 	}
 	BricksMCP\Plugin::get_instance();

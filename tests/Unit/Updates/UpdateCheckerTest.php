@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace BricksMCP\Tests\Unit\Updates;
 
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use BricksMCP\Updates\UpdateChecker;
@@ -54,6 +55,9 @@ final class UpdateCheckerTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_remote_get']        = [];
 		$GLOBALS['_bricks_mcp_test_active_plugins']    = [ 'mcp-adapter/mcp-adapter.php' ];
 		$GLOBALS['wp_version']                         = '7.1';
+		$GLOBALS['_bricks_mcp_test_site_transients']   = [];
+		$GLOBALS['_bricks_mcp_test_is_multisite']      = false;
+		$GLOBALS['_bricks_mcp_test_network_active_plugins'] = [];
 	}
 
 	/**
@@ -321,6 +325,7 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
 	public function test_old_bricks_is_offered_1x_only(): void {
 		define( 'BRICKS_VERSION', '2.4.9' );
 		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
@@ -329,6 +334,7 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
 	public function test_bricks_beta_counts_as_eligible(): void {
 		define( 'BRICKS_VERSION', '2.5-beta1' );
 		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
@@ -359,14 +365,77 @@ final class UpdateCheckerTest extends TestCase {
 		$this->assertSame( [], $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] );
 	}
 
-	public function test_cached_2x_is_not_offered_once_the_site_stops_being_eligible(): void {
+	public function test_cached_2x_gives_way_to_1x_once_the_site_stops_being_eligible(): void {
 		$this->with_bricks();
 		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
 		$this->assertSame( '2.0.0', $this->offer()['version'] );
 
 		$GLOBALS['_bricks_mcp_test_active_plugins'] = [];
 
-		$this->assertFalse( $this->offer() );
+		$this->assertSame( '1.5.2', $this->offer()['version'] );
+	}
+
+	public function test_adapter_active_on_one_site_only_does_not_make_a_multisite_eligible(): void {
+		$this->with_bricks();
+		$GLOBALS['_bricks_mcp_test_is_multisite'] = true;
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
+
+		$this->assertSame( '1.5.2', $this->offer()['version'] );
+
+		$this->checker->clear_cache();
+		$GLOBALS['_bricks_mcp_test_network_active_plugins'] = [ 'mcp-adapter/mcp-adapter.php' ];
+
+		$this->assertSame( '2.0.0', $this->offer()['version'] );
+	}
+
+	public function test_cached_2x_is_hidden_from_the_settings_page_once_the_site_stops_being_eligible(): void {
+		$this->with_bricks();
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
+		$this->offer();
+		$this->assertSame( '2.0.0', $this->checker->get_cached_update_data()['version'] );
+
+		$GLOBALS['_bricks_mcp_test_active_plugins'] = [];
+
+		$this->assertSame( [], $this->checker->get_cached_update_data() );
+	}
+
+	public function test_cached_2x_package_is_refused_at_install_time_once_the_site_stops_being_eligible(): void {
+		$this->with_bricks();
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ] ] );
+		$this->offer();
+		$GLOBALS['_bricks_mcp_test_site_transients']['update_plugins'] = (object) [ 'response' => [ 'bricks-mcp/bricks-mcp.php' => (object) [ 'new_version' => '2.0.0' ] ] ];
+		$GLOBALS['_bricks_mcp_test_active_plugins']                    = [];
+		$GLOBALS['_bricks_mcp_test_download_url_return']               = $this->make_temp_file( 'zip' );
+
+		$result = $this->checker->verify_download(
+			false,
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.0.0/bricks-mcp.zip',
+			new \stdClass(),
+			[ 'plugin' => 'bricks-mcp/bricks-mcp.php' ]
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'requirements_not_met', $result->get_error_code() );
+		$this->assertStringContainsString( 'MCP Adapter', $result->message );
+		$this->assertArrayNotHasKey( 'bricks_mcp_update_data', $GLOBALS['_bricks_mcp_test_transients'] );
+		$this->assertArrayNotHasKey( 'update_plugins', $GLOBALS['_bricks_mcp_test_site_transients'] );
+	}
+
+	public function test_cached_2x_package_is_downloaded_and_verified_on_an_eligible_site(): void {
+		$this->with_bricks();
+		$content = 'fake 2.x zip';
+		$temp    = $this->make_temp_file( $content );
+		$GLOBALS['_bricks_mcp_test_download_url_return'] = $temp;
+		$this->set_expected_hash( hash( 'sha256', $content ) );
+
+		$result = $this->checker->verify_download(
+			false,
+			'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.0.0/bricks-mcp.zip',
+			new \stdClass(),
+			[ 'plugin' => 'bricks-mcp/bricks-mcp.php' ]
+		);
+
+		$this->assertSame( $temp, $result );
 	}
 
 	public function test_major_jump_is_refused_by_the_auto_update_filter(): void {

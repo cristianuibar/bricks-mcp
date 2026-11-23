@@ -154,7 +154,7 @@ final class UpdateChecker {
 	 * @return bool|null
 	 */
 	public function block_major_auto_update( $update, $item ) {
-		if ( 'bricks-mcp/bricks-mcp.php' !== ( $item->plugin ?? '' ) ) {
+		if ( BRICKS_MCP_PLUGIN_BASENAME !== ( $item->plugin ?? '' ) ) {
 			return $update;
 		}
 
@@ -174,16 +174,41 @@ final class UpdateChecker {
 	 * @return bool
 	 */
 	private function is_installable( string $version ): bool {
+		return [] === $this->unmet_requirements( $version );
+	}
+
+	/**
+	 * Requirements the site does not meet for the given release version.
+	 *
+	 * On multisite the adapter must be network-activated, because plugin files are shared network-wide.
+	 *
+	 * @param string $version Release version.
+	 * @return array<int,string> Unmet requirements, empty when installable.
+	 */
+	private function unmet_requirements( string $version ): array {
 		if ( version_compare( $version, '2', '<' ) ) {
-			return true;
+			return [];
 		}
 
 		global $wp_version;
 
-		return version_compare( (string) $wp_version, '7.1', '>=' )
-			&& defined( 'BRICKS_VERSION' )
-			&& version_compare( (string) BRICKS_VERSION, '2.5-dev', '>=' )
-			&& is_plugin_active( self::ADAPTER_PLUGIN );
+		$unmet = [];
+
+		if ( version_compare( (string) $wp_version, '7.1', '<' ) ) {
+			$unmet[] = 'WordPress 7.1 or higher';
+		}
+
+		if ( ! defined( 'BRICKS_VERSION' ) || version_compare( (string) BRICKS_VERSION, '2.5-dev', '<' ) ) {
+			$unmet[] = 'Bricks Builder 2.5 or higher';
+		}
+
+		$adapter_active = is_multisite() ? is_plugin_active_for_network( self::ADAPTER_PLUGIN ) : is_plugin_active( self::ADAPTER_PLUGIN );
+
+		if ( ! $adapter_active ) {
+			$unmet[] = 'an active MCP Adapter plugin';
+		}
+
+		return $unmet;
 	}
 
 	/**
@@ -198,7 +223,7 @@ final class UpdateChecker {
 	private function get_update_data(): array {
 		$cached = get_transient( self::TRANSIENT_KEY );
 
-		if ( false !== $cached ) {
+		if ( false !== $cached && $this->is_installable( (string) ( $cached['version'] ?? '0' ) ) ) {
 			return $cached;
 		}
 
@@ -308,8 +333,27 @@ final class UpdateChecker {
 
 		// Only verify our own plugin — leave other plugins untouched.
 		$plugin = $hook_extra['plugin'] ?? '';
-		if ( 'bricks-mcp/bricks-mcp.php' !== $plugin ) {
+		if ( BRICKS_MCP_PLUGIN_BASENAME !== $plugin ) {
 			return $reply;
+		}
+
+		if ( 1 === preg_match( '#/releases/download/v?(\d+\.\d+\.\d+)/#', $package, $target ) && (int) $target[1] > (int) BRICKS_MCP_VERSION ) {
+			$unmet = $this->unmet_requirements( $target[1] );
+
+			if ( [] !== $unmet ) {
+				$this->clear_cache();
+				delete_site_transient( 'update_plugins' );
+
+				return new \WP_Error(
+					'requirements_not_met',
+					sprintf(
+						/* translators: 1: Release version, 2: Unmet requirements */
+						__( 'Bricks MCP %1$s cannot be installed. It requires: %2$s.', 'bricks-mcp' ),
+						$target[1],
+						implode( ', ', $unmet )
+					)
+				);
+			}
 		}
 
 		// If no expected hash is cached, degrade gracefully — allow the update to proceed.
@@ -357,7 +401,7 @@ final class UpdateChecker {
 	public function get_cached_update_data(): array {
 		$cached = get_transient( self::TRANSIENT_KEY );
 
-		return false !== $cached ? $cached : [];
+		return false !== $cached && $this->is_installable( (string) ( $cached['version'] ?? '0' ) ) ? $cached : [];
 	}
 
 	/**
