@@ -352,7 +352,8 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
-	 * The fix for a stale Bricks noindex drops only the blocking directives, so a nosnippet next to it is kept.
+	 * The fix for a stale Bricks noindex drops only the blocking directives, so a nosnippet next to it is kept. Robots
+	 * directives are case-insensitive, so a stored NOINDEX is an error too.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
@@ -375,9 +376,15 @@ final class ContentTest extends TestCase {
 		update_post_meta( self::POST_ID, '_bricks_page_settings', [ 'metaRobots' => [ 'noindex' ] ] );
 		$blocking_only = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'][1];
 
+		update_post_meta( self::POST_ID, '_bricks_page_settings', [ 'metaRobots' => [ 'NOINDEX', 'nosnippet' ] ] );
+		$upper = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'][1];
+
 		$this->assertSame( 'bricks_seo_stale_values', $mixed['type'] );
 		$this->assertSame( 'Clear metaDescription by sending each as null and send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops noindex, none and keeps the other robots directives, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $mixed['fix'] );
 		$this->assertSame( 'Clear metaRobots with bricks/set-page-settings by sending each as null, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $blocking_only['fix'] );
+		$this->assertSame( 'error', $upper['severity'] );
+		$this->assertStringContainsString( 'Its robots tag says NOINDEX whatever the SEO plugin says', $upper['message'] );
+		$this->assertSame( 'Send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops NOINDEX and keeps the other robots directives, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $upper['fix'] );
 	}
 
 	/**
