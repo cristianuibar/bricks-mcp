@@ -43,6 +43,9 @@ final class Media implements Module {
 
 	private const UNSPLASH_PHOTOGRAPHER_URL_META_KEY = '_unsplash_photographer_url';
 
+	// Set after the photo ID on upload and removed once the attribution is saved, so a retry completes the attachment.
+	private const UNSPLASH_PENDING_META_KEY = '_unsplash_attribution_pending';
+
 	private const GLOBAL_SETTINGS_OPTION = 'bricks_global_settings';
 
 	private const ADOBE_FONTS_OPTION = 'bricks_adobe_fonts';
@@ -218,18 +221,34 @@ final class Media implements Module {
 
 		$post_id     = isset( $input['postId'] ) ? (int) $input['postId'] : 0;
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
+		$pending     = false;
 		if ( null !== $existing_id ) {
-			if ( $post_id > 0 && current_user_can( 'edit_post', $existing_id ) ) {
-				$existing_post = get_post( $existing_id );
-				if ( $existing_post && 0 === (int) ( $existing_post->post_parent ?? 0 ) ) {
-					$attached = $this->attach_to_post( $existing_id, $post_id );
-					if ( is_wp_error( $attached ) ) {
-						return $attached;
-					}
-				}
+			// The credit URL is saved last, so an attachment without it lacks its attribution. This import names its
+			// upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is an unfinished
+			// import even if its pending mark failed. Releases before stored attribution kept the Unsplash file name.
+			$uncredited = '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
+			$pending    = $uncredited && (
+				'' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true )
+				|| str_starts_with( wp_basename( (string) get_post_meta( $existing_id, '_wp_attached_file', true ) ), 'unsplash-' )
+			);
+			// A legacy attachment is completed when this caller can, else returned as it is.
+			$uncredited = $uncredited && ! $pending;
+			$completing = $pending || ( $uncredited && current_user_can( 'edit_post', $existing_id ) && '' !== $this->get_unsplash_api_key() );
+			if ( ! $completing ) {
+				return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
+		}
 
-			return $this->format_existing_attachment( $existing_id, $photo_id );
+		// Uploading again would duplicate the attachment, so only a user who can complete it may continue.
+		if ( $pending && ! current_user_can( 'edit_post', $existing_id ) ) {
+			return new \WP_Error(
+				'bricks_mcp_unsplash_import_incomplete',
+				__( 'An earlier import of this Unsplash photo left an attachment without its attribution. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
+				[
+					'status'       => 403,
+					'attachmentId' => $existing_id,
+				]
+			);
 		}
 
 		$api_key = $this->get_unsplash_api_key();
@@ -241,7 +260,36 @@ final class Media implements Module {
 		$photo     = $this->unsplash_get_json( $photo_url, $api_key );
 
 		if ( is_wp_error( $photo ) ) {
-			return $photo;
+			// A legacy attachment always deduplicates: when Unsplash cannot credit it, it is returned as it is.
+			return null !== $existing_id && ! $pending ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
+		}
+
+		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
+			? sanitize_text_field( $photo['user']['name'] )
+			: '';
+		$photographer_url = $this->with_unsplash_utm(
+			isset( $photo['user']['links']['html'] ) && is_string( $photo['user']['links']['html'] ) && '' !== $photo['user']['links']['html']
+				? $photo['user']['links']['html']
+				: 'https://unsplash.com'
+		);
+
+		// Attribution is kept so a duplicate import can return it; the caption may be edited later.
+		$attribution = [
+			self::UNSPLASH_PHOTOGRAPHER_META_KEY     => $photographer,
+			self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY => $photographer_url,
+		];
+
+		if ( null !== $existing_id ) {
+			// The attachment may already be in use, so a failure here keeps it for the next retry.
+			$recorded = $this->record_unsplash_attribution( $existing_id, $attribution );
+			if ( is_wp_error( $recorded ) ) {
+				return $recorded;
+			}
+
+			// After a marked failure the earlier call reported an error, so this call is the one that completed the import.
+			$completed = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
+
+			return is_wp_error( $completed ) || ! $pending ? $completed : array_merge( $completed, [ 'duplicate' => false ] );
 		}
 
 		$image_url = '';
@@ -266,15 +314,6 @@ final class Media implements Module {
 			? $photo['links']['download_location']
 			: '';
 		$this->ping_unsplash_download( $download_location, $api_key );
-
-		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
-			? sanitize_text_field( $photo['user']['name'] )
-			: '';
-		$photographer_url = $this->with_unsplash_utm(
-			isset( $photo['user']['links']['html'] ) && is_string( $photo['user']['links']['html'] ) && '' !== $photo['user']['links']['html']
-				? $photo['user']['links']['html']
-				: 'https://unsplash.com'
-		);
 
 		$caption = '' !== $photographer
 			/* translators: %s: photographer name */
@@ -315,29 +354,24 @@ final class Media implements Module {
 			);
 		}
 
-		// Attribution is kept so a duplicate import can return it; the caption may be edited later.
-		// The photo ID goes last: a retry deduplicates only an attachment whose attribution was saved.
-		$import_meta = [
-			self::UNSPLASH_PHOTOGRAPHER_META_KEY     => $photographer,
-			self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY => $photographer_url,
-			self::UNSPLASH_META_KEY                  => $photo_id,
-		];
-		foreach ( $import_meta as $meta_key => $meta_value ) {
-			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
-			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
-			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
-				// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
-				$error_data = [ 'status' => 500 ];
-				if ( ! wp_delete_attachment( $attachment_id, true ) ) {
-					$error_data['attachmentId'] = $attachment_id;
-				}
-
-				return new \WP_Error(
-					'bricks_mcp_unsplash_meta_failed',
-					__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
-					$error_data
-				);
+		// The photo ID goes first, so a retry finds this attachment by it; only a failure here leaves it unfindable.
+		if ( ! $this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_META_KEY => $photo_id ] ) ) {
+			// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
+			$error_data = [ 'status' => 500 ];
+			if ( ! wp_delete_attachment( $attachment_id, true ) ) {
+				$error_data['attachmentId'] = $attachment_id;
 			}
+
+			return $this->unsplash_meta_error( $error_data );
+		}
+
+		// The pending mark lets any retry complete a failed attribution. If it does not persist, a retry still finds
+		// this attachment by its photo ID, without a credit URL, and completes it when the caller can edit it.
+		$this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_PENDING_META_KEY => '1' ] );
+
+		$recorded = $this->record_unsplash_attribution( $attachment_id, $attribution );
+		if ( is_wp_error( $recorded ) ) {
+			return $recorded;
 		}
 
 		if ( $post_id > 0 ) {
@@ -1026,6 +1060,86 @@ final class Media implements Module {
 		}
 
 		return '';
+	}
+
+	/**
+	 * Save meta values on an attachment, stopping at the first one that does not persist.
+	 *
+	 * @param int                  $attachment_id Attachment ID.
+	 * @param array<string,string> $meta          Meta values by key, in write order.
+	 * @return bool Whether every value was saved.
+	 */
+	private function write_unsplash_meta( int $attachment_id, array $meta ): bool {
+		foreach ( $meta as $meta_key => $meta_value ) {
+			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
+			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
+			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Save the photographer attribution of an attachment marked with its photo ID, then clear its pending mark.
+	 *
+	 * On failure the attachment stays, as it may already be in use, and a retry finds it by the photo ID.
+	 *
+	 * @param int                  $attachment_id Attachment ID.
+	 * @param array<string,string> $attribution   Attribution meta values by key.
+	 * @return true|\WP_Error
+	 */
+	private function record_unsplash_attribution( int $attachment_id, array $attribution ): true|\WP_Error {
+		if ( ! $this->write_unsplash_meta( $attachment_id, $attribution ) ) {
+			return $this->unsplash_meta_error(
+				[
+					'status'       => 500,
+					'attachmentId' => $attachment_id,
+				]
+			);
+		}
+
+		// A mark left behind is ignored, since the credit URL saved last shows the attribution is complete.
+		delete_post_meta( $attachment_id, self::UNSPLASH_PENDING_META_KEY );
+
+		return true;
+	}
+
+	/**
+	 * Error for Unsplash import meta that did not persist on the uploaded attachment.
+	 *
+	 * @param array<string, int> $error_data Error data.
+	 * @return \WP_Error
+	 */
+	private function unsplash_meta_error( array $error_data ): \WP_Error {
+		return new \WP_Error(
+			'bricks_mcp_unsplash_meta_failed',
+			__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
+			$error_data
+		);
+	}
+
+	/**
+	 * Return an attachment already in the library for this photo, attaching it to the post when it is unattached.
+	 *
+	 * @param int    $attachment_id Existing attachment ID.
+	 * @param string $photo_id      Unsplash photo ID.
+	 * @param int    $post_id       Requested parent post ID, or 0.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function reuse_existing_attachment( int $attachment_id, string $photo_id, int $post_id ): array|\WP_Error {
+		if ( $post_id > 0 && current_user_can( 'edit_post', $attachment_id ) ) {
+			$existing_post = get_post( $attachment_id );
+			if ( $existing_post && 0 === (int) ( $existing_post->post_parent ?? 0 ) ) {
+				$attached = $this->attach_to_post( $attachment_id, $post_id );
+				if ( is_wp_error( $attached ) ) {
+					return $attached;
+				}
+			}
+		}
+
+		return $this->format_existing_attachment( $attachment_id, $photo_id );
 	}
 
 	/**
