@@ -799,9 +799,7 @@ final class Content implements Module {
 		}
 
 		if ( 'slimseo' === $source ) {
-			$this->write_slim_seo( $post_id, $fields );
-
-			return true;
+			return $this->write_slim_seo( $post_id, $fields );
 		}
 
 		foreach ( self::SEO_META_KEYS[ $source ] as $field => $meta_key ) {
@@ -881,9 +879,9 @@ final class Content implements Module {
 	 *
 	 * @param int                        $post_id Post ID.
 	 * @param array<string, string|bool> $fields  Fields to write.
-	 * @return void
+	 * @return true|\WP_Error Error when the database refuses the delete.
 	 */
-	private function write_slim_seo( int $post_id, array $fields ): void {
+	private function write_slim_seo( int $post_id, array $fields ): bool|\WP_Error {
 		$stored = get_post_meta( $post_id, 'slim_seo', true );
 		$slim   = is_array( $stored ) ? $stored : [];
 
@@ -901,9 +899,11 @@ final class Content implements Module {
 
 		if ( array() !== $slim ) {
 			update_metadata( 'post', $post_id, 'slim_seo', $slim );
-		} elseif ( '' !== $stored && false !== $stored ) {
-			$this->delete_post_meta_if_unchanged( $post_id, 'slim_seo', $stored );
+		} elseif ( '' !== $stored && false !== $stored && ! $this->delete_post_meta_if_unchanged( $post_id, 'slim_seo', $stored ) ) {
+			return new \WP_Error( 'bricks_mcp_seo_write_failed', __( 'The database did not delete the cleared Slim SEO record, so its fields are still stored. Re-read the SEO before retrying.', 'bricks-mcp' ), [ 'status' => 500 ] );
 		}
+
+		return true;
 	}
 
 	/**
@@ -916,13 +916,13 @@ final class Content implements Module {
 	 * @param int    $post_id  Post ID; a revision keeps its own row.
 	 * @param string $meta_key Meta key.
 	 * @param mixed  $value    Value read before the delete.
-	 * @return void
+	 * @return bool False when the database refused the DELETE; true when it ran, even if a newer save kept the row.
 	 */
-	private function delete_post_meta_if_unchanged( int $post_id, string $meta_key, mixed $value ): void {
+	private function delete_post_meta_if_unchanged( int $post_id, string $meta_key, mixed $value ): bool {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- delete_metadata() cannot match the value in its DELETE; the meta cache is cleared below.
-		$wpdb->query(
+		$deleted = $wpdb->query(
 			$wpdb->prepare(
 				"DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s AND meta_value = CAST( %s AS BINARY )",
 				$post_id,
@@ -931,6 +931,8 @@ final class Content implements Module {
 			)
 		);
 		wp_cache_delete( $post_id, 'post_meta' );
+
+		return false !== $deleted;
 	}
 
 	/**

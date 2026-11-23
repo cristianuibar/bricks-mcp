@@ -919,6 +919,41 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Clearing the last Slim SEO field fails, instead of reporting it updated, when the database refuses the delete.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_clear_fails_when_the_delete_is_denied(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, 'slim_seo', [ 'noindex' => 1 ] );
+		// Like wpdb when MySQL denies DELETE on the post meta table.
+		$GLOBALS['wpdb'] = new class() extends \wpdb {
+			/**
+			 * @param string $query Prepared query.
+			 * @return false
+			 */
+			public function query( string $query ): int|false {
+				return false;
+			}
+		};
+
+		$result = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'noindex' => false ],
+			]
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'bricks_mcp_seo_write_failed', $result->get_error_code() );
+		$this->assertSame( [ 'noindex' => 1 ], get_post_meta( self::POST_ID, 'slim_seo', true ) );
+	}
+
+	/**
 	 * Clearing the last Slim SEO fields deletes a record whose values hold a backslash.
 	 *
 	 * @runInSeparateProcess
