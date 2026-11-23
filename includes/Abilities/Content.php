@@ -62,6 +62,7 @@ final class Content implements Module {
 			'twitterTitle'       => '_seopress_social_twitter_title',
 			'twitterDescription' => '_seopress_social_twitter_desc',
 			'twitterImage'       => '_seopress_social_twitter_img',
+			'focusKeyword'       => '_seopress_analysis_target_kw',
 		],
 	];
 
@@ -272,7 +273,10 @@ final class Content implements Module {
 							'twitterTitle'       => $text,
 							'twitterDescription' => $text,
 							'twitterImage'       => $text,
-							'focusKeyword'       => $text,
+							'focusKeyword'       => [
+								'type'        => 'string',
+								'description' => __( 'Focus keyword. Rank Math and SEOPress keep several keywords in this one string, separated by commas; send the whole list.', 'bricks-mcp' ),
+							],
 						],
 						'additionalProperties' => false,
 					],

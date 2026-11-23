@@ -383,6 +383,35 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * SEOPress keeps its target keywords as one comma-separated string, which get-seo reads and update-seo replaces as is.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_seopress_focus_keyword_round_trip(): void {
+		eval( 'function seopress_init() {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin function in this separate test process only.
+		update_post_meta( self::POST_ID, '_seopress_analysis_target_kw', 'local garden,garden design' );
+
+		$read  = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+		$write = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'focusKeyword' => 'replacement,second keyword' ],
+			]
+		);
+
+		$this->assertContains( 'focusKeyword', $read['supportedFields'] );
+		$this->assertSame( 'local garden,garden design', $read['fields']['focusKeyword'] );
+		$this->assertSame( [ 'focusKeyword' ], $write['updated'] );
+		$this->assertSame( [], $write['unsupported'] );
+		$this->assertSame( 'replacement,second keyword', $write['after']['focusKeyword'] );
+		$this->assertSame( 'replacement,second keyword', get_post_meta( self::POST_ID, '_seopress_analysis_target_kw', true ) );
+	}
+
+	/**
 	 * With SEOPress active, Bricks output that is still on and a noindex left by the Bricks fallback are reported until
 	 * the Bricks SEO and Open Graph output is turned off.
 	 *

@@ -95,6 +95,8 @@ Each ability has a `permission_callback` that mirrors Bricks:
 
 When more than one SEO plugin is active, the SEO abilities read and write the first of Yoast SEO, Rank Math, SEOPress and Slim SEO. The others still print their own tags, and `get-seo` lists them in `audit.activeSeoPlugins` with a `multiple_seo_plugins` warning.
 
+`focusKeyword` is one string. Rank Math and SEOPress keep several keywords in it separated by commas, and `update-seo` replaces the whole list.
+
 Bricks prints its own title, meta description, robots and Open Graph tags from page settings next to an SEO plugin unless **Disable Bricks SEO meta tags** (`disableSeo`) and **Disable Bricks Open Graph meta tags** (`disableOpenGraph`) are on in Bricks > Settings > General, or the `bricks/frontend/disable_seo` and `bricks/frontend/disable_opengraph` filters return true on the page request. With an SEO plugin active, `get-seo`, `update-seo` and `diagnose-page` warn about each output that is still on (`bricks_seo_output`, `bricks_opengraph_output`) and about Bricks page settings of the post it prints (`bricks_seo_stale_values`, `bricks_opengraph_stale_values`, with the values in `staleValues`). Those filters run per page request and cannot be evaluated from an MCP request, so the checks read the two settings only; a site that turns the output off with a filter still gets the warnings. A stale Bricks `noindex` or `nofollow`, for example one written through the Bricks fallback while no SEO plugin was active, is an `error`: crawlers may follow it whatever the SEO plugin says. The plugin never changes the global Bricks settings.
 
 ## Settings
