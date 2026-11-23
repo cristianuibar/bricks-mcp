@@ -983,7 +983,8 @@ final class Content implements Module {
 			return true;
 		}
 
-		if ( '' === $stored || false === $stored ) {
+		// A stored empty string reads like a missing row, but the row would block a later unique insert.
+		if ( ( '' === $stored || false === $stored ) && ! metadata_exists( 'post', $post_id, 'slim_seo' ) ) {
 			return true;
 		}
 
