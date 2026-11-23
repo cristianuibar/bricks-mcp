@@ -59,6 +59,14 @@ if ( ! function_exists( 'wp_get_attachment_url' ) ) {
 	}
 }
 
+if ( ! function_exists( 'attachment_url_to_postid' ) ) {
+	function attachment_url_to_postid( string $url ): int {
+		$id = preg_match( '#^https://example\.test/uploads/(\d+)\.jpg$#', $url, $match ) ? (int) $match[1] : 0;
+
+		return get_post( $id ) ? $id : 0;
+	}
+}
+
 if ( ! function_exists( 'get_post_thumbnail_id' ) ) {
 	function get_post_thumbnail_id( int $post_id ): int|false {
 		$id = (int) get_post_meta( $post_id, '_thumbnail_id', true );
