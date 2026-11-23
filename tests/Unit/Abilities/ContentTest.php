@@ -209,7 +209,6 @@ final class ContentTest extends TestCase {
 					'description'  => str_repeat( 'a', 170 ),
 					'nofollow'     => true,
 					'focusKeyword' => 'roofing',
-					'ogImage'      => 'javascript:alert(1)',
 				],
 			]
 		);
@@ -218,13 +217,71 @@ final class ContentTest extends TestCase {
 		$this->assertSame( 'yoast', $write['source'] );
 		$this->assertSame( 'Short title', get_post_meta( self::POST_ID, '_yoast_wpseo_title', true ) );
 		$this->assertSame( '1', get_post_meta( self::POST_ID, '_yoast_wpseo_meta-robots-nofollow', true ) );
-		$this->assertSame( '', get_post_meta( self::POST_ID, '_yoast_wpseo_opengraph-image', true ) );
 		$this->assertSame( 'roofing', $read['fields']['focusKeyword'] );
 		$this->assertTrue( $read['fields']['nofollow'] );
 		$this->assertFalse( $read['fields']['noindex'] );
 		$this->assertSame( 'too_short', $read['audit']['titleIssue'] );
 		$this->assertSame( 'too_long', $read['audit']['descriptionIssue'] );
 		$this->assertFalse( $read['audit']['hasOgImage'] );
+	}
+
+	/**
+	 * SEO plugins with a stored image, and a write whose image URL WordPress rejects.
+	 *
+	 * @return array<string, array{0: string, 1: string, 2: mixed, 3: array<string, string>}>
+	 */
+	public static function rejected_image_urls(): array {
+		return [
+			'Slim SEO image as a data URL'  => [
+				'namespace SlimSEO\\MetaTags; final class Title {}',
+				'slim_seo',
+				[ 'facebook_image' => 'https://example.com/fb.jpg' ],
+				[
+					'title'   => 'New title',
+					'ogImage' => 'data:image/png;base64,iVBORw0KGgo=',
+				],
+			],
+			'Yoast image as a javascript URL' => [
+				'final class WPSEO_Options {}',
+				'_yoast_wpseo_opengraph-image',
+				'https://example.com/og.jpg',
+				[
+					'title'   => 'New title',
+					'ogImage' => 'javascript:alert(1)',
+				],
+			],
+		];
+	}
+
+	/**
+	 * A non-empty image URL that sanitizes to nothing fails the write and keeps the stored image and every other field.
+	 *
+	 * @param string                $plugin   Fake plugin declaration.
+	 * @param string                $meta_key Meta key holding the image.
+	 * @param mixed                 $stored   Stored meta value.
+	 * @param array<string, string> $seo      Fields to write.
+	 * @return void
+	 */
+	#[DataProvider( 'rejected_image_urls' )]
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_rejected_image_url_keeps_the_stored_image( string $plugin, string $meta_key, mixed $stored, array $seo ): void {
+		eval( $plugin ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, $meta_key, $stored );
+
+		$result = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => $seo,
+			]
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'bricks_mcp_invalid_seo_url', $result->get_error_code() );
+		$this->assertSame( [ 'status' => 400 ], $result->get_error_data() );
+		$this->assertSame( $stored, get_post_meta( self::POST_ID, $meta_key, true ) );
+		$this->assertSame( '', get_post_meta( self::POST_ID, '_yoast_wpseo_title', true ) );
 	}
 
 	/**

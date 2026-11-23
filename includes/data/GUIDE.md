@@ -60,7 +60,7 @@ Arguments: `postId`, optional `focus` (`all`, `seo`, `accessibility`, `performan
 
 ### bricks-mcp/get-seo and bricks-mcp/update-seo
 
-Read and write SEO fields through the active SEO plugin (Yoast SEO, Rank Math, SEOPress, Slim SEO), or through Bricks page settings when none is active. `get-seo` takes `postId` and returns `source`, `supportedFields`, the fields and an audit. `update-seo` takes `postId` and a `seo` object with only the fields to change (`title`, `description`, `noindex`, `nofollow`, `canonical`, `ogTitle`, `ogDescription`, `ogImage`, `twitterTitle`, `twitterDescription`, `twitterImage`, `focusKeyword`). An empty string clears a field.
+Read and write SEO fields through the active SEO plugin (Yoast SEO, Rank Math, SEOPress, Slim SEO), or through Bricks page settings when none is active. `get-seo` takes `postId` and returns `source`, `supportedFields`, the fields and an audit. `update-seo` takes `postId` and a `seo` object with only the fields to change (`title`, `description`, `noindex`, `nofollow`, `canonical`, `ogTitle`, `ogDescription`, `ogImage`, `twitterTitle`, `twitterDescription`, `twitterImage`, `focusKeyword`). An empty string clears a field; a URL WordPress does not accept (such as a `data:` or `javascript:` URL) fails the request and changes nothing.
 
 - Always call `get-seo` first. With an SEO plugin active, write SEO through `update-seo`, never through `bricks/set-page-settings`.
 - With several SEO plugins active, the source is the first of Yoast SEO, Rank Math, SEOPress and Slim SEO. `audit.activeSeoPlugins` lists them all, and a `multiple_seo_plugins` warning says the others still print their own tags.
