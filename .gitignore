@@ -17,6 +17,8 @@ logs/*
 coverage/
 # DebugLogAccessTest probe, left only if PHPUnit dies before requesting it
 bricks-mcp-log-probe-*.php
+# DebugLogAccessTest log folder, left the same way
+bricks-mcp-access-test-*/
 
 # IDE
 .idea/

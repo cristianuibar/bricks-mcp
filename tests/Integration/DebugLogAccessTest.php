@@ -117,6 +117,42 @@ PHP;
 	}
 
 	/**
+	 * A log name with URL syntax in it is requested as that file, not the part before the syntax.
+	 *
+	 * Only the file is denied, so a request that loses the rest of its name finds nothing (404).
+	 *
+	 * @dataProvider log_names
+	 */
+	public function test_visitor_cannot_read_log_named_with_url_syntax( string $name ): void {
+		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
+		$folder = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
+		$dir    = dirname( __DIR__, 2 ) . '/' . $folder;
+		mkdir( $dir );
+		file_put_contents( "{$dir}/.htaccess", "<Files \"{$name}\">\nRequire all denied\n</Files>\n" );
+		file_put_contents( "{$dir}/{$name}", $canary . "\n" );
+
+		try {
+			$this->assert_denied( self::SERVER, "/wp-content/plugins/bricks-mcp/{$folder}/{$name}", $canary );
+		} finally {
+			unlink( "{$dir}/{$name}" );
+			unlink( "{$dir}/.htaccess" );
+			rmdir( $dir );
+		}
+	}
+
+	/**
+	 * @return array<string, array{string}>
+	 */
+	public static function log_names(): array {
+		return [
+			'fragment' => [ 'debug#local.log' ],
+			'query'    => [ 'debug?local.log' ],
+			'percent'  => [ 'debug%41.log' ],
+			'space'    => [ 'debug local.log' ],
+		];
+	}
+
+	/**
 	 * Runs the probe on a site.
 	 *
 	 * @return array{array{log: string, root: string, file: bool, written: bool}, string} What it reports, and its canary.
@@ -152,11 +188,14 @@ PHP;
 	}
 
 	/**
+	 * Requests a file by its path under the web root, each segment URL-encoded.
+	 *
 	 * @return array{int, string}
 	 */
 	private function get( string $server, string $path ): array {
+		$url     = 'http://' . $server . implode( '/', array_map( 'rawurlencode', explode( '/', $path ) ) );
 		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => 10 ] ] );
-		$body    = file_get_contents( 'http://' . $server . $path, false, $context );
+		$body    = file_get_contents( $url, false, $context );
 		$this->assertNotFalse( $body, "{$server} did not answer." );
 
 		preg_match( '#^HTTP/\S+ (\d{3})#', $http_response_header[0], $matches );
