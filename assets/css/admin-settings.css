@@ -172,3 +172,7 @@
 .bricks-mcp-up-to-date {
 	color: #00a32a;
 }
+
+.bricks-mcp-update-blocked {
+	color: #d63638;
+}

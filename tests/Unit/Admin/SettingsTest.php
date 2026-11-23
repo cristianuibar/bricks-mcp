@@ -135,7 +135,7 @@ final class SettingsTest extends TestCase {
 
 	/**
 	 * Test that the Updates card links to an update only when WordPress is offered it:
-	 * a newer release without a checksum bound to its ZIP is not advertised.
+	 * a newer release without a checksum bound to its ZIP is reported as blocked, not up to date.
 	 *
 	 * @return void
 	 */
@@ -162,8 +162,14 @@ final class SettingsTest extends TestCase {
 
 			$this->assertSame( $advertised, str_contains( $html, 'v2.1.0 available' ), $label );
 			$this->assertSame( $advertised, str_contains( $html, 'href="http://localhost/wp-admin/update-core.php"' ), $label );
-			$this->assertSame( ! $advertised, str_contains( $html, 'up to date' ), $label );
+			$this->assertSame( ! $advertised, str_contains( $html, 'v2.1.0 found, but its checksum could not be verified.' ), $label );
+			$this->assertFalse( str_contains( $html, 'up to date' ), $label );
 		}
+
+		$GLOBALS['_bricks_mcp_test_transients'] = [];
+		ob_start();
+		( new Settings() )->render_settings_page();
+		$this->assertStringContainsString( 'up to date', (string) ob_get_clean() );
 	}
 
 	/**

@@ -4,7 +4,7 @@
  *
  * Executed in its own PHP process by UpdateCheckerTest because the unit
  * bootstrap fixes BRICKS_MCP_VERSION for the main test process.
- * Usage: php check-now.php <installed version> <release tag>.
+ * Usage: php check-now.php <installed version> <release tag> [checksum-timeout].
  * Prints the JSON body WordPress would send to the Settings page script.
  *
  * @package BricksMCP
@@ -43,6 +43,9 @@ $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
 	'response' => [ 'code' => 200 ],
 	'body'     => hash( 'sha256', 'zip' ) . "  bricks-mcp.zip\n",
 ];
+if ( 'checksum-timeout' === ( $argv[3] ?? '' ) ) {
+	$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 10001 milliseconds' );
+}
 $_REQUEST['nonce'] = wp_create_nonce( 'bricks_mcp_settings_nonce' );
 
 ( new BricksMCP\Updates\UpdateChecker() )->ajax_check_update();

@@ -86,11 +86,13 @@ final class Settings {
 				'currentVersion' => BRICKS_MCP_VERSION,
 				'updateCoreUrl'  => admin_url( 'update-core.php' ),
 				'i18n'           => [
-					'error'       => __( 'An error occurred.', 'bricks-mcp' ),
-					'requestFail' => __( 'Request failed. Please try again.', 'bricks-mcp' ),
-					'howToFix'    => __( 'How to fix:', 'bricks-mcp' ),
-					'copied'      => __( 'Copied!', 'bricks-mcp' ),
-					'copyResults' => __( 'Copy Results', 'bricks-mcp' ),
+					'error'         => __( 'An error occurred.', 'bricks-mcp' ),
+					'requestFail'   => __( 'Request failed. Please try again.', 'bricks-mcp' ),
+					'howToFix'      => __( 'How to fix:', 'bricks-mcp' ),
+					'copied'        => __( 'Copied!', 'bricks-mcp' ),
+					'copyResults'   => __( 'Copy Results', 'bricks-mcp' ),
+					/* translators: %s: release version. */
+					'updateBlocked' => __( 'v%s found, but its checksum could not be verified. Check again later.', 'bricks-mcp' ),
 				],
 			]
 		);
@@ -111,7 +113,7 @@ final class Settings {
 		$status      = $this->get_connection_status();
 		$option      = Options::OPTION;
 		$update_data = ( new UpdateChecker() )->get_cached_update_data();
-		$has_update  = ! empty( $update_data['version'] ) && UpdateChecker::is_newer_version( BRICKS_MCP_VERSION, (string) $update_data['version'] );
+		$has_update  = true === $update_data['update_available'];
 		?>
 		<div class="wrap bricks-mcp-wrap">
 			<h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
@@ -166,6 +168,13 @@ final class Settings {
 					<?php if ( $has_update ) : ?>
 						<span class="bricks-mcp-update-available">v<?php echo esc_html( (string) $update_data['version'] ); ?> <?php esc_html_e( 'available', 'bricks-mcp' ); ?></span>
 						<a href="<?php echo esc_url( admin_url( 'update-core.php' ) ); ?>"><?php esc_html_e( 'Update', 'bricks-mcp' ); ?></a>
+					<?php elseif ( '' !== $update_data['blocked_version'] ) : ?>
+						<span class="bricks-mcp-update-blocked">
+						<?php
+						/* translators: %s: release version. */
+						echo esc_html( sprintf( __( 'v%s found, but its checksum could not be verified. Check again later.', 'bricks-mcp' ), (string) $update_data['blocked_version'] ) );
+						?>
+						</span>
 					<?php else : ?>
 						<span class="bricks-mcp-up-to-date"><?php esc_html_e( 'up to date', 'bricks-mcp' ); ?></span>
 					<?php endif; ?>
