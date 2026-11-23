@@ -8,7 +8,70 @@ on:
 permissions: {}
 
 jobs:
-  build:
+  verify:
+    name: Verify tag, branch and tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Validate tag name
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ID='[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*'
+          NUM='(0|[1-9][0-9]*)'
+          if ! [[ "$TAG" =~ ^v${NUM}\.${NUM}\.${NUM}(-${ID})?(\+${ID})?$ ]]; then
+            echo "Tag is not vMAJOR.MINOR.PATCH[-prerelease][+build]" >&2
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require tagged commit on main
+        env:
+          TAG_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null \
+            && git merge-base --is-ancestor "$TAG_SHA" refs/remotes/origin/main; then
+            echo "Tagged commit is on origin/main"
+            exit 0
+          fi
+          echo "Tagged commit is not on origin/main" >&2
+          exit 1
+
+      - name: Set up PHP
+        if: hashFiles('composer.json') != ''
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.2'
+          coverage: none
+          extensions: dom, mbstring, simplexml, tokenizer, xml, xmlwriter
+          tools: composer:v2
+
+      - name: Install dependencies
+        if: hashFiles('composer.json') != ''
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run PHPCS
+        if: hashFiles('phpcs.xml') != ''
+        run: php -d memory_limit=512M vendor/bin/phpcs -n
+
+      - name: Run unit tests
+        if: hashFiles('phpunit-unit.xml') != ''
+        run: php vendor/bin/phpunit -c phpunit-unit.xml
+
+  release:
+    name: Build and draft release
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -18,8 +81,9 @@ jobs:
           persist-credentials: false
 
       - name: Stamp version from tag
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
           echo "Stamping version: $VERSION"
           sed -i "s/^ \* Version:.*/ * Version:           $VERSION/" bricks-mcp.php
           sed -i "s/define( 'BRICKS_MCP_VERSION', '.*' );/define( 'BRICKS_MCP_VERSION', '$VERSION' );/" bricks-mcp.php
@@ -30,35 +94,8 @@ jobs:
 
       - name: Build plugin ZIP
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
           mkdir -p build/bricks-mcp
-          rsync -a \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='vendor' \
-            --exclude='docs' \
-            --exclude='mu-plugins' \
-            --exclude='logs' \
-            --exclude='tests' \
-            --exclude='.planning' \
-            --exclude='.wp-env.json' \
-            --exclude='package.json' \
-            --exclude='package-lock.json' \
-            --exclude='composer.json' \
-            --exclude='composer.lock' \
-            --exclude='phpunit.xml' \
-            --exclude='phpunit-unit.xml' \
-            --exclude='phpcs.xml' \
-            --exclude='.editorconfig' \
-            --exclude='.gitignore' \
-            --exclude='build' \
-            --exclude='.github' \
-            --exclude='update-server' \
-            --exclude='.claude' \
-            --exclude='README.md' \
-            --exclude='.wordpress-org' \
-            --exclude='.distignore' \
-            ./ build/bricks-mcp/
+          rsync -a --exclude-from=.github/release-excludes.txt ./ build/bricks-mcp/
           cd build && zip -r "bricks-mcp.zip" bricks-mcp/
 
       - name: Generate SHA-256 checksum
@@ -66,14 +103,34 @@ jobs:
           cd build
           sha256sum bricks-mcp.zip > bricks-mcp.zip.sha256
 
-      - name: Create GitHub Release
+      - name: Verify release ZIP
+        run: bash .github/scripts/verify-release-zip.sh build/bricks-mcp.zip
+
+      - name: Upload to draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            build/bricks-mcp.zip \
-            build/bricks-mcp.zip.sha256 \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --verify-tag \
-            --generate-notes
+          set -euo pipefail
+          RELEASES="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
+          STATE="$(jq -s -r --arg tag "$TAG" 'flatten | map(select(.tag_name == $tag)) | if length == 0 then "none" elif any(.draft | not) then "published" else "draft" end' <<<"$RELEASES")"
+          if [ "$STATE" != none ]; then
+            CLOBBER=()
+            if [ "$STATE" = draft ]; then
+              CLOBBER=(--clobber)
+            fi
+            gh release upload "$TAG" \
+              build/bricks-mcp.zip \
+              build/bricks-mcp.zip.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              "${CLOBBER[@]}"
+          else
+            gh release create "$TAG" \
+              build/bricks-mcp.zip \
+              build/bricks-mcp.zip.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --verify-tag \
+              --generate-notes \
+              --draft
+          fi
