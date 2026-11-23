@@ -871,6 +871,33 @@ final class MediaTest extends TestCase {
 			$this->assertTrue( $duplicate['duplicate'], $photo_id );
 		}
 
+		// A rejected pending mark does not hide the upload: with deletion refused, a retry returns the same attachment
+		// instead of uploading a second one. Alone, the mark failure does not fail the import.
+		foreach ( [ [ '_unsplash_attribution_pending' ], [ '_unsplash_attribution_pending', '_unsplash_photographer_url' ] ] as $failing_keys ) {
+			$label = (string) wp_json_encode( $failing_keys );
+			$clear_attachments();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = $failing_keys;
+			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = true;
+			$first = $import();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = false;
+			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
+			if ( 1 === count( $failing_keys ) ) {
+				$this->assertIsArray( $first, $label );
+				$this->assertSame( 'Pat', $first['photographer'], $label );
+				$first_id = $first['attachmentId'];
+			} else {
+				$this->assertInstanceOf( \WP_Error::class, $first, $label );
+				$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $first->get_error_code(), $label );
+				$first_id = $first->get_error_data()['attachmentId'];
+			}
+			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
+
+			$retry = $import();
+			$this->assertIsArray( $retry, $label );
+			$this->assertSame( $first_id, $retry['attachmentId'], $label );
+			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
+		}
+
 		// An ordinary upload that shares the import's file name is left alone, and the import uploads its own.
 		$clear_attachments();
 		bricks_mcp_test_add_post(

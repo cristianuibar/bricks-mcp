@@ -43,7 +43,7 @@ final class Media implements Module {
 
 	private const UNSPLASH_PHOTOGRAPHER_URL_META_KEY = '_unsplash_photographer_url';
 
-	// Set with the photo ID on upload and removed once the attribution is saved, so a retry completes the attachment.
+	// Set after the photo ID on upload and removed once the attribution is saved, so a retry completes the attachment.
 	private const UNSPLASH_PENDING_META_KEY = '_unsplash_attribution_pending';
 
 	private const GLOBAL_SETTINGS_OPTION = 'bricks_global_settings';
@@ -340,12 +340,8 @@ final class Media implements Module {
 			);
 		}
 
-		// The photo ID goes first, so a retry finds this attachment by it and completes a failed attribution.
-		$marked = [
-			self::UNSPLASH_PENDING_META_KEY => '1',
-			self::UNSPLASH_META_KEY         => $photo_id,
-		];
-		if ( ! $this->write_unsplash_meta( $attachment_id, $marked ) ) {
+		// The photo ID goes first, so a retry finds this attachment by it; only a failure here leaves it unfindable.
+		if ( ! $this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_META_KEY => $photo_id ] ) ) {
 			// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
 			$error_data = [ 'status' => 500 ];
 			if ( ! wp_delete_attachment( $attachment_id, true ) ) {
@@ -354,6 +350,10 @@ final class Media implements Module {
 
 			return $this->unsplash_meta_error( $error_data );
 		}
+
+		// The pending mark lets a retry complete a failed attribution. If it does not persist, a retry still finds
+		// this attachment by its photo ID and returns it without the attribution instead of uploading again.
+		$this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_PENDING_META_KEY => '1' ] );
 
 		$recorded = $this->record_unsplash_attribution( $attachment_id, $attribution );
 		if ( is_wp_error( $recorded ) ) {
