@@ -1005,7 +1005,8 @@ final class Content implements Module {
 	 *
 	 * WordPress's delete_metadata() selects the matching row IDs and then deletes those IDs, so a save between the two is lost.
 	 * One DELETE that matches the value cannot remove a newer save. The value is compared as bytes: the column's collation
-	 * would match a save that only changed letter case or trailing spaces.
+	 * would match a save that only changed letter case or trailing spaces. Both sides are converted to utf8mb4 first, so a
+	 * column in another character set than the connection, such as latin1, still matches its unchanged accented text.
 	 *
 	 * @param int    $post_id  Post ID; a revision keeps its own row.
 	 * @param string $meta_key Meta key.
@@ -1018,7 +1019,7 @@ final class Content implements Module {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- delete_metadata() cannot match the value in its DELETE; the meta cache is cleared below.
 		$deleted = $wpdb->query(
 			$wpdb->prepare(
-				"DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s AND meta_value = CAST( %s AS BINARY )",
+				"DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s AND CAST( CONVERT( meta_value USING utf8mb4 ) AS BINARY ) = CAST( CONVERT( %s USING utf8mb4 ) AS BINARY )",
 				$post_id,
 				$meta_key,
 				maybe_serialize( $value )

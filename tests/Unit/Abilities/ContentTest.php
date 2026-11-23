@@ -1217,6 +1217,31 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Clearing the last Slim SEO field deletes an unchanged record with an accented letter from a latin1 column on a utf8mb4 connection.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_clear_deletes_an_accented_record_from_a_latin1_column(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		$GLOBALS['wpdb']->meta_value_charset = 'latin1';
+		update_post_meta( self::POST_ID, 'slim_seo', [ 'title' => 'Café' ] );
+
+		$result = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'title' => '' ],
+			]
+		);
+
+		$this->assertNotInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( '', get_post_meta( self::POST_ID, 'slim_seo', true ) );
+	}
+
+	/**
 	 * Changing one Slim SEO field keeps the literal backslashes of the fields it leaves alone.
 	 *
 	 * @runInSeparateProcess

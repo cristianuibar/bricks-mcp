@@ -147,10 +147,14 @@ if ( ! class_exists( 'wpdb' ) ) {
 	 * Minimal wpdb stub: deletes post meta rows from the in-memory store.
 	 *
 	 * Like MySQL's default utf8mb4 collations, a meta_value comparison ignores letter case and trailing spaces unless it is cast to BINARY.
+	 * The connection is utf8mb4; a BINARY cast of the column compares the bytes of its own character set.
 	 */
 	class wpdb {
 		/** @var string */
 		public string $postmeta = 'wp_postmeta';
+
+		/** @var string Character set of the meta_value column: utf8mb4 or latin1. */
+		public string $meta_value_charset = 'utf8mb4';
 
 		/**
 		 * Delete the post meta row matching post_id and meta_key, and meta_value when given.
@@ -193,10 +197,20 @@ if ( ! class_exists( 'wpdb' ) ) {
 		 */
 		public function query( string $query ): int|false {
 			$quoted = "'((?:[^'\\\\]|\\\\.)*)'";
-			if ( ! preg_match( "/^DELETE FROM {$this->postmeta} WHERE post_id = (\\d+) AND meta_key = {$quoted} AND meta_value = (CAST\\( )?{$quoted}( AS BINARY \\))?$/", $query, $matches ) ) {
+			$prefix = "DELETE FROM {$this->postmeta} WHERE post_id = (\\d+) AND meta_key = {$quoted} AND ";
+			if ( preg_match( "/^{$prefix}CAST\\( CONVERT\\( meta_value USING utf8mb4 \\) AS BINARY \\) = CAST\\( CONVERT\\( {$quoted} USING utf8mb4 \\) AS BINARY \\)$/", $query, $matches ) ) {
+				return $this->delete_post_meta_row( (int) $matches[1], stripslashes( $matches[2] ), stripslashes( $matches[3] ), true );
+			}
+			if ( ! preg_match( "/^{$prefix}meta_value = (CAST\\( )?{$quoted}( AS BINARY \\))?$/", $query, $matches ) ) {
 				throw new LogicException( "Unsupported query: {$query}" );
 			}
-			return $this->delete_post_meta_row( (int) $matches[1], stripslashes( $matches[2] ), stripslashes( $matches[4] ), '' !== $matches[3] && '' !== ( $matches[5] ?? '' ) );
+			$value  = stripslashes( $matches[4] );
+			$binary = '' !== $matches[3] && '' !== ( $matches[5] ?? '' );
+			// The utf8mb4 bytes of the literal, read as the column's character set, are what the column bytes must equal.
+			if ( $binary && 'latin1' === $this->meta_value_charset ) {
+				$value = mb_convert_encoding( $value, 'UTF-8', 'Windows-1252' );
+			}
+			return $this->delete_post_meta_row( (int) $matches[1], stripslashes( $matches[2] ), $value, $binary );
 		}
 
 		/**
