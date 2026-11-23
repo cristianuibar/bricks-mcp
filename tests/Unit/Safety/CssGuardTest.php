@@ -399,38 +399,57 @@ final class CssGuardTest extends TestCase {
 		self::assertSame( [ 'status' => 400, 'path' => 'settings.customCss', 'pattern' => 'import' ], $result->get_error_data() );
 	}
 
-	public function test_skips_only_unchanged_stored_elements_while_a_move_saves_them(): void {
+	public function test_skips_only_stored_elements_unchanged_in_place_while_a_move_saves_them(): void {
 		$save   = make_safety_ability( 'bricks/set-page-elements', [ 'input_schema' => self::SCHEMA, 'execute_callback' => static fn() => 'saved' ] );
 		$stored = [
-			[ 'id' => 'parent', 'name' => 'div', 'parent' => 0, 'children' => [ 'styled' ] ],
-			[ 'id' => 'styled', 'name' => 'text', 'parent' => 'parent', 'children' => [], 'settings' => [ '_cssCustom' => '@import "example.css";' ] ],
+			[ 'id' => 'member', 'name' => 'div', 'parent' => 0, 'children' => [ 'wraper', 'otherx' ], 'settings' => [ '_conditions' => [ [ [ 'key' => 'user_logged_in', 'value' => true ] ] ] ] ],
+			[ 'id' => 'wraper', 'name' => 'div', 'parent' => 'member', 'children' => [ 'styled' ] ],
+			[ 'id' => 'styled', 'name' => 'text', 'parent' => 'wraper', 'children' => [], 'settings' => [ '_cssCustom' => '@import "example.css";' ] ],
+			[ 'id' => 'otherx', 'name' => 'text', 'parent' => 'member', 'children' => [] ],
 		];
-		$moved  = [
-			[ 'id' => 'parent', 'name' => 'div', 'parent' => 0, 'children' => [] ],
-			[ 'id' => 'styled', 'name' => 'text', 'parent' => 0, 'settings' => [ '_cssCustom' => '@import "example.css";' ] ],
-		];
-		$changed = $moved;
-		$added   = $moved;
-		$added[] = [ 'id' => 'addedx', 'name' => 'text', 'parent' => 0, 'settings' => [ 'css' => '@import "example.css";' ] ];
+		$saves  = [];
 
-		$changed[0]['settings']['_cssCustom'] = '.x { behavior: none; }';
+		$saves['reordered']                      = $stored;
+		$saves['reordered'][0]['children']       = [ 'otherx', 'wraper' ];
+		$saves['sibling moved']                  = $stored;
+		$saves['sibling moved'][0]['children']   = [ 'wraper' ];
+		$saves['sibling moved'][3]['parent']     = 0;
+		$saves['changed']                        = $saves['sibling moved'];
+		$saves['changed'][2]['settings']         = [ '_cssCustom' => '.x { behavior: none; }' ];
+		$saves['added']                          = $saves['sibling moved'];
+		$saves['added'][]                        = [ 'id' => 'addedx', 'name' => 'text', 'parent' => 0, 'settings' => [ 'css' => '@import "example.css";' ] ];
+		$saves['moved to root']                  = $stored;
+		$saves['moved to root'][1]['children']   = [];
+		$saves['moved to root'][2]['parent']     = 0;
+		$saves['ancestor moved']                 = $stored;
+		$saves['ancestor moved'][0]['children']  = [ 'otherx' ];
+		$saves['ancestor moved'][1]['parent']    = 0;
+		$saves['ancestor changed']               = $stored;
+		$saves['ancestor changed'][0]['settings'] = [];
 
 		$results = CssGuard::with_stored_elements(
 			42,
 			$stored,
-			static fn(): array => [
-				$save->execute( [ 'postId' => 42, 'elements' => $moved ] ),
-				$save->execute( [ 'postId' => 42, 'elements' => $changed ] ),
-				$save->execute( [ 'postId' => 42, 'elements' => $added ] ),
-				$save->execute( [ 'postId' => 43, 'elements' => $moved ] ),
-			]
+			static fn(): array => array_map( static fn( array $elements ) => $save->execute( [ 'postId' => 42, 'elements' => $elements ] ), $saves )
+				+ [ 'other post' => $save->execute( [ 'postId' => 43, 'elements' => $saves['sibling moved'] ] ) ]
 		);
+		$results['after the move'] = $save->execute( [ 'postId' => 42, 'elements' => $saves['sibling moved'] ] );
 
-		self::assertSame( 'saved', $results[0] );
-		self::assertSame( [ 'status' => 400, 'path' => 'elements.0.settings._cssCustom', 'pattern' => 'behaviour' ], $results[1]->get_error_data() );
-		self::assertSame( [ 'status' => 400, 'path' => 'elements.2.settings.css', 'pattern' => 'import' ], $results[2]->get_error_data() );
-		self::assertSame( [ 'status' => 400, 'path' => 'elements.1.settings._cssCustom', 'pattern' => 'import' ], $results[3]->get_error_data() );
-		self::assertSame( [ 'status' => 400, 'path' => 'elements.1.settings._cssCustom', 'pattern' => 'import' ], $save->execute( [ 'postId' => 42, 'elements' => $moved ] )->get_error_data() );
+		$import = [ 'status' => 400, 'path' => 'elements.2.settings._cssCustom', 'pattern' => 'import' ];
+		self::assertSame(
+			[
+				'reordered'        => 'saved',
+				'sibling moved'    => 'saved',
+				'changed'          => [ 'status' => 400, 'path' => 'elements.2.settings._cssCustom', 'pattern' => 'behaviour' ],
+				'added'            => [ 'status' => 400, 'path' => 'elements.4.settings.css', 'pattern' => 'import' ],
+				'moved to root'    => $import,
+				'ancestor moved'   => $import,
+				'ancestor changed' => $import,
+				'other post'       => $import,
+				'after the move'   => $import,
+			],
+			array_map( static fn( mixed $result ): mixed => $result instanceof WP_Error ? $result->get_error_data() : $result, $results )
+		);
 	}
 
 	public function test_allows_css_when_guard_is_disabled(): void {
