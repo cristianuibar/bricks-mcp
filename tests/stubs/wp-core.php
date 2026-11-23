@@ -242,6 +242,13 @@ if ( ! function_exists( 'delete_post_meta' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_basename' ) ) {
+	function wp_basename( string $path, string $suffix = '' ): string {
+		// WordPress core's implementation: a multibyte-safe basename().
+		return urldecode( basename( str_replace( [ '%2F', '%5C' ], '/', urlencode( $path ) ), $suffix ) );
+	}
+}
+
 if ( ! function_exists( 'wp_delete_attachment' ) ) {
 	function wp_delete_attachment( int $post_id, bool $force_delete = false ): WP_Post|false|null {
 		$post = get_post( $post_id );

@@ -223,10 +223,16 @@ final class Media implements Module {
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 		$pending     = false;
 		if ( null !== $existing_id ) {
-			$pending = '' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true );
-			// The credit URL is saved last. An unmarked attachment without it predates stored attribution, or lost
-			// its pending mark along with the attribution: complete it when this caller can, else return it as is.
-			$uncredited = ! $pending && '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
+			// The credit URL is saved last, so an attachment without it lacks its attribution. This import names its
+			// upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is an unfinished
+			// import even if its pending mark failed. Releases before stored attribution kept the Unsplash file name.
+			$uncredited = '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
+			$pending    = $uncredited && (
+				'' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true )
+				|| str_starts_with( wp_basename( (string) get_post_meta( $existing_id, '_wp_attached_file', true ) ), 'unsplash-' )
+			);
+			// A legacy attachment is completed when this caller can, else returned as it is.
+			$uncredited = $uncredited && ! $pending;
 			$completing = $pending || ( $uncredited && current_user_can( 'edit_post', $existing_id ) && '' !== $this->get_unsplash_api_key() );
 			if ( ! $completing ) {
 				return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
@@ -1096,7 +1102,7 @@ final class Media implements Module {
 			);
 		}
 
-		// A mark left behind only makes a later import save the same attribution again.
+		// A mark left behind is ignored, since the credit URL saved last shows the attribution is complete.
 		delete_post_meta( $attachment_id, self::UNSPLASH_PENDING_META_KEY );
 
 		return true;

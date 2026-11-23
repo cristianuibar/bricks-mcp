@@ -247,7 +247,11 @@ final class MediaTest extends TestCase {
 				'post_status' => 'inherit',
 				'post_parent' => 7,
 			],
-			[ '_unsplash_photo_id' => 'dup_99' ]
+			[
+				'_unsplash_photo_id' => 'dup_99',
+				// Releases before stored attribution kept the Unsplash image file name.
+				'_wp_attached_file'  => '2024/05/photo-1506744038136-46273834b3fb.jpg',
+			]
 		);
 		$GLOBALS['_bricks_mcp_test_get_posts_return'] = [ 42 ];
 		wp_register_ability(
@@ -965,15 +969,28 @@ final class MediaTest extends TestCase {
 			}
 			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
 
-			// A rate-limited retry cannot fetch the credit, so it fails rather than return the attachment uncredited.
-			$api_code     = 429;
-			$rate_limited = $import();
-			$api_code     = 200;
+			// Without its mark the upload is still an unfinished import, not a legacy one: a retry that cannot fetch the
+			// credit (rate-limited, or the photo is gone) or a user who cannot edit it gets an error, not null credits.
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $first_id ] = false;
+			$refused = $import();
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $first_id ] );
+			$failed_codes = [];
+			foreach ( [ 429, 404 ] as $code ) {
+				$api_code       = $code;
+				$failed_codes[] = $import();
+			}
+			$api_code = 200;
 			if ( 1 === count( $failing_keys ) ) {
-				$this->assertSame( $first_id, $rate_limited['attachmentId'], $label );
+				$this->assertSame( $first_id, $refused['attachmentId'], $label );
+				$this->assertSame( [ $first_id, $first_id ], array_column( $failed_codes, 'attachmentId' ), $label );
 			} else {
-				$this->assertInstanceOf( \WP_Error::class, $rate_limited, $label );
-				$this->assertSame( 429, $rate_limited->get_error_data()['status'], $label );
+				$this->assertInstanceOf( \WP_Error::class, $refused, $label );
+				$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $refused->get_error_code(), $label );
+				$this->assertSame(
+					[ 429, 404 ],
+					array_map( static fn( $failed ): int => $failed instanceof \WP_Error ? $failed->get_error_data()['status'] : 0, $failed_codes ),
+					$label
+				);
 			}
 			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
 
