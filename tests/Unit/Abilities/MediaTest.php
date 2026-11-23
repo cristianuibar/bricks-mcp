@@ -733,14 +733,16 @@ final class MediaTest extends TestCase {
 		wp_register_ability(
 			'bricks/upload-media',
 			[
-				'execute_callback' => static function () use ( &$next_id ): array {
+				'execute_callback' => static function ( array $input ) use ( &$next_id ): array {
 					$id = $next_id++;
 					bricks_mcp_test_add_post(
 						[
 							'ID'          => $id,
 							'post_type'   => 'attachment',
 							'post_parent' => 0,
-						]
+						],
+						// WordPress stores the uploaded file path with the attachment, adding -N when the name is taken.
+						[ '_wp_attached_file' => '2026/11/' . str_replace( '.', '-' . $id . '.', $input['filename'] ) ]
 					);
 
 					return [
@@ -756,11 +758,33 @@ final class MediaTest extends TestCase {
 				static fn( $post ): bool => 'attachment' === $post->post_type
 			)
 		);
-		// The attachment lookup matches stored meta, like a WordPress meta query.
+		// The attachment lookup matches stored meta like a WordPress meta query: an exact meta_key/meta_value,
+		// or meta_query clauses using REGEXP (case-insensitive, as in MySQL) and NOT EXISTS.
 		$GLOBALS['_bricks_mcp_test_get_posts_return'] = static fn( array $args ): array => array_values(
 			array_filter(
 				$attachment_ids(),
-				static fn( int $id ): bool => get_post_meta( $id, $args['meta_key'], true ) === $args['meta_value']
+				static function ( int $id ) use ( $args ): bool {
+					$meta    = $GLOBALS['_bricks_mcp_test_post_meta'][ $id ] ?? [];
+					$clauses = $args['meta_query'] ?? [
+						[
+							'key'   => $args['meta_key'],
+							'value' => $args['meta_value'],
+						],
+					];
+					foreach ( $clauses as $clause ) {
+						$compare = $clause['compare'] ?? '=';
+						$matches = match ( $compare ) {
+							'NOT EXISTS' => ! array_key_exists( $clause['key'], $meta ),
+							'REGEXP'     => array_key_exists( $clause['key'], $meta ) && 1 === preg_match( '#' . $clause['value'] . '#i', (string) $meta[ $clause['key'] ] ),
+							default      => ( $meta[ $clause['key'] ] ?? null ) === $clause['value'],
+						};
+						if ( ! $matches ) {
+							return false;
+						}
+					}
+
+					return true;
+				}
 			)
 		);
 		$import         = static fn(): array|\WP_Error => wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute(
@@ -788,19 +812,39 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 'photo_77', get_post_meta( $retried['attachmentId'], '_unsplash_photo_id', true ) );
 
 		// When the cleanup delete fails too, the error names the leftover attachment, and a retry completes it
-		// instead of uploading a second one: after a photographer URL failure, and when every meta write fails.
+		// instead of uploading a second one: after a photographer URL failure, and when every write after the
+		// upload fails, as with a database that turned read-only.
 		foreach ( [ [ '_unsplash_photographer_url' ], true ] as $failing_keys ) {
 			$label = wp_json_encode( $failing_keys );
 			$GLOBALS['_bricks_mcp_test_posts']                             = array_diff_key( $GLOBALS['_bricks_mcp_test_posts'], array_flip( $attachment_ids() ) );
 			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']       = $failing_keys;
 			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail']   = true;
+			$GLOBALS['_bricks_mcp_test_media_update_option_fail']          = true === $failing_keys;
 			$kept_error = $import();
+			$GLOBALS['_bricks_mcp_test_media_update_option_fail'] = false;
 			$this->assertInstanceOf( \WP_Error::class, $kept_error, $label );
 			$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $kept_error->get_error_code(), $label );
 			$this->assertSame( 500, $kept_error->get_error_data()['status'], $label );
 			$kept_id = $kept_error->get_error_data()['attachmentId'];
 			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
 			$this->assertSame( '', get_post_meta( $kept_id, '_unsplash_photographer_url', true ), $label );
+
+			// A user who cannot edit the kept upload is refused rather than given a second upload.
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']             = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
+			$refused = $import();
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] );
+			$this->assertInstanceOf( \WP_Error::class, $refused, $label );
+			$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $refused->get_error_code(), $label );
+			$this->assertSame(
+				[
+					'status'       => 403,
+					'attachmentId' => $kept_id,
+				],
+				$refused->get_error_data(),
+				$label
+			);
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
 
 			// A retry whose meta writes fail again keeps the upload, which may already be in use, even though deletion now works.
 			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = true;

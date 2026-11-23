@@ -43,10 +43,6 @@ final class Media implements Module {
 
 	private const UNSPLASH_PHOTOGRAPHER_URL_META_KEY = '_unsplash_photographer_url';
 
-	// Maps a photo ID to the upload kept after its import failed, so a retry completes it instead of uploading again.
-	// An option rather than post meta: the kept upload is the one whose meta writes failed.
-	private const UNSPLASH_PENDING_OPTION = 'bricks_mcp_unsplash_pending';
-
 	private const GLOBAL_SETTINGS_OPTION = 'bricks_global_settings';
 
 	private const ADOBE_FONTS_OPTION = 'bricks_adobe_fonts';
@@ -268,14 +264,25 @@ final class Media implements Module {
 			self::UNSPLASH_META_KEY                  => $photo_id,
 		];
 
-		$pending_id = $this->find_pending_unsplash_attachment( $photo_id );
-		if ( null !== $pending_id && current_user_can( 'edit_post', $pending_id ) ) {
+		$pending_id = $this->find_incomplete_unsplash_attachment( $photo_id );
+		if ( null !== $pending_id ) {
+			// Uploading again would duplicate the kept upload, so only a user who can complete it may continue.
+			if ( ! current_user_can( 'edit_post', $pending_id ) ) {
+				return new \WP_Error(
+					'bricks_mcp_unsplash_import_incomplete',
+					__( 'An earlier import of this Unsplash photo left an attachment without its metadata. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
+					[
+						'status'       => 403,
+						'attachmentId' => $pending_id,
+					]
+				);
+			}
+
 			// The kept upload may already be in use, so a failure here keeps it for the next retry.
-			$recorded = $this->record_unsplash_import_meta( $pending_id, $photo_id, $import_meta, false );
+			$recorded = $this->record_unsplash_import_meta( $pending_id, $import_meta, false );
 			if ( is_wp_error( $recorded ) ) {
 				return $recorded;
 			}
-			$this->set_pending_unsplash_attachment( $photo_id, null );
 
 			// The earlier call reported a failure, so this call is the one that completed the import.
 			$completed = $this->reuse_existing_attachment( $pending_id, $photo_id, $post_id );
@@ -332,7 +339,7 @@ final class Media implements Module {
 			);
 		}
 
-		$recorded = $this->record_unsplash_import_meta( $attachment_id, $photo_id, $import_meta, true );
+		$recorded = $this->record_unsplash_import_meta( $attachment_id, $import_meta, true );
 		if ( is_wp_error( $recorded ) ) {
 			return $recorded;
 		}
@@ -1029,21 +1036,19 @@ final class Media implements Module {
 	 * Save the attribution and photo ID meta of an Unsplash import on its attachment.
 	 *
 	 * @param int                  $attachment_id Attachment ID.
-	 * @param string               $photo_id      Unsplash photo ID.
 	 * @param array<string,string> $import_meta   Meta values by key, the photo ID last.
 	 * @param bool                 $new_upload    Whether this call uploaded the attachment, so a failure may delete it.
 	 * @return true|\WP_Error
 	 */
-	private function record_unsplash_import_meta( int $attachment_id, string $photo_id, array $import_meta, bool $new_upload ): true|\WP_Error {
+	private function record_unsplash_import_meta( int $attachment_id, array $import_meta, bool $new_upload ): true|\WP_Error {
 		foreach ( $import_meta as $meta_key => $meta_value ) {
 			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
 			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
 			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
-				// A retry cannot find an attachment without the photo ID, so remove a new upload rather than leave a duplicate.
-				// A kept upload stays recorded so a retry completes it instead of uploading again.
+				// Remove a new upload rather than leave it incomplete. A kept upload may already be in use, so it
+				// stays, and a retry finds it by its file name and completes it instead of uploading again.
 				$error_data = [ 'status' => 500 ];
 				if ( ! $new_upload || ! wp_delete_attachment( $attachment_id, true ) ) {
-					$this->set_pending_unsplash_attachment( $photo_id, $attachment_id );
 					$error_data['attachmentId'] = $attachment_id;
 				}
 
@@ -1059,40 +1064,50 @@ final class Media implements Module {
 	}
 
 	/**
-	 * Find the upload kept after a failed import of this photo.
+	 * Find an upload of this photo that a failed import kept without its photo ID meta.
+	 *
+	 * It is found by the file name the import uploaded, which WordPress stores with the upload itself, so no
+	 * write after the failure is needed to find it.
 	 *
 	 * @param string $photo_id Unsplash photo ID.
 	 * @return int|null
 	 */
-	private function find_pending_unsplash_attachment( string $photo_id ): ?int {
-		$pending = get_option( self::UNSPLASH_PENDING_OPTION, [] );
-		$id      = is_array( $pending ) ? (int) ( $pending[ $photo_id ] ?? 0 ) : 0;
-		$post    = $id > 0 ? get_post( $id ) : null;
+	private function find_incomplete_unsplash_attachment( string $photo_id ): ?int {
+		// WordPress may add a -N suffix when the name is taken, or -scaled when it resizes a large image.
+		$file_pattern = '(^|/)unsplash-' . $photo_id . '(-[0-9]+)?(-scaled)?[.](' . implode( '|', self::ALLOWED_IMAGE_MIMES ) . ')$';
+		$candidates   = get_posts(
+			[
+				'post_type'      => 'attachment',
+				'post_status'    => 'inherit',
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded lookup that runs only when an import is about to upload.
+				'meta_query'     => [
+					[
+						'key'     => '_wp_attached_file',
+						'value'   => $file_pattern,
+						'compare' => 'REGEXP',
+					],
+					[
+						'key'     => self::UNSPLASH_META_KEY,
+						'compare' => 'NOT EXISTS',
+					],
+				],
+				'orderby'        => 'ID',
+				'order'          => 'ASC',
+				'posts_per_page' => 10,
+				'fields'         => 'ids',
+			]
+		);
 
-		return $post && 'attachment' === $post->post_type ? $id : null;
-	}
-
-	/**
-	 * Record or, with a null ID, clear the upload kept after a failed import of this photo.
-	 *
-	 * @param string   $photo_id      Unsplash photo ID.
-	 * @param int|null $attachment_id Kept attachment ID, or null to clear.
-	 * @return void
-	 */
-	private function set_pending_unsplash_attachment( string $photo_id, ?int $attachment_id ): void {
-		$pending = get_option( self::UNSPLASH_PENDING_OPTION, [] );
-		$pending = is_array( $pending ) ? $pending : [];
-		if ( null === $attachment_id ) {
-			unset( $pending[ $photo_id ] );
-		} else {
-			$pending[ $photo_id ] = $attachment_id;
+		foreach ( $candidates as $candidate ) {
+			$id = is_object( $candidate ) && isset( $candidate->ID ) ? (int) $candidate->ID : (int) $candidate;
+			// MySQL REGEXP ignores case, but photo IDs are case-sensitive.
+			$file = (string) get_post_meta( $id, '_wp_attached_file', true );
+			if ( $id > 0 && 1 === preg_match( '#' . $file_pattern . '#', $file ) ) {
+				return $id;
+			}
 		}
 
-		if ( empty( $pending ) ) {
-			delete_option( self::UNSPLASH_PENDING_OPTION );
-		} else {
-			update_option( self::UNSPLASH_PENDING_OPTION, $pending, false );
-		}
+		return null;
 	}
 
 	/**
