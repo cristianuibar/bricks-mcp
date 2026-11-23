@@ -178,6 +178,51 @@ PHP;
 	}
 
 	/**
+	 * A response larger than the memory left fails the check instead of ending the run before cleanup.
+	 *
+	 * @dataProvider large_responses
+	 */
+	public function test_large_response_fails_the_check_within_memory( string $htaccess, string $failure ): void {
+		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
+		$folder = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
+		$dir    = dirname( __DIR__, 2 ) . '/' . $folder;
+		mkdir( $dir );
+		file_put_contents( "{$dir}/.htaccess", str_replace( 'FOLDER', $folder, $htaccess ) );
+		$this->write_large_file( "{$dir}/debug.log", $canary );
+		$this->write_large_file( "{$dir}/denied.txt", $canary );
+		$limit = ini_get( 'memory_limit' );
+
+		try {
+			$this->assertNotFalse( ini_set( 'memory_limit', (string) ( memory_get_usage( true ) + 16 * 1024 * 1024 ) ) );
+			$this->assert_denied( self::SERVER, "/wp-content/plugins/bricks-mcp/{$folder}/debug.log", $canary );
+		} catch ( AssertionFailedError $e ) {
+			$this->assertStringContainsString( $failure, $e->getMessage() );
+			return;
+		} finally {
+			ini_set( 'memory_limit', $limit );
+			unlink( "{$dir}/debug.log" );
+			unlink( "{$dir}/denied.txt" );
+			unlink( "{$dir}/.htaccess" );
+			rmdir( $dir );
+		}
+
+		$this->fail( 'The check passed for a log served with its canary.' );
+	}
+
+	/**
+	 * @return array<string, array{string, string}>
+	 */
+	public static function large_responses(): array {
+		return [
+			'served log'  => [ "Require all granted\n", 'Failed asserting that 200 is identical to 403' ],
+			'denial page' => [
+				"<Files \"debug.log\">\nRequire all denied\n</Files>\nErrorDocument 403 /wp-content/plugins/bricks-mcp/FOLDER/denied.txt\n",
+				'served the canary',
+			],
+		];
+	}
+
+	/**
 	 * Runs the probe on a site.
 	 *
 	 * @return array{array{log: string, root: string, file: bool, written: bool}, string} What it reports, and its canary.
@@ -229,26 +274,70 @@ PHP;
 		$this->assertTrue( $site['file'], "WordPress on {$server} could not create {$site['log']}." );
 	}
 
+	/**
+	 * The request is refused and its body, read in chunks so a large log fits in memory, holds no canary.
+	 */
 	private function assert_denied( string $server, string $path, string $canary ): void {
-		[ $status, $body ] = $this->get( $server, $path );
+		[ $status, $stream ] = $this->open( $server, $path );
 
-		$this->assertSame( 403, $status, $server . $path );
-		$this->assertStringNotContainsString( $canary, $body, $server . $path );
+		try {
+			$this->assertSame( 403, $status, $server . $path );
+
+			// Keep the end of each chunk, so a canary split across two chunks is still found.
+			$tail = '';
+			do {
+				$read  = (string) fread( $stream, 65536 );
+				$chunk = $tail . $read;
+				$found = str_contains( $chunk, $canary );
+				$tail  = substr( $chunk, -( strlen( $canary ) - 1 ) );
+			} while ( ! $found && '' !== $read );
+			$this->assertFalse( $found, "{$server}{$path} served the canary." );
+		} finally {
+			fclose( $stream );
+		}
 	}
 
 	/**
-	 * Requests a file by its path under the web root, each segment URL-encoded.
+	 * Requests a file by its path under the web root and reads the whole body.
 	 *
 	 * @return array{int, string}
 	 */
 	private function get( string $server, string $path ): array {
+		[ $status, $stream ] = $this->open( $server, $path );
+
+		try {
+			return [ $status, (string) stream_get_contents( $stream ) ];
+		} finally {
+			fclose( $stream );
+		}
+	}
+
+	/**
+	 * Requests a file by its path under the web root, each segment URL-encoded, without reading its body.
+	 *
+	 * @return array{int, resource}
+	 */
+	private function open( string $server, string $path ): array {
 		$url     = 'http://' . $server . implode( '/', array_map( 'rawurlencode', explode( '/', $path ) ) );
 		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => 10 ] ] );
-		$body    = file_get_contents( $url, false, $context );
-		$this->assertNotFalse( $body, "{$server} did not answer." );
+		$stream  = fopen( $url, 'rb', false, $context );
+		$this->assertNotFalse( $stream, "{$server} did not answer." );
 
-		preg_match( '#^HTTP/\S+ (\d{3})#', $http_response_header[0], $matches );
+		preg_match( '#^HTTP/\S+ (\d{3})#', stream_get_meta_data( $stream )['wrapper_data'][0], $matches );
 
-		return [ (int) $matches[1], $body ];
+		return [ (int) $matches[1], $stream ];
+	}
+
+	/**
+	 * Writes a 64 MB file that ends with the canary, without holding it in memory.
+	 */
+	private function write_large_file( string $file, string $canary ): void {
+		$handle = fopen( $file, 'wb' );
+		$line   = str_repeat( 'x', 1023 ) . "\n";
+		for ( $i = 0; $i < 64 * 1024; $i++ ) {
+			fwrite( $handle, $line );
+		}
+		fwrite( $handle, $canary . "\n" );
+		fclose( $handle );
 	}
 }
