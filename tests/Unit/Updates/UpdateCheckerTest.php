@@ -1176,53 +1176,47 @@ final class UpdateCheckerTest extends TestCase {
 	}
 
 	/**
-	 * Test: Check Now reports an update only for a release with a newer version core,
-	 * so build metadata ("+build.7") on an equal version shows no Update link.
+	 * Test: after Check Now, the Settings card shows an Update link only for a release with
+	 * a newer version core, so build metadata ("+build.7") on an equal version shows none.
+	 *
+	 * Runs the AJAX handler in a separate PHP process for each installed version, then
+	 * clicks Check Now in assets/js/admin-updates.js (under node) with that response.
 	 *
 	 * @return void
 	 */
-	public function test_check_now_ignores_build_metadata_for_update_available(): void {
-		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
-			'response' => [ 'code' => 200 ],
-			'body'     => hash( 'sha256', 'zip' ) . "  bricks-mcp.zip\n",
-		];
-		$_REQUEST['nonce'] = wp_create_nonce( 'bricks_mcp_settings_nonce' );
-
-		// The installed version (BRICKS_MCP_VERSION) is 2.0.0 in the unit bootstrap.
-		$cases = [
-			'v2.0.0+build.7' => false,
-			'v2.0.0'         => false,
-			'v1.9.9+build.9' => false,
-			'v2.0.1+build.1' => true,
-			'v2.1.0'         => true,
-		];
-
-		foreach ( $cases as $tag => $expected ) {
-			$GLOBALS['_bricks_mcp_test_transients'] = [];
-			$base = 'https://github.com/cristianuibar/bricks-mcp/releases/download/' . rawurlencode( $tag ) . '/';
-			$this->stub_release(
-				[
-					'tag_name' => $tag,
-					'assets'   => [
-						[
-							'name'                 => 'bricks-mcp.zip',
-							'browser_download_url' => $base . 'bricks-mcp.zip',
-						],
-						[
-							'name'                 => 'bricks-mcp.zip.sha256',
-							'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
-						],
-					],
-				]
-			);
-
-			$this->checker->ajax_check_update();
-
-			$this->assertTrue( $GLOBALS['_bricks_mcp_test_json_response']['success'] ?? null, $tag );
-			$this->assertSame( ltrim( $tag, 'v' ), $GLOBALS['_bricks_mcp_test_json_response']['data']['version'] ?? null, $tag );
-			$this->assertSame( $expected, $GLOBALS['_bricks_mcp_test_json_response']['data']['update_available'] ?? null, $tag );
+	public function test_check_now_shows_update_link_only_for_newer_version_core(): void {
+		$node = trim( (string) shell_exec( 'command -v node' ) );
+		if ( '' === $node ) {
+			$this->markTestSkipped( 'node is required to run the Settings page script.' );
 		}
 
-		unset( $_REQUEST['nonce'] );
+		$cases = [
+			[ '2.1.0+build.6', 'v2.1.0+build.7', false ],
+			[ '2.0.0', 'v2.0.0+build.7', false ],
+			[ '2.1.0+build.6', 'v2.1.0', false ],
+			[ '2.1.0+build.6', 'v2.0.9+build.9', false ],
+			[ '2.1.0+build.6', 'v2.1.1+build.1', true ],
+		];
+
+		foreach ( $cases as [ $installed, $tag, $update ] ) {
+			$label  = $installed . ' -> ' . $tag;
+			$output = [];
+			$status = 1;
+			exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.php' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $tag ) . ' 2>&1', $output, $status );
+			$this->assertSame( 0, $status, $label . "\n" . implode( "\n", $output ) );
+			$response = implode( "\n", $output );
+
+			$output = [];
+			$status = 1;
+			exec( escapeshellarg( $node ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.js' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $response ) . ' 2>&1', $output, $status );
+			$this->assertSame( 0, $status, $label . "\n" . implode( "\n", $output ) );
+			$card = json_decode( implode( "\n", $output ), true );
+
+			$this->assertSame( 'bricks_mcp_check_update', $card['action'], $label );
+			$this->assertSame( $update, str_contains( $card['html'], '>Update</a>' ), $label . ': ' . $card['html'] );
+			$this->assertSame( ! $update, str_contains( $card['html'], 'up to date' ), $label . ': ' . $card['html'] );
+			$this->assertSame( $update, $card['hasUpdateClass'], $label );
+			$this->assertTrue( $card['buttonEnabled'], $label );
+		}
 	}
 }
