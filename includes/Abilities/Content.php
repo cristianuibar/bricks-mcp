@@ -644,20 +644,30 @@ final class Content implements Module {
 			}
 
 			$keys     = implode( ', ', array_keys( $stale ) );
-			$blocking = array_values( array_intersect( self::ROBOTS_BLOCKING_DIRECTIVES, (array) ( $stale[ self::BRICKS_ROBOTS_SETTING ] ?? [] ) ) );
+			$robots   = (array) ( $stale[ self::BRICKS_ROBOTS_SETTING ] ?? [] );
+			$blocking = array_values( array_intersect( self::ROBOTS_BLOCKING_DIRECTIVES, $robots ) );
+			$kept     = array_values( array_diff( $robots, self::ROBOTS_BLOCKING_DIRECTIVES ) );
 			/* translators: 1: Bricks page setting keys, 2: SEO plugin name */
 			$message = sprintf( __( 'The Bricks page settings of this post still hold %1$s, which Bricks prints next to %2$s.', 'bricks-mcp' ), $keys, $source );
+			$fix     = sprintf( 'Clear %1$s with bricks/set-page-settings by sending each as null', $keys );
 
 			if ( array() !== $blocking ) {
 				/* translators: %s: robots directives */
 				$message .= ' ' . sprintf( __( 'Its robots tag says %s whatever the SEO plugin says, so crawlers may drop the page.', 'bricks-mcp' ), implode( ', ', $blocking ) );
 			}
 
+			// Clearing the whole robots setting would also drop directives such as nosnippet that block nothing.
+			if ( array() !== $blocking && array() !== $kept ) {
+				$clear = array_diff( array_keys( $stale ), [ self::BRICKS_ROBOTS_SETTING ] );
+				$fix   = sprintf( 'send %1$s as %2$s with bricks/set-page-settings, which drops %3$s and keeps the other robots directives', self::BRICKS_ROBOTS_SETTING, wp_json_encode( $kept ), implode( ', ', $blocking ) );
+				$fix   = array() === $clear ? ucfirst( $fix ) : sprintf( 'Clear %1$s by sending each as null and %2$s', implode( ', ', $clear ), $fix );
+			}
+
 			$warnings[] = $this->seo_warning(
 				array() !== $blocking ? 'error' : 'warning',
 				'bricks_' . $output['type'] . '_stale_values',
 				$message,
-				sprintf( 'Clear %1$s with bricks/set-page-settings by sending each as null, or ask the site owner to %2$s.', $keys, $turn_off )
+				sprintf( '%1$s, or ask the site owner to %2$s.', $fix, $turn_off )
 			) + [ 'staleValues' => $stale ];
 		}
 
