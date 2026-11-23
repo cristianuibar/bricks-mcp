@@ -3,7 +3,7 @@ Contributors: cristianuibar, optiwebopz
 Tags: ai, bricks builder, mcp, artificial intelligence, page builder
 Requires at least: 6.4
 Tested up to: 6.8
-Stable tag: 1.5.0
+Stable tag: 1.5.2
 Requires PHP: 8.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -106,6 +106,11 @@ Yes, when configured correctly. The plugin enforces WordPress Application Passwo
 3. An AI assistant creating a Bricks Builder hero section from a plain-text prompt.
 
 == Changelog ==
+
+= 1.5.2 =
+* Fix: Updates no longer install automatically. The site's own plugin auto-update setting decides.
+* Fix: The updater reads the releases list and offers 2.x only to sites running WordPress 7.1+, Bricks 2.5+ and the active MCP Adapter plugin; other sites stay on the newest 1.x release.
+* Fix: A jump from 1.x to 2.x is never installed by auto-update, only by a manual update.
 
 = 1.5.0 =
 * Security: Fix SSRF in template import by enforcing wp_safe_remote_get (blocks internal network requests).

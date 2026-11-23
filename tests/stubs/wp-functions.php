@@ -19,6 +19,9 @@
 if ( ! defined( 'DAY_IN_SECONDS' ) ) {
 	define( 'DAY_IN_SECONDS', 86400 );
 }
+if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
+	define( 'MINUTE_IN_SECONDS', 60 );
+}
 if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
 	define( 'HOUR_IN_SECONDS', 3600 );
 }
@@ -149,6 +152,31 @@ if ( ! function_exists( 'delete_transient' ) ) {
 	function delete_transient( string $transient ): bool {
 		unset( $GLOBALS['_bricks_mcp_test_transients'][ $transient ] );
 		return true;
+	}
+}
+
+if ( ! function_exists( 'get_site_transient' ) ) {
+	function get_site_transient( string $transient ): mixed {
+		return $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] ?? false;
+	}
+}
+
+if ( ! function_exists( 'delete_site_transient' ) ) {
+	function delete_site_transient( string $transient ): bool {
+		unset( $GLOBALS['_bricks_mcp_test_site_transients'][ $transient ] );
+		return true;
+	}
+}
+
+if ( ! function_exists( 'is_multisite' ) ) {
+	function is_multisite(): bool {
+		return (bool) ( $GLOBALS['_bricks_mcp_test_is_multisite'] ?? false );
+	}
+}
+
+if ( ! function_exists( 'is_plugin_active_for_network' ) ) {
+	function is_plugin_active_for_network( string $plugin ): bool {
+		return in_array( $plugin, $GLOBALS['_bricks_mcp_test_network_active_plugins'] ?? [], true );
 	}
 }
 
@@ -307,6 +335,18 @@ if ( ! function_exists( 'wp_safe_remote_get' ) ) {
 	function wp_safe_remote_get( string $url, array $args = [] ): array|\WP_Error {
 		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'][] = [ 'url' => $url, 'args' => $args ];
 		return $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] ?? [];
+	}
+}
+
+if ( ! function_exists( 'wp_remote_get' ) ) {
+	function wp_remote_get( string $url, array $args = [] ): array|\WP_Error {
+		return $GLOBALS['_bricks_mcp_test_remote_get'][ $url ] ?? new \WP_Error( 'http_request_failed', 'No stubbed response' );
+	}
+}
+
+if ( ! function_exists( 'is_plugin_active' ) ) {
+	function is_plugin_active( string $plugin ): bool {
+		return in_array( $plugin, $GLOBALS['_bricks_mcp_test_active_plugins'] ?? [], true );
 	}
 }
 
