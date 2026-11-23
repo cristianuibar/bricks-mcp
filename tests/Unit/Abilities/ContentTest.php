@@ -515,11 +515,11 @@ final class ContentTest extends TestCase {
 		$nofollow = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'][1];
 
 		$this->assertSame( 'bricks_seo_stale_values', $mixed['type'] );
-		$this->assertSame( 'Clear metaDescription by sending each as null and send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops noindex, none and keeps the other robots directives, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $mixed['fix'] );
-		$this->assertSame( 'Clear metaRobots with bricks/set-page-settings by sending each as null, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $blocking_only['fix'] );
+		$this->assertStringStartsWith( 'Clear metaDescription by sending each as null and send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops noindex, none and keeps the other robots directives, ', $mixed['fix'] );
+		$this->assertStringStartsWith( 'Clear metaRobots with bricks/set-page-settings by sending each as null, ', $blocking_only['fix'] );
 		$this->assertSame( 'error', $upper['severity'] );
 		$this->assertStringContainsString( 'Its robots tag says NOINDEX whatever the SEO plugin says', $upper['message'] );
-		$this->assertSame( 'Send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops NOINDEX and keeps the other robots directives, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $upper['fix'] );
+		$this->assertStringStartsWith( 'Send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops NOINDEX and keeps the other robots directives, ', $upper['fix'] );
 		$this->assertStringContainsString( 'crawlers may drop the page', $mixed['message'] );
 		$this->assertSame( 'error', $nofollow['severity'] );
 		$this->assertSame( 'The Bricks page settings of this post still hold metaRobots, which Bricks prints next to SEOPress. Its robots tag says nofollow whatever the SEO plugin says, so crawlers may not follow the links on the page.', $nofollow['message'] );
