@@ -353,7 +353,8 @@ final class ContentTest extends TestCase {
 
 	/**
 	 * The fix for a stale Bricks noindex drops only the blocking directives, so a nosnippet next to it is kept. Robots
-	 * directives are case-insensitive, so a stored NOINDEX is an error too.
+	 * directives are case-insensitive, so a stored NOINDEX is an error too. A nofollow alone is an error that keeps the
+	 * page indexed, so its message does not say crawlers may drop the page.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
@@ -379,12 +380,18 @@ final class ContentTest extends TestCase {
 		update_post_meta( self::POST_ID, '_bricks_page_settings', [ 'metaRobots' => [ 'NOINDEX', 'nosnippet' ] ] );
 		$upper = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'][1];
 
+		update_post_meta( self::POST_ID, '_bricks_page_settings', [ 'metaRobots' => [ 'nofollow' ] ] );
+		$nofollow = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'][1];
+
 		$this->assertSame( 'bricks_seo_stale_values', $mixed['type'] );
 		$this->assertSame( 'Clear metaDescription by sending each as null and send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops noindex, none and keeps the other robots directives, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $mixed['fix'] );
 		$this->assertSame( 'Clear metaRobots with bricks/set-page-settings by sending each as null, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $blocking_only['fix'] );
 		$this->assertSame( 'error', $upper['severity'] );
 		$this->assertStringContainsString( 'Its robots tag says NOINDEX whatever the SEO plugin says', $upper['message'] );
 		$this->assertSame( 'Send metaRobots as ["nosnippet"] with bricks/set-page-settings, which drops NOINDEX and keeps the other robots directives, or ask the site owner to turn on "Disable Bricks SEO meta tags" (disableSeo) in Bricks > Settings > General.', $upper['fix'] );
+		$this->assertStringContainsString( 'crawlers may drop the page', $mixed['message'] );
+		$this->assertSame( 'error', $nofollow['severity'] );
+		$this->assertSame( 'The Bricks page settings of this post still hold metaRobots, which Bricks prints next to SEOPress. Its robots tag says nofollow whatever the SEO plugin says, so crawlers may not follow the links on the page.', $nofollow['message'] );
 	}
 
 	/**
