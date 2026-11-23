@@ -255,7 +255,7 @@ final class QualityTest extends TestCase {
 	}
 
 	/**
-	 * A Bricks noindex left next to an active SEO plugin is a page-level error.
+	 * A Bricks noindex left next to an active SEO plugin is a page-level error that carries the stale values.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
@@ -265,7 +265,14 @@ final class QualityTest extends TestCase {
 	public function test_stale_bricks_robots_next_to_an_seo_plugin_is_reported(): void {
 		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
 		update_option( 'bricks_global_settings', [ 'disableOpenGraph' => true ] );
-		update_post_meta( 7, '_bricks_page_settings', [ 'metaRobots' => [ 'noindex' ] ] );
+		update_post_meta(
+			7,
+			'_bricks_page_settings',
+			[
+				'metaRobots'      => [ 'noindex' ],
+				'metaDescription' => 'Old Bricks description',
+			]
+		);
 		$this->fake_elements( [] );
 
 		$report = $this->diagnose();
@@ -275,6 +282,14 @@ final class QualityTest extends TestCase {
 		$this->assertSame( [ 'warning', 'error' ], array_column( $report['issues'], 'severity' ) );
 		$this->assertSame( [ null, null ], array_column( $report['issues'], 'elementId' ) );
 		$this->assertStringContainsString( 'bricks/set-page-settings', $report['issues'][1]['fix'] );
+		$this->assertSame(
+			[
+				'metaDescription' => 'Old Bricks description',
+				'metaRobots'      => [ 'noindex' ],
+			],
+			$report['issues'][1]['staleValues']
+		);
+		$this->assertArrayNotHasKey( 'staleValues', $report['issues'][0] );
 	}
 
 	public function test_unreadable_class_list_skips_the_missing_class_check_and_says_so(): void {

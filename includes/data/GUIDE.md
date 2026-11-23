@@ -46,7 +46,7 @@ Issue types:
 - `missing_wp_reset_postdata`: a code element runs `WP_Query` without `wp_reset_postdata()`.
 - `orphaned_child`: an element lists a child that does not exist. `bricks/set-page-elements` replaces the whole page, so read the complete tree with `bricks/get-page-elements`, remove only the dangling id, and send the complete tree back with `expectedDocumentDigest` from that read.
 - `phantom_content`: a header or footer template also has content in the page content meta; Bricks ignores it.
-- `multiple_seo_plugins`, `bricks_seo_output`, `bricks_opengraph_output`, `bricks_seo_stale_values`, `bricks_opengraph_stale_values`: the page prints SEO or Open Graph tags next to the active SEO plugin's own, as `bricks-mcp/get-seo` warns. Checked for pages, not header or footer templates.
+- `multiple_seo_plugins`, `bricks_seo_output`, `bricks_opengraph_output`, `bricks_seo_stale_values`, `bricks_opengraph_stale_values`: the page prints SEO or Open Graph tags next to the active SEO plugin's own, as `bricks-mcp/get-seo` warns. The two `_stale_values` issues also carry the Bricks page settings in `staleValues`. Checked for pages, not header or footer templates.
 
 Not checked, because Bricks rejects them on every write: unknown element types, invalid parent ids, duplicate ids, circular references and malformed query, image or link settings.
 
