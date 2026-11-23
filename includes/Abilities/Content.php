@@ -131,6 +131,8 @@ final class Content implements Module {
 
 	private const ROBOTS_BLOCKING_DIRECTIVES = [ 'noindex', 'nofollow', 'none' ];
 
+	private const ROBOTS_DEINDEXING_DIRECTIVES = [ 'noindex', 'none' ];
+
 	private const SEO_WARNINGS_SCHEMA = [
 		'type'  => 'array',
 		'items' => [
@@ -668,9 +670,15 @@ final class Content implements Module {
 			$message = sprintf( __( 'The Bricks page settings of this post still hold %1$s, which Bricks prints next to %2$s.', 'bricks-mcp' ), $keys, $source );
 			$fix     = sprintf( 'Clear %1$s with bricks/set-page-settings by sending each as null', $keys );
 
-			if ( array() !== $blocking ) {
+			// Only noindex and none drop the page; nofollow alone keeps it indexed and stops crawlers following its links.
+			$deindexing = array_filter( $blocking, static fn( string $directive ): bool => in_array( strtolower( trim( $directive ) ), self::ROBOTS_DEINDEXING_DIRECTIVES, true ) );
+
+			if ( array() !== $deindexing ) {
 				/* translators: %s: robots directives */
 				$message .= ' ' . sprintf( __( 'Its robots tag says %s whatever the SEO plugin says, so crawlers may drop the page.', 'bricks-mcp' ), implode( ', ', $blocking ) );
+			} elseif ( array() !== $blocking ) {
+				/* translators: %s: robots directives */
+				$message .= ' ' . sprintf( __( 'Its robots tag says %s whatever the SEO plugin says, so crawlers may not follow the links on the page.', 'bricks-mcp' ), implode( ', ', $blocking ) );
 			}
 
 			// Clearing the whole robots setting would also drop directives such as nosnippet that block nothing.
