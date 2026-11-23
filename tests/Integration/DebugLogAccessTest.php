@@ -36,14 +36,17 @@ final class DebugLogAccessTest extends TestCase {
 unlink( __FILE__ );
 require dirname( __DIR__, 3 ) . '/wp-load.php';
 
+// A relative error_log resolves against the working directory: the web root for a root request.
+chdir( ABSPATH );
 $log     = (string) ini_get( 'error_log' );
 $written = error_log( CANARY );
-clearstatcache( true, $log );
+clearstatcache();
+$log = (string) realpath( $log ) ?: $log;
 
 echo PHP_EOL, wp_json_encode(
 	[
 		'log'     => $log,
-		'root'    => ABSPATH,
+		'root'    => realpath( ABSPATH ) . '/',
 		'file'    => is_file( $log ),
 		'written' => $written,
 	]
