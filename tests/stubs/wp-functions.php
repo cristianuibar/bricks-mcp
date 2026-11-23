@@ -372,7 +372,9 @@ if ( ! function_exists( 'wp_parse_args' ) ) {
 if ( ! function_exists( 'get_posts' ) ) {
 	function get_posts( array $args = [] ): array {
 		$GLOBALS['_bricks_mcp_test_last_get_posts_args'] = $args;
-		return $GLOBALS['_bricks_mcp_test_get_posts_return'] ?? [];
+		$return = $GLOBALS['_bricks_mcp_test_get_posts_return'] ?? [];
+		// A closure answers from the query args, for tests that need a lookup to see posts they created.
+		return $return instanceof Closure ? $return( $args ) : $return;
 	}
 }
 

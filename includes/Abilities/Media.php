@@ -43,6 +43,9 @@ final class Media implements Module {
 
 	private const UNSPLASH_PHOTOGRAPHER_URL_META_KEY = '_unsplash_photographer_url';
 
+	// Marks an upload kept after a failed import, so a retry of that photo completes it instead of uploading again.
+	private const UNSPLASH_PENDING_META_KEY = '_unsplash_pending_photo_id';
+
 	private const GLOBAL_SETTINGS_OPTION = 'bricks_global_settings';
 
 	private const ADOBE_FONTS_OPTION = 'bricks_adobe_fonts';
@@ -219,17 +222,7 @@ final class Media implements Module {
 		$post_id     = isset( $input['postId'] ) ? (int) $input['postId'] : 0;
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 		if ( null !== $existing_id ) {
-			if ( $post_id > 0 && current_user_can( 'edit_post', $existing_id ) ) {
-				$existing_post = get_post( $existing_id );
-				if ( $existing_post && 0 === (int) ( $existing_post->post_parent ?? 0 ) ) {
-					$attached = $this->attach_to_post( $existing_id, $post_id );
-					if ( is_wp_error( $attached ) ) {
-						return $attached;
-					}
-				}
-			}
-
-			return $this->format_existing_attachment( $existing_id, $photo_id );
+			return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 		}
 
 		$api_key = $this->get_unsplash_api_key();
@@ -257,6 +250,37 @@ final class Media implements Module {
 			);
 		}
 
+		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
+			? sanitize_text_field( $photo['user']['name'] )
+			: '';
+		$photographer_url = $this->with_unsplash_utm(
+			isset( $photo['user']['links']['html'] ) && is_string( $photo['user']['links']['html'] ) && '' !== $photo['user']['links']['html']
+				? $photo['user']['links']['html']
+				: 'https://unsplash.com'
+		);
+
+		// Attribution is kept so a duplicate import can return it; the caption may be edited later.
+		// The photo ID goes last: a retry deduplicates only an attachment whose attribution was saved.
+		$import_meta = [
+			self::UNSPLASH_PHOTOGRAPHER_META_KEY     => $photographer,
+			self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY => $photographer_url,
+			self::UNSPLASH_META_KEY                  => $photo_id,
+		];
+
+		$pending_id = $this->find_existing_unsplash_attachment( $photo_id, self::UNSPLASH_PENDING_META_KEY );
+		if ( null !== $pending_id && current_user_can( 'edit_post', $pending_id ) ) {
+			$recorded = $this->record_unsplash_import_meta( $pending_id, $photo_id, $import_meta );
+			if ( is_wp_error( $recorded ) ) {
+				return $recorded;
+			}
+			delete_post_meta( $pending_id, self::UNSPLASH_PENDING_META_KEY );
+
+			// The earlier call reported a failure, so this call is the one that completed the import.
+			$completed = $this->reuse_existing_attachment( $pending_id, $photo_id, $post_id );
+
+			return is_wp_error( $completed ) ? $completed : array_merge( $completed, [ 'duplicate' => false ] );
+		}
+
 		$downloaded = $this->download_unsplash_image( $image_url, $photo_id );
 		if ( is_wp_error( $downloaded ) ) {
 			return $downloaded;
@@ -266,15 +290,6 @@ final class Media implements Module {
 			? $photo['links']['download_location']
 			: '';
 		$this->ping_unsplash_download( $download_location, $api_key );
-
-		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
-			? sanitize_text_field( $photo['user']['name'] )
-			: '';
-		$photographer_url = $this->with_unsplash_utm(
-			isset( $photo['user']['links']['html'] ) && is_string( $photo['user']['links']['html'] ) && '' !== $photo['user']['links']['html']
-				? $photo['user']['links']['html']
-				: 'https://unsplash.com'
-		);
 
 		$caption = '' !== $photographer
 			/* translators: %s: photographer name */
@@ -315,29 +330,9 @@ final class Media implements Module {
 			);
 		}
 
-		// Attribution is kept so a duplicate import can return it; the caption may be edited later.
-		// The photo ID goes last: a retry deduplicates only an attachment whose attribution was saved.
-		$import_meta = [
-			self::UNSPLASH_PHOTOGRAPHER_META_KEY     => $photographer,
-			self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY => $photographer_url,
-			self::UNSPLASH_META_KEY                  => $photo_id,
-		];
-		foreach ( $import_meta as $meta_key => $meta_value ) {
-			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
-			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
-			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
-				// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
-				$error_data = [ 'status' => 500 ];
-				if ( ! wp_delete_attachment( $attachment_id, true ) ) {
-					$error_data['attachmentId'] = $attachment_id;
-				}
-
-				return new \WP_Error(
-					'bricks_mcp_unsplash_meta_failed',
-					__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
-					$error_data
-				);
-			}
+		$recorded = $this->record_unsplash_import_meta( $attachment_id, $photo_id, $import_meta );
+		if ( is_wp_error( $recorded ) ) {
+			return $recorded;
 		}
 
 		if ( $post_id > 0 ) {
@@ -1029,17 +1024,72 @@ final class Media implements Module {
 	}
 
 	/**
+	 * Save the attribution and photo ID meta of an Unsplash import on its attachment.
+	 *
+	 * @param int                  $attachment_id Attachment ID.
+	 * @param string               $photo_id      Unsplash photo ID.
+	 * @param array<string,string> $import_meta   Meta values by key, the photo ID last.
+	 * @return true|\WP_Error
+	 */
+	private function record_unsplash_import_meta( int $attachment_id, string $photo_id, array $import_meta ): true|\WP_Error {
+		foreach ( $import_meta as $meta_key => $meta_value ) {
+			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
+			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
+			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
+				// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
+				// When WordPress refuses, mark it so a retry completes this attachment instead of uploading again.
+				$error_data = [ 'status' => 500 ];
+				if ( ! wp_delete_attachment( $attachment_id, true ) ) {
+					update_post_meta( $attachment_id, self::UNSPLASH_PENDING_META_KEY, $photo_id );
+					$error_data['attachmentId'] = $attachment_id;
+				}
+
+				return new \WP_Error(
+					'bricks_mcp_unsplash_meta_failed',
+					__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
+					$error_data
+				);
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Return an attachment already in the library for this photo, attaching it to the post when it is unattached.
+	 *
+	 * @param int    $attachment_id Existing attachment ID.
+	 * @param string $photo_id      Unsplash photo ID.
+	 * @param int    $post_id       Requested parent post ID, or 0.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function reuse_existing_attachment( int $attachment_id, string $photo_id, int $post_id ): array|\WP_Error {
+		if ( $post_id > 0 && current_user_can( 'edit_post', $attachment_id ) ) {
+			$existing_post = get_post( $attachment_id );
+			if ( $existing_post && 0 === (int) ( $existing_post->post_parent ?? 0 ) ) {
+				$attached = $this->attach_to_post( $attachment_id, $post_id );
+				if ( is_wp_error( $attached ) ) {
+					return $attached;
+				}
+			}
+		}
+
+		return $this->format_existing_attachment( $attachment_id, $photo_id );
+	}
+
+	/**
 	 * Find an already-imported WordPress attachment by Unsplash photo ID.
 	 *
 	 * @param string $photo_id Unsplash photo ID.
+	 * @param string $meta_key Meta key holding the photo ID.
 	 * @return int|null
 	 */
-	private function find_existing_unsplash_attachment( string $photo_id ): ?int {
+	private function find_existing_unsplash_attachment( string $photo_id, string $meta_key = self::UNSPLASH_META_KEY ): ?int {
 		$existing = get_posts(
 			[
 				'post_type'      => 'attachment',
 				'post_status'    => 'inherit',
-				'meta_key'       => self::UNSPLASH_META_KEY, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- Bounded 1-row lookup for Unsplash deduplication.
+				'meta_key'       => $meta_key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- Bounded 1-row lookup for Unsplash deduplication.
 				'meta_value'     => $photo_id, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- Bounded 1-row lookup for Unsplash deduplication.
 				'posts_per_page' => 1,
 				'fields'         => 'ids',
