@@ -1105,7 +1105,7 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
-	 * Clearing the last Slim SEO field keeps a record saved after the clear read it, up to the delete itself.
+	 * Clearing the last Slim SEO field keeps a record saved after the clear read it, up to the delete itself, and fails instead of reporting the clear.
 	 *
 	 * @param array<string, mixed>       $record Record the clear reads.
 	 * @param array<string, mixed>       $saved  Record the editor saves.
@@ -1138,7 +1138,7 @@ final class ContentTest extends TestCase {
 			}
 		};
 
-		$this->call(
+		$result = $this->call(
 			'bricks-mcp/update-seo',
 			[
 				'postId' => self::POST_ID,
@@ -1146,6 +1146,8 @@ final class ContentTest extends TestCase {
 			]
 		);
 
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'bricks_mcp_seo_changed', $result->get_error_code() );
 		$this->assertSame( $saved, get_post_meta( self::POST_ID, 'slim_seo', true ) );
 	}
 
