@@ -127,18 +127,33 @@ PHP;
 	}
 
 	/**
-	 * The plugin mount "." serves the checkout's logs/ folder whatever WP_DEBUG_LOG says.
+	 * The mapping "wp-content/logs" and the plugin mount "." serve the checkout's logs/ folder whatever WP_DEBUG_LOG says.
+	 *
+	 * The tests site's configured check skips while wp-env keeps its logging off, but the
+	 * development site's notices still land in that shared folder, so both URLs are checked here.
+	 *
+	 * @dataProvider logs_folder_urls
 	 */
-	public function test_visitor_cannot_read_plugin_checkout_logs_folder(): void {
+	public function test_visitor_cannot_read_shared_logs_folder( string $path ): void {
 		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
 		$file   = dirname( __DIR__, 2 ) . '/logs/bricks-mcp-access-test.log';
 		file_put_contents( $file, $canary . "\n" );
 
 		try {
-			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/logs/bricks-mcp-access-test.log', $canary );
+			$this->assert_denied( self::SERVER, $path . '/bricks-mcp-access-test.log', $canary );
 		} finally {
 			unlink( $file );
 		}
+	}
+
+	/**
+	 * @return array<string, array{string}>
+	 */
+	public static function logs_folder_urls(): array {
+		return [
+			'wp-content/logs mapping'     => [ '/wp-content/logs' ],
+			'plugin checkout logs folder' => [ '/wp-content/plugins/bricks-mcp/logs' ],
+		];
 	}
 
 	/**
