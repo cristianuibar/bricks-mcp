@@ -1,57 +1,29 @@
 #!/usr/bin/env bash
-# Build the release tree like release.yml and check its contents.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$ROOT"
+ZIP="${1:?Usage: verify-release-zip.sh <zip>}"
+EXCLUDES="$(cd "$(dirname "$0")/.." && pwd)/release-excludes.txt"
 
-BUILD_DIR="$(mktemp -d)"
-trap 'rm -rf "${BUILD_DIR}"' EXIT
-STAGE="${BUILD_DIR}/bricks-mcp"
-ZIP="${BUILD_DIR}/bricks-mcp.zip"
+ENTRIES="$(unzip -Z1 "$ZIP")"
 
-echo "==> Ability registration smoke (RegistrarTest)"
-php vendor/bin/phpunit -c phpunit-unit.xml --filter RegistrarTest
+OUTSIDE="$(grep -v '^bricks-mcp/' <<<"$ENTRIES" || true)"
+if [ -n "$OUTSIDE" ]; then
+	echo "ZIP entries outside bricks-mcp/:" >&2
+	echo "$OUTSIDE" >&2
+	exit 1
+fi
 
-echo "==> Staging production tree at ${STAGE}"
-mkdir -p "$STAGE"
-rsync -a \
-	--exclude='.git' \
-	--exclude='node_modules' \
-	--exclude='vendor' \
-	--exclude='docs' \
-	--exclude='mu-plugins' \
-	--exclude='logs' \
-	--exclude='tests' \
-	--exclude='.planning' \
-	--exclude='.wp-env.json' \
-	--exclude='package.json' \
-	--exclude='package-lock.json' \
-	--exclude='composer.json' \
-	--exclude='composer.lock' \
-	--exclude='phpunit.xml' \
-	--exclude='phpunit-unit.xml' \
-	--exclude='phpcs.xml' \
-	--exclude='.editorconfig' \
-	--exclude='.gitignore' \
-	--exclude='build' \
-	--exclude='.github' \
-	--exclude='update-server' \
-	--exclude='.claude' \
-	--exclude='README.md' \
-	--exclude='.wordpress-org' \
-	--exclude='.distignore' \
-	./ "$STAGE/"
+for REQUIRED in bricks-mcp/bricks-mcp.php bricks-mcp/includes/data/GUIDE.md; do
+	if ! grep -qxF "$REQUIRED" <<<"$ENTRIES"; then
+		echo "ZIP is missing ${REQUIRED}" >&2
+		exit 1
+	fi
+done
 
-echo "==> Building ZIP"
-(cd "$BUILD_DIR" && zip -rq bricks-mcp.zip bricks-mcp)
-
-echo "==> Checking ZIP contents"
-ZIP_LIST="$(unzip -l "$ZIP")"
-echo "$ZIP_LIST" | grep -q 'bricks-mcp/bricks-mcp.php'
-echo "$ZIP_LIST" | grep -q 'bricks-mcp/includes/data/GUIDE.md'
-if echo "$ZIP_LIST" | grep -qE 'bricks-mcp/(vendor|tests)/'; then
-	echo "ZIP must not contain vendor/ or tests/" >&2
+FORBIDDEN="$(awk -F/ 'NR==FNR { excluded[$0]; next } { for (i = 1; i <= NF; i++) if ($i in excluded) { print; break } }' "$EXCLUDES" - <<<"$ENTRIES")"
+if [ -n "$FORBIDDEN" ]; then
+	echo "ZIP contains entries from release-excludes.txt:" >&2
+	echo "$FORBIDDEN" >&2
 	exit 1
 fi
 
