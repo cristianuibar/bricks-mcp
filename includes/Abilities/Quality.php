@@ -110,14 +110,15 @@ final class Quality implements Module {
 						'items' => [
 							'type'       => 'object',
 							'properties' => [
-								'elementId' => [ 'type' => [ 'string', 'null' ] ],
-								'severity'  => [
+								'elementId'   => [ 'type' => [ 'string', 'null' ] ],
+								'severity'    => [
 									'type' => 'string',
 									'enum' => [ 'error', 'warning', 'info' ],
 								],
-								'type'      => [ 'type' => 'string' ],
-								'message'   => [ 'type' => 'string' ],
-								'fix'       => [ 'type' => 'string' ],
+								'type'        => [ 'type' => 'string' ],
+								'message'     => [ 'type' => 'string' ],
+								'fix'         => [ 'type' => 'string' ],
+								'staleValues' => [ 'type' => 'object' ],
 							],
 						],
 					],
@@ -572,7 +573,7 @@ final class Quality implements Module {
 		}
 
 		return array_map(
-			fn( array $warning ): array => $this->issue( null, $warning['severity'], $warning['type'], $warning['message'], $warning['fix'] ),
+			fn( array $warning ): array => $this->issue( null, $warning['severity'], $warning['type'], $warning['message'], $warning['fix'] ) + array_intersect_key( $warning, [ 'staleValues' => true ] ),
 			( new Content() )->seo_output_warnings( $post_id )
 		);
 	}
