@@ -1026,6 +1026,7 @@ final class UpdateCheckerTest extends TestCase {
 				'response' => [ 'code' => 404 ],
 				'body'     => hash( 'sha256', 'zip' ),
 			],
+			'timed out'        => new \WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 10001 milliseconds' ),
 		];
 
 		foreach ( $responses as $label => $response ) {
@@ -1048,7 +1049,8 @@ final class UpdateCheckerTest extends TestCase {
 			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = $response;
 
 			$this->assertFalse( $this->run_check_update(), $label );
-			$this->assertSame( [], $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] ?? null, $label );
+			$this->assertSame( '', $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data']['sha256'] ?? null, $label );
+			$this->assertSame( 'checksum_missing', $this->verify_on_fresh_instance()->get_error_code(), $label );
 		}
 	}
 
@@ -1173,6 +1175,7 @@ final class UpdateCheckerTest extends TestCase {
 
 			$this->assertTrue( $GLOBALS['_bricks_mcp_test_json_response']['success'] ?? null, $label );
 			$this->assertSame( $expected, $GLOBALS['_bricks_mcp_test_json_response']['data']['version'] ?? null, $label );
+			$this->assertSame( null === $expected ? '2.1.0' : '', $GLOBALS['_bricks_mcp_test_json_response']['data']['blocked_version'] ?? null, $label );
 			$this->assertSame( null !== $expected, is_array( $this->run_check_update() ), $label );
 		}
 
@@ -1181,7 +1184,8 @@ final class UpdateCheckerTest extends TestCase {
 
 	/**
 	 * Test: after Check Now, the Settings card shows an Update link only for a release with
-	 * a newer version core, so build metadata ("+build.7") on an equal version shows none.
+	 * a newer version core, so build metadata ("+build.7") on an equal version shows none,
+	 * and a newer release whose checksum request times out is reported as blocked, not up to date.
 	 *
 	 * Runs the AJAX handler in a separate PHP process for each installed version, then
 	 * clicks Check Now in assets/js/admin-updates.js (under node) with that response.
@@ -1195,18 +1199,21 @@ final class UpdateCheckerTest extends TestCase {
 		}
 
 		$cases = [
-			[ '2.1.0+build.6', 'v2.1.0+build.7', false ],
-			[ '2.0.0', 'v2.0.0+build.7', false ],
-			[ '2.1.0+build.6', 'v2.1.0', false ],
-			[ '2.1.0+build.6', 'v2.0.9+build.9', false ],
-			[ '2.1.0+build.6', 'v2.1.1+build.1', true ],
+			[ '2.1.0+build.6', 'v2.1.0+build.7', 'current', '' ],
+			[ '2.0.0', 'v2.0.0+build.7', 'current', '' ],
+			[ '2.1.0+build.6', 'v2.1.0', 'current', '' ],
+			[ '2.1.0+build.6', 'v2.0.9+build.9', 'current', '' ],
+			[ '2.1.0+build.6', 'v2.1.1+build.1', 'update', '' ],
+			[ '2.1.0', 'v2.1.1', 'blocked', 'checksum-timeout' ],
+			[ '2.1.0', 'v2.1.0', 'current', 'checksum-timeout' ],
 		];
 
-		foreach ( $cases as [ $installed, $tag, $update ] ) {
-			$label  = $installed . ' -> ' . $tag;
+		foreach ( $cases as [ $installed, $tag, $state, $mode ] ) {
+			$update = 'update' === $state;
+			$label  = $installed . ' -> ' . $tag . ' ' . $mode;
 			$output = [];
 			$status = 1;
-			exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.php' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $tag ) . ' 2>&1', $output, $status );
+			exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.php' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $tag ) . ' ' . escapeshellarg( $mode ) . ' 2>&1', $output, $status );
 			$this->assertSame( 0, $status, $label . "\n" . implode( "\n", $output ) );
 			$response = implode( "\n", $output );
 
@@ -1218,7 +1225,8 @@ final class UpdateCheckerTest extends TestCase {
 
 			$this->assertSame( 'bricks_mcp_check_update', $card['action'], $label );
 			$this->assertSame( $update, str_contains( $card['html'], '>Update</a>' ), $label . ': ' . $card['html'] );
-			$this->assertSame( ! $update, str_contains( $card['html'], 'up to date' ), $label . ': ' . $card['html'] );
+			$this->assertSame( 'current' === $state, str_contains( $card['html'], 'up to date' ), $label . ': ' . $card['html'] );
+			$this->assertSame( 'blocked' === $state, str_contains( $card['html'], 'v2.1.1 found, but its checksum could not be verified.' ), $label . ': ' . $card['html'] );
 			$this->assertSame( $update, $card['hasUpdateClass'], $label );
 			$this->assertTrue( $card['buttonEnabled'], $label );
 		}

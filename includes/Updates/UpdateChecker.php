@@ -247,11 +247,8 @@ final class UpdateChecker {
 				}
 			}
 
-			// A published checksum that cannot be fetched or parsed must not silently disable verification.
-			if ( '' === $sha256 ) {
-				set_transient( self::TRANSIENT_KEY, [], 5 * MINUTE_IN_SECONDS );
-				return [];
-			}
+			// A published checksum that cannot be fetched or parsed leaves the release without one:
+			// it is not offered and its download is refused, and the card reports it as blocked.
 			break;
 		}
 
@@ -389,6 +386,26 @@ final class UpdateChecker {
 	}
 
 	/**
+	 * Update status for the Settings card: the offerable release data plus
+	 * `update_available`, whether WordPress is offered a newer release, and
+	 * `blocked_version`, the version of a newer release it is not offered
+	 * because no valid checksum was read for its package ('' when none).
+	 *
+	 * @param array<string,mixed> $remote Release data from get_update_data().
+	 * @return array<string,mixed>
+	 */
+	private static function update_status( array $remote ): array {
+		$data     = self::offerable( $remote );
+		$version  = is_string( $remote['version'] ?? null ) ? $remote['version'] : '';
+		$is_newer = '' !== $version && self::is_newer_version( BRICKS_MCP_VERSION, $version );
+
+		$data['update_available'] = $is_newer && [] !== $data;
+		$data['blocked_version']  = $is_newer && ! $data['update_available'] ? $version : '';
+
+		return $data;
+	}
+
+	/**
 	 * Whether a release version takes precedence over the installed version.
 	 *
 	 * Build metadata ("+build.7") is ignored, as SemVer gives it no precedence:
@@ -447,20 +464,19 @@ final class UpdateChecker {
 	 *
 	 * Used by the Settings page version card to display update status.
 	 *
-	 * @return array<string,mixed> Cached update data, or empty array if no cache or WordPress cannot be offered the release.
+	 * @return array<string,mixed> Update status of the cached release (see update_status()); no release data if no cache or WordPress cannot be offered the release.
 	 */
 	public function get_cached_update_data(): array {
 		$cached = get_transient( self::TRANSIENT_KEY );
 
-		return is_array( $cached ) ? self::offerable( $cached ) : [];
+		return self::update_status( is_array( $cached ) ? $cached : [] );
 	}
 
 	/**
 	 * AJAX handler for "Check Now" button.
 	 *
 	 * Clears all caches and forces a fresh update check. Responds with the
-	 * offerable release data plus `update_available`, whether that release
-	 * takes precedence over the installed version.
+	 * update status of the fresh release data (see update_status()).
 	 *
 	 * @return void
 	 */
@@ -480,12 +496,7 @@ final class UpdateChecker {
 		// Force WordPress to re-check all plugin updates.
 		wp_update_plugins();
 
-		// Fetch fresh data; report only a release WordPress can be offered.
-		$data = self::offerable( $this->get_update_data() );
-
-		// Precedence is decided here, with the rule the Settings card and WordPress use, so build metadata never shows an update.
-		$data['update_available'] = isset( $data['version'] ) && self::is_newer_version( BRICKS_MCP_VERSION, (string) $data['version'] );
-
-		wp_send_json_success( $data );
+		// Fetch fresh data; precedence is decided here, with the rule WordPress uses, so build metadata never shows an update.
+		wp_send_json_success( self::update_status( $this->get_update_data() ) );
 	}
 }
