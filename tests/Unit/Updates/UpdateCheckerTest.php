@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace BricksMCP\Tests\Unit\Updates;
 
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use BricksMCP\Updates\UpdateChecker;
 
@@ -50,6 +51,9 @@ final class UpdateCheckerTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_transients']        = [];
 		$GLOBALS['_bricks_mcp_test_download_url_return'] = null;
 		$GLOBALS['_bricks_mcp_test_deleted_files']     = [];
+		$GLOBALS['_bricks_mcp_test_remote_get']        = [];
+		$GLOBALS['_bricks_mcp_test_active_plugins']    = [ 'mcp-adapter/mcp-adapter.php' ];
+		$GLOBALS['wp_version']                         = '7.1';
 	}
 
 	/**
@@ -213,5 +217,171 @@ final class UpdateCheckerTest extends TestCase {
 
 		// Temp file should NOT be deleted on match — WP will use it.
 		$this->assertNotContains( $temp, $GLOBALS['_bricks_mcp_test_deleted_files'] );
+	}
+
+	// -----------------------------------------------------------------------
+	// Release discovery and offer tests, through check_update().
+	// -----------------------------------------------------------------------
+
+	private const LIST_URL = 'https://api.github.com/repos/cristianuibar/bricks-mcp/releases?per_page=30';
+
+	/**
+	 * Helper: stub the releases list and each release's assets.
+	 *
+	 * @param array<int,array<string,mixed>> $releases Each: tag, draft?, prerelease?.
+	 * @return void
+	 */
+	private function stub_releases( array $releases ): void {
+		$list = [];
+		foreach ( $releases as $release ) {
+			$tag    = $release['tag'];
+			$base   = "https://github.com/cristianuibar/bricks-mcp/releases/download/{$tag}/bricks-mcp.zip";
+			$list[] = [
+				'tag_name'   => $tag,
+				'draft'      => $release['draft'] ?? false,
+				'prerelease' => $release['prerelease'] ?? false,
+				'html_url'   => "https://github.com/cristianuibar/bricks-mcp/releases/tag/{$tag}",
+				'assets'     => [
+					[ 'name' => 'bricks-mcp.zip', 'browser_download_url' => $base ],
+					[ 'name' => 'bricks-mcp.zip.sha256', 'browser_download_url' => $base . '.sha256' ],
+				],
+			];
+			$GLOBALS['_bricks_mcp_test_remote_get'][ $base . '.sha256' ] = [
+				'response' => [ 'code' => 200 ],
+				'body'     => str_repeat( 'a', 64 ) . '  bricks-mcp.zip',
+			];
+		}
+		$GLOBALS['_bricks_mcp_test_remote_get'][ self::LIST_URL ] = [
+			'response' => [ 'code' => 200 ],
+			'body'     => json_encode( $list ),
+		];
+	}
+
+	/**
+	 * Helper: run the updater as WordPress does for an installed 1.5.1.
+	 *
+	 * @return mixed
+	 */
+	private function offer() {
+		return $this->checker->check_update(
+			false,
+			[ 'Version' => '1.5.1', 'UpdateURI' => 'https://github.com/cristianuibar/bricks-mcp' ],
+			'bricks-mcp/bricks-mcp.php',
+			[]
+		);
+	}
+
+	/**
+	 * Helper: make the site look like a Bricks 2.5 install.
+	 *
+	 * @return void
+	 */
+	private function with_bricks( string $version = '2.5' ): void {
+		if ( ! defined( 'BRICKS_VERSION' ) ) {
+			define( 'BRICKS_VERSION', $version );
+		}
+	}
+
+	public function test_offer_does_not_force_auto_update(): void {
+		$this->stub_releases( [ [ 'tag' => 'v1.5.2' ], [ 'tag' => 'v1.5.1' ] ] );
+
+		$offer = $this->offer();
+
+		$this->assertSame( '1.5.2', $offer['version'] );
+		$this->assertArrayNotHasKey( 'autoupdate', $offer );
+		$this->assertArrayNotHasKey( 'requires', $offer );
+		$this->assertSame( str_repeat( 'a', 64 ), $this->get_expected_hash() );
+	}
+
+	public function test_eligible_site_is_offered_2x_with_requirement(): void {
+		$this->with_bricks();
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
+
+		$offer = $this->offer();
+
+		$this->assertSame( '2.0.0', $offer['version'] );
+		$this->assertSame( '7.1', $offer['requires'] );
+		$this->assertSame( 'https://github.com/cristianuibar/bricks-mcp/releases/download/v2.0.0/bricks-mcp.zip', $offer['package'] );
+	}
+
+	public function test_old_wordpress_is_offered_1x_only(): void {
+		$this->with_bricks();
+		$GLOBALS['wp_version'] = '7.0.2';
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
+
+		$this->assertSame( '1.5.2', $this->offer()['version'] );
+	}
+
+	public function test_inactive_adapter_is_offered_1x_only(): void {
+		$this->with_bricks();
+		$GLOBALS['_bricks_mcp_test_active_plugins'] = [];
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
+
+		$this->assertSame( '1.5.2', $this->offer()['version'] );
+	}
+
+	#[RunInSeparateProcess]
+	public function test_old_bricks_is_offered_1x_only(): void {
+		define( 'BRICKS_VERSION', '2.4.9' );
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
+
+		$this->assertSame( '1.5.2', $this->offer()['version'] );
+	}
+
+	#[RunInSeparateProcess]
+	public function test_bricks_beta_counts_as_eligible(): void {
+		define( 'BRICKS_VERSION', '2.5-beta1' );
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
+
+		$this->assertSame( '2.0.0', $this->offer()['version'] );
+	}
+
+	public function test_drafts_and_prereleases_are_ignored(): void {
+		$this->with_bricks();
+		$this->stub_releases(
+			[
+				[ 'tag' => 'v2.1.0', 'draft' => true ],
+				[ 'tag' => 'v2.0.0', 'prerelease' => true ],
+				[ 'tag' => 'v1.5.2' ],
+			]
+		);
+
+		$this->assertSame( '1.5.2', $this->offer()['version'] );
+	}
+
+	public function test_malformed_releases_response_offers_nothing_and_caches_briefly(): void {
+		$GLOBALS['_bricks_mcp_test_remote_get'][ self::LIST_URL ] = [
+			'response' => [ 'code' => 200 ],
+			'body'     => '{"message":"rate limited"}',
+		];
+
+		$this->assertFalse( $this->offer() );
+		$this->assertSame( [], $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] );
+	}
+
+	public function test_cached_2x_is_not_offered_once_the_site_stops_being_eligible(): void {
+		$this->with_bricks();
+		$this->stub_releases( [ [ 'tag' => 'v2.0.0' ], [ 'tag' => 'v1.5.2' ] ] );
+		$this->assertSame( '2.0.0', $this->offer()['version'] );
+
+		$GLOBALS['_bricks_mcp_test_active_plugins'] = [];
+
+		$this->assertFalse( $this->offer() );
+	}
+
+	public function test_major_jump_is_refused_by_the_auto_update_filter(): void {
+		$major = (object) [ 'plugin' => 'bricks-mcp/bricks-mcp.php', 'new_version' => '2.0.0' ];
+		$minor = (object) [ 'plugin' => 'bricks-mcp/bricks-mcp.php', 'new_version' => '1.5.2' ];
+		$other = (object) [ 'plugin' => 'other/other.php', 'new_version' => '3.0.0' ];
+
+		$this->assertFalse( $this->checker->block_major_auto_update( true, $major ) );
+		$this->assertTrue( $this->checker->block_major_auto_update( true, $minor ) );
+		$this->assertTrue( $this->checker->block_major_auto_update( true, $other ) );
+	}
+
+	private function get_expected_hash(): string {
+		$ref = new \ReflectionProperty( UpdateChecker::class, 'expected_sha256' );
+		$ref->setAccessible( true );
+		return $ref->getValue( $this->checker );
 	}
 }

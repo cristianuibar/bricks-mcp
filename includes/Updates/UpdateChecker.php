@@ -27,11 +27,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class UpdateChecker {
 
 	/**
-	 * GitHub Releases API URL for the latest release.
+	 * GitHub Releases API URL for the releases list.
 	 *
 	 * @var string
 	 */
-	private const GITHUB_API_URL = 'https://api.github.com/repos/cristianuibar/bricks-mcp/releases/latest';
+	private const GITHUB_API_URL = 'https://api.github.com/repos/cristianuibar/bricks-mcp/releases?per_page=30';
+
+	/**
+	 * Plugin file of the MCP Adapter, required by 2.x releases.
+	 *
+	 * @var string
+	 */
+	private const ADAPTER_PLUGIN = 'mcp-adapter/mcp-adapter.php';
 
 	/**
 	 * Transient key for cached update data.
@@ -68,6 +75,9 @@ final class UpdateChecker {
 
 		// Intercept the plugin download to verify SHA-256 checksum before WP installs.
 		add_filter( 'upgrader_pre_download', [ $this, 'verify_download' ], 10, 4 );
+
+		// Never auto-install a major version jump.
+		add_filter( 'auto_update_plugin', [ $this, 'block_major_auto_update' ], PHP_INT_MAX, 2 );
 
 		// AJAX handler for "Check Now" button on settings page.
 		add_action( 'wp_ajax_bricks_mcp_check_update', [ $this, 'ajax_check_update' ] );
@@ -107,7 +117,7 @@ final class UpdateChecker {
 	public function check_update( $update, array $plugin_data, string $plugin_file, array $locales ) {
 		$remote = $this->get_update_data();
 
-		if ( empty( $remote['version'] ) ) {
+		if ( empty( $remote['version'] ) || ! $this->is_installable( $remote['version'] ) ) {
 			return $update;
 		}
 
@@ -119,7 +129,7 @@ final class UpdateChecker {
 			return $update;
 		}
 
-		return [
+		$offer = [
 			'id'           => $plugin_data['UpdateURI'],
 			'slug'         => 'bricks-mcp',
 			'version'      => $remote['version'],
@@ -127,16 +137,61 @@ final class UpdateChecker {
 			'package'      => $remote['package'] ?? '',
 			'tested'       => $remote['tested'] ?? '',
 			'requires_php' => $remote['requires_php'] ?? '8.2',
-			'autoupdate'   => true,
 		];
+
+		if ( version_compare( $remote['version'], '2', '>=' ) ) {
+			$offer['requires'] = '7.1';
+		}
+
+		return $offer;
+	}
+
+	/**
+	 * Refuse automatic installation of a 2.x or higher release over an installed 1.x.
+	 *
+	 * @param bool|null $update Whether to auto-update.
+	 * @param object    $item   Update offer.
+	 * @return bool|null
+	 */
+	public function block_major_auto_update( $update, $item ) {
+		if ( 'bricks-mcp/bricks-mcp.php' !== ( $item->plugin ?? '' ) ) {
+			return $update;
+		}
+
+		if ( (int) BRICKS_MCP_VERSION < 2 && (int) ( $item->new_version ?? 0 ) >= 2 ) {
+			return false;
+		}
+
+		return $update;
+	}
+
+	/**
+	 * Whether this site may install the given release version.
+	 *
+	 * 2.x and higher need WordPress 7.1+, Bricks 2.5+ (betas accepted) and the MCP Adapter plugin.
+	 *
+	 * @param string $version Release version.
+	 * @return bool
+	 */
+	private function is_installable( string $version ): bool {
+		if ( version_compare( $version, '2', '<' ) ) {
+			return true;
+		}
+
+		global $wp_version;
+
+		return version_compare( (string) $wp_version, '7.1', '>=' )
+			&& defined( 'BRICKS_VERSION' )
+			&& version_compare( (string) BRICKS_VERSION, '2.5-dev', '>=' )
+			&& is_plugin_active( self::ADAPTER_PLUGIN );
 	}
 
 	/**
 	 * Get update data from cache or GitHub Releases API.
 	 *
-	 * Fetches the latest release from GitHub, extracts the version from
-	 * `tag_name` (stripping a leading "v") and the ZIP download URL from
-	 * `assets[0].browser_download_url`.
+	 * Fetches the releases list from GitHub, skips drafts and prereleases, and picks
+	 * the highest version this site may install. Extracts the version from
+	 * `tag_name` (stripping a leading "v") and the ZIP download URL from the assets.
 	 *
 	 * @return array<string,mixed> Update data array.
 	 */
@@ -164,15 +219,32 @@ final class UpdateChecker {
 			return [];
 		}
 
-		$release = json_decode( wp_remote_retrieve_body( $response ), true );
+		$releases = json_decode( wp_remote_retrieve_body( $response ), true );
+		$release  = null;
+		$version  = '';
 
-		if ( ! is_array( $release ) || empty( $release['tag_name'] ) ) {
+		if ( is_array( $releases ) ) {
+			foreach ( $releases as $candidate ) {
+				if ( ! is_array( $candidate ) || ! empty( $candidate['draft'] ) || ! empty( $candidate['prerelease'] ) || ! is_string( $candidate['tag_name'] ?? null ) ) {
+					continue;
+				}
+
+				// Strip leading "v" from tag name (e.g. "v1.2.3" → "1.2.3").
+				$candidate_version = ltrim( $candidate['tag_name'], 'v' );
+
+				if ( 1 === preg_match( '/^\d+\.\d+\.\d+$/', $candidate_version )
+					&& $this->is_installable( $candidate_version )
+					&& ( null === $release || version_compare( $candidate_version, $version, '>' ) ) ) {
+					$release = $candidate;
+					$version = $candidate_version;
+				}
+			}
+		}
+
+		if ( null === $release ) {
 			set_transient( self::TRANSIENT_KEY, [], 5 * MINUTE_IN_SECONDS );
 			return [];
 		}
-
-		// Strip leading "v" from tag name (e.g. "v1.2.3" → "1.2.3").
-		$version = ltrim( $release['tag_name'], 'v' );
 
 		// Scan assets for the plugin ZIP and a matching .sha256 checksum file.
 		$package = '';
