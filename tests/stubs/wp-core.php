@@ -198,16 +198,21 @@ if ( ! class_exists( 'wpdb' ) ) {
 		/**
 		 * Run a post meta DELETE on post_id, meta_key and meta_value; any other query fails the test.
 		 *
+		 * Like MySQL, keywords ignore letter case and whitespace is optional inside parentheses and around "=";
+		 * CAST must be followed directly by "(", as MySQL requires without IGNORE_SPACE.
+		 *
 		 * @param string $query Prepared query.
 		 * @return int|false Rows deleted.
 		 */
 		public function query( string $query ): int|false {
 			$quoted = "'((?:[^'\\\\]|\\\\.)*)'";
-			$prefix = "DELETE FROM {$this->postmeta} WHERE post_id = (\\d+) AND meta_key = {$quoted} AND ";
-			if ( preg_match( "/^{$prefix}CAST\\( CONVERT\\( meta_value USING utf8mb4 \\) AS BINARY \\) = CAST\\( CONVERT\\( {$quoted} USING utf8mb4 \\) AS BINARY \\)$/", $query, $matches ) ) {
+			$table  = preg_quote( $this->postmeta, '/' );
+			$prefix = "\\s*DELETE\\s+FROM\\s+(?-i:{$table})\\s+WHERE\\s+post_id\\s*=\\s*(\\d+)\\s+AND\\s+meta_key\\s*=\\s*{$quoted}\\s+AND\\s+";
+			$utf8   = static fn( string $operand ): string => "CAST\\(\\s*CONVERT\\s*\\(\\s*{$operand}\\s+USING\\s+utf8mb4\\s*\\)\\s+AS\\s+BINARY\\s*\\)";
+			if ( preg_match( "/^{$prefix}{$utf8( 'meta_value' )}\\s*=\\s*{$utf8( $quoted )}\\s*$/i", $query, $matches ) ) {
 				return $this->delete_post_meta_row( (int) $matches[1], stripslashes( $matches[2] ), stripslashes( $matches[3] ), true );
 			}
-			if ( ! preg_match( "/^{$prefix}meta_value = (CAST\\( )?{$quoted}( AS BINARY \\))?$/", $query, $matches ) ) {
+			if ( ! preg_match( "/^{$prefix}meta_value\\s*=\\s*(CAST\\(\\s*)?{$quoted}(\\s+AS\\s+BINARY\\s*\\))?\\s*$/i", $query, $matches ) ) {
 				throw new LogicException( "Unsupported query: {$query}" );
 			}
 			$value  = stripslashes( $matches[4] );

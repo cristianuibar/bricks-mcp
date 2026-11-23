@@ -1096,12 +1096,13 @@ final class ContentTest extends TestCase {
 	/**
 	 * Slim SEO records an editor saves while a clear empties the record, and the clear's fields.
 	 *
-	 * @return array<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: array<string, string|bool>}>
+	 * @return array<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: array<string, string|bool>, 3: bool}>
 	 */
 	public static function slim_seo_saves_during_a_clear(): array {
 		return [
-			'a new image'                     => [ [ 'noindex' => 1 ], [ 'noindex' => 1, 'facebook_image' => 'https://example.com/fb.jpg' ], [ 'noindex' => false ] ],
-			'an image that only changes case' => [ [ 'facebook_image' => 'https://example.com/Hero.jpg' ], [ 'facebook_image' => 'https://example.com/hero.jpg' ], [ 'ogImage' => '' ] ],
+			'a new image'                     => [ [ 'noindex' => 1 ], [ 'noindex' => 1, 'facebook_image' => 'https://example.com/fb.jpg' ], [ 'noindex' => false ], false ],
+			'an image that only changes case' => [ [ 'facebook_image' => 'https://example.com/Hero.jpg' ], [ 'facebook_image' => 'https://example.com/hero.jpg' ], [ 'ogImage' => '' ], false ],
+			'an image that only changes case, in SQL without spaces inside parentheses' => [ [ 'facebook_image' => 'https://example.com/Hero.jpg' ], [ 'facebook_image' => 'https://example.com/hero.jpg' ], [ 'ogImage' => '' ], true ],
 		];
 	}
 
@@ -1111,20 +1112,30 @@ final class ContentTest extends TestCase {
 	 * @param array<string, mixed>       $record Record the clear reads.
 	 * @param array<string, mixed>       $saved  Record the editor saves.
 	 * @param array<string, string|bool> $seo    Fields the clear empties.
+	 * @param bool                       $compact Whether the DELETE is sent without spaces inside its parentheses, as equivalent SQL.
 	 * @return void
 	 */
 	#[DataProvider( 'slim_seo_saves_during_a_clear' )]
 	#[RunInSeparateProcess]
 	#[PreserveGlobalState( false )]
-	public function test_slim_seo_clear_keeps_a_record_saved_after_it_was_read( array $record, array $saved, array $seo ): void {
+	public function test_slim_seo_clear_keeps_a_record_saved_after_it_was_read( array $record, array $saved, array $seo, bool $compact ): void {
 		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
 		update_post_meta( self::POST_ID, 'slim_seo', $record );
 		// Slim SEO's editor saves the post after the clear has read and matched the row, just before the row is deleted.
-		$GLOBALS['wpdb'] = new class( $saved ) extends \wpdb {
+		$GLOBALS['wpdb'] = new class( $saved, $compact ) extends \wpdb {
 			/**
-			 * @param array<string, mixed> $saved Record the editor saves.
+			 * @param array<string, mixed> $saved   Record the editor saves.
+			 * @param bool                 $compact Whether to remove the spaces inside the query's parentheses.
 			 */
-			public function __construct( private array $saved ) {}
+			public function __construct( private array $saved, private bool $compact ) {}
+
+			/**
+			 * @param string $query Prepared query.
+			 * @return int|false
+			 */
+			public function query( string $query ): int|false {
+				return parent::query( $this->compact ? (string) preg_replace( [ '/\(\s+/', '/\s+\)/' ], [ '(', ')' ], $query ) : $query );
+			}
 
 			/**
 			 * @param int         $post_id  Post ID.
