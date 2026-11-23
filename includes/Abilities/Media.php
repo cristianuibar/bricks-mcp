@@ -254,8 +254,10 @@ final class Media implements Module {
 		$photo     = $this->unsplash_get_json( $photo_url, $api_key );
 
 		if ( is_wp_error( $photo ) ) {
-			// An unmarked attachment may predate stored attribution, and still deduplicates when Unsplash cannot credit it.
-			return null !== $existing_id && ! $pending ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
+			// An unmarked attachment may predate stored attribution. If Unsplash no longer has the photo it can never be
+			// credited, so it deduplicates as it is; any other failure is returned so a later retry completes the credit.
+			$gone = 'bricks_mcp_unsplash_not_found' === $photo->get_error_code();
+			return null !== $existing_id && ! $pending && $gone ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
 		}
 
 		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )

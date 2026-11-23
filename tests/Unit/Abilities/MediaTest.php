@@ -233,7 +233,8 @@ final class MediaTest extends TestCase {
 
 	/**
 	 * A duplicate import saved without attribution, as before it was stored, gets its credit from Unsplash when the
-	 * caller can edit it, and is still returned as it is when Unsplash cannot be reached or the caller cannot edit it.
+	 * caller can edit it. A temporary Unsplash failure is an error, so a retry still completes the credit; the
+	 * attachment is returned as it is only when Unsplash no longer has the photo or the caller cannot edit it.
 	 *
 	 * @return void
 	 */
@@ -255,15 +256,23 @@ final class MediaTest extends TestCase {
 		);
 		$import = static fn(): array|\WP_Error => wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'dup_99' ] );
 
-		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static fn(): array => [
-			'response' => [ 'code' => 404 ],
-			'headers'  => [ 'content-type' => 'application/json' ],
-			'body'     => '{}',
-		];
-		$unreachable = $import();
-		$this->assertIsArray( $unreachable );
-		$this->assertSame( 42, $unreachable['attachmentId'] );
-		$this->assertNull( $unreachable['photographerUrl'] );
+		$unsplash_code                                  = 429;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function () use ( &$unsplash_code ): array {
+			return [
+				'response' => [ 'code' => $unsplash_code ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => '{}',
+			];
+		};
+		$rate_limited = $import();
+		$this->assertInstanceOf( \WP_Error::class, $rate_limited );
+		$this->assertSame( 429, $rate_limited->get_error_data()['status'] );
+
+		$unsplash_code = 404;
+		$gone          = $import();
+		$this->assertIsArray( $gone );
+		$this->assertSame( 42, $gone['attachmentId'] );
+		$this->assertNull( $gone['photographerUrl'] );
 
 		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static fn(): array => [
 			'response' => [ 'code' => 200 ],
@@ -769,7 +778,8 @@ final class MediaTest extends TestCase {
 		);
 
 		$image_url                                      = 'https://images.unsplash.com/photo-77?w=1080';
-		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url ): array {
+		$api_code                                       = 200;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$api_code ): array {
 			if ( $image_url === $url ) {
 				return [
 					'response' => [ 'code' => 200 ],
@@ -779,7 +789,7 @@ final class MediaTest extends TestCase {
 			}
 
 			return [
-				'response' => [ 'code' => 200 ],
+				'response' => [ 'code' => $api_code ],
 				'headers'  => [ 'content-type' => 'application/json' ],
 				'body'     => (string) wp_json_encode(
 					[
@@ -952,6 +962,18 @@ final class MediaTest extends TestCase {
 				$this->assertInstanceOf( \WP_Error::class, $first, $label );
 				$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $first->get_error_code(), $label );
 				$first_id = $first->get_error_data()['attachmentId'];
+			}
+			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
+
+			// A rate-limited retry cannot fetch the credit, so it fails rather than return the attachment uncredited.
+			$api_code     = 429;
+			$rate_limited = $import();
+			$api_code     = 200;
+			if ( 1 === count( $failing_keys ) ) {
+				$this->assertSame( $first_id, $rate_limited['attachmentId'], $label );
+			} else {
+				$this->assertInstanceOf( \WP_Error::class, $rate_limited, $label );
+				$this->assertSame( 429, $rate_limited->get_error_data()['status'], $label );
 			}
 			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
 
