@@ -112,13 +112,18 @@ namespace BricksMCP\Abilities {
 	if ( ! function_exists( __NAMESPACE__ . '\wp_delete_attachment' ) ) {
 		/**
 		 * Allow Media tests to simulate a failed attachment delete without affecting other tests.
+		 * The fail flag 'after_meta' models WordPress removing the post meta before the post delete fails.
 		 *
 		 * @param int  $post_id      Attachment ID.
 		 * @param bool $force_delete Whether to bypass the trash.
 		 * @return \WP_Post|false|null
 		 */
 		function wp_delete_attachment( int $post_id, bool $force_delete = false ): \WP_Post|false|null {
-			if ( ! empty( $GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] ) ) {
+			$fail = $GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] ?? false;
+			if ( 'after_meta' === $fail ) {
+				unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] );
+			}
+			if ( ! empty( $fail ) ) {
 				return false;
 			}
 

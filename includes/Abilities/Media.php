@@ -43,6 +43,9 @@ final class Media implements Module {
 
 	private const UNSPLASH_PHOTOGRAPHER_URL_META_KEY = '_unsplash_photographer_url';
 
+	// Set with the photo ID on upload and removed once the attribution is saved, so a retry completes the attachment.
+	private const UNSPLASH_PENDING_META_KEY = '_unsplash_attribution_pending';
+
 	private const GLOBAL_SETTINGS_OPTION = 'bricks_global_settings';
 
 	private const ADOBE_FONTS_OPTION = 'bricks_adobe_fonts';
@@ -218,8 +221,21 @@ final class Media implements Module {
 
 		$post_id     = isset( $input['postId'] ) ? (int) $input['postId'] : 0;
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
-		if ( null !== $existing_id ) {
+		$pending     = null !== $existing_id && '' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true );
+		if ( null !== $existing_id && ! $pending ) {
 			return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
+		}
+
+		// Uploading again would duplicate the attachment, so only a user who can complete it may continue.
+		if ( $pending && ! current_user_can( 'edit_post', $existing_id ) ) {
+			return new \WP_Error(
+				'bricks_mcp_unsplash_import_incomplete',
+				__( 'An earlier import of this Unsplash photo left an attachment without its attribution. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
+				[
+					'status'       => 403,
+					'attachmentId' => $existing_id,
+				]
+			);
 		}
 
 		$api_key = $this->get_unsplash_api_key();
@@ -257,35 +273,20 @@ final class Media implements Module {
 		);
 
 		// Attribution is kept so a duplicate import can return it; the caption may be edited later.
-		// The photo ID goes last: a retry deduplicates only an attachment whose attribution was saved.
-		$import_meta = [
+		$attribution = [
 			self::UNSPLASH_PHOTOGRAPHER_META_KEY     => $photographer,
 			self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY => $photographer_url,
-			self::UNSPLASH_META_KEY                  => $photo_id,
 		];
 
-		$pending_id = $this->find_incomplete_unsplash_attachment( $photo_id );
-		if ( null !== $pending_id ) {
-			// Uploading again would duplicate the kept upload, so only a user who can complete it may continue.
-			if ( ! current_user_can( 'edit_post', $pending_id ) ) {
-				return new \WP_Error(
-					'bricks_mcp_unsplash_import_incomplete',
-					__( 'An earlier import of this Unsplash photo left an attachment without its metadata. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
-					[
-						'status'       => 403,
-						'attachmentId' => $pending_id,
-					]
-				);
-			}
-
-			// The kept upload may already be in use, so a failure here keeps it for the next retry.
-			$recorded = $this->record_unsplash_import_meta( $pending_id, $import_meta, false );
+		if ( $pending ) {
+			// The attachment may already be in use, so a failure here keeps it for the next retry.
+			$recorded = $this->record_unsplash_attribution( $existing_id, $attribution );
 			if ( is_wp_error( $recorded ) ) {
 				return $recorded;
 			}
 
 			// The earlier call reported a failure, so this call is the one that completed the import.
-			$completed = $this->reuse_existing_attachment( $pending_id, $photo_id, $post_id );
+			$completed = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 
 			return is_wp_error( $completed ) ? $completed : array_merge( $completed, [ 'duplicate' => false ] );
 		}
@@ -339,7 +340,22 @@ final class Media implements Module {
 			);
 		}
 
-		$recorded = $this->record_unsplash_import_meta( $attachment_id, $import_meta, true );
+		// The photo ID goes first, so a retry finds this attachment by it and completes a failed attribution.
+		$marked = [
+			self::UNSPLASH_PENDING_META_KEY => '1',
+			self::UNSPLASH_META_KEY         => $photo_id,
+		];
+		if ( ! $this->write_unsplash_meta( $attachment_id, $marked ) ) {
+			// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
+			$error_data = [ 'status' => 500 ];
+			if ( ! wp_delete_attachment( $attachment_id, true ) ) {
+				$error_data['attachmentId'] = $attachment_id;
+			}
+
+			return $this->unsplash_meta_error( $error_data );
+		}
+
+		$recorded = $this->record_unsplash_attribution( $attachment_id, $attribution );
 		if ( is_wp_error( $recorded ) ) {
 			return $recorded;
 		}
@@ -1033,30 +1049,18 @@ final class Media implements Module {
 	}
 
 	/**
-	 * Save the attribution and photo ID meta of an Unsplash import on its attachment.
+	 * Save meta values on an attachment, stopping at the first one that does not persist.
 	 *
 	 * @param int                  $attachment_id Attachment ID.
-	 * @param array<string,string> $import_meta   Meta values by key, the photo ID last.
-	 * @param bool                 $new_upload    Whether this call uploaded the attachment, so a failure may delete it.
-	 * @return true|\WP_Error
+	 * @param array<string,string> $meta          Meta values by key, in write order.
+	 * @return bool Whether every value was saved.
 	 */
-	private function record_unsplash_import_meta( int $attachment_id, array $import_meta, bool $new_upload ): true|\WP_Error {
-		foreach ( $import_meta as $meta_key => $meta_value ) {
+	private function write_unsplash_meta( int $attachment_id, array $meta ): bool {
+		foreach ( $meta as $meta_key => $meta_value ) {
 			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
 			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
 			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
-				// Remove a new upload rather than leave it incomplete. A kept upload may already be in use, so it
-				// stays, and a retry finds it by its file name and completes it instead of uploading again.
-				$error_data = [ 'status' => 500 ];
-				if ( ! $new_upload || ! wp_delete_attachment( $attachment_id, true ) ) {
-					$error_data['attachmentId'] = $attachment_id;
-				}
-
-				return new \WP_Error(
-					'bricks_mcp_unsplash_meta_failed',
-					__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
-					$error_data
-				);
+				return false;
 			}
 		}
 
@@ -1064,50 +1068,42 @@ final class Media implements Module {
 	}
 
 	/**
-	 * Find an upload of this photo that a failed import kept without its photo ID meta.
+	 * Save the photographer attribution of an attachment marked with its photo ID, then clear its pending mark.
 	 *
-	 * It is found by the file name the import uploaded, which WordPress stores with the upload itself, so no
-	 * write after the failure is needed to find it.
+	 * On failure the attachment stays, as it may already be in use, and a retry finds it by the photo ID.
 	 *
-	 * @param string $photo_id Unsplash photo ID.
-	 * @return int|null
+	 * @param int                  $attachment_id Attachment ID.
+	 * @param array<string,string> $attribution   Attribution meta values by key.
+	 * @return true|\WP_Error
 	 */
-	private function find_incomplete_unsplash_attachment( string $photo_id ): ?int {
-		// WordPress may add a -N suffix when the name is taken, or -scaled when it resizes a large image.
-		$file_pattern = '(^|/)unsplash-' . $photo_id . '(-[0-9]+)?(-scaled)?[.](' . implode( '|', self::ALLOWED_IMAGE_MIMES ) . ')$';
-		$candidates   = get_posts(
-			[
-				'post_type'      => 'attachment',
-				'post_status'    => 'inherit',
-				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded lookup that runs only when an import is about to upload.
-				'meta_query'     => [
-					[
-						'key'     => '_wp_attached_file',
-						'value'   => $file_pattern,
-						'compare' => 'REGEXP',
-					],
-					[
-						'key'     => self::UNSPLASH_META_KEY,
-						'compare' => 'NOT EXISTS',
-					],
-				],
-				'orderby'        => 'ID',
-				'order'          => 'ASC',
-				'posts_per_page' => 10,
-				'fields'         => 'ids',
-			]
-		);
-
-		foreach ( $candidates as $candidate ) {
-			$id = is_object( $candidate ) && isset( $candidate->ID ) ? (int) $candidate->ID : (int) $candidate;
-			// MySQL REGEXP ignores case, but photo IDs are case-sensitive.
-			$file = (string) get_post_meta( $id, '_wp_attached_file', true );
-			if ( $id > 0 && 1 === preg_match( '#' . $file_pattern . '#', $file ) ) {
-				return $id;
-			}
+	private function record_unsplash_attribution( int $attachment_id, array $attribution ): true|\WP_Error {
+		if ( ! $this->write_unsplash_meta( $attachment_id, $attribution ) ) {
+			return $this->unsplash_meta_error(
+				[
+					'status'       => 500,
+					'attachmentId' => $attachment_id,
+				]
+			);
 		}
 
-		return null;
+		// A mark left behind only makes a later import save the same attribution again.
+		delete_post_meta( $attachment_id, self::UNSPLASH_PENDING_META_KEY );
+
+		return true;
+	}
+
+	/**
+	 * Error for Unsplash import meta that did not persist on the uploaded attachment.
+	 *
+	 * @param array<string, int> $error_data Error data.
+	 * @return \WP_Error
+	 */
+	private function unsplash_meta_error( array $error_data ): \WP_Error {
+		return new \WP_Error(
+			'bricks_mcp_unsplash_meta_failed',
+			__( 'Failed to record Unsplash photo metadata on the uploaded attachment.', 'bricks-mcp' ),
+			$error_data
+		);
 	}
 
 	/**
