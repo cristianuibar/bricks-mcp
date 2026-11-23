@@ -46,7 +46,12 @@ chdir( ABSPATH );
 $log     = (string) ini_get( 'error_log' );
 $written = error_log( CANARY );
 clearstatcache();
-$log = (string) realpath( $log ) ?: $log;
+
+// Resolve the folder, so a log that could not be created still resolves. '' is stderr.
+if ( '' !== $log && 'syslog' !== $log ) {
+	$dir = realpath( dirname( $log ) );
+	$log = false === $dir ? $log : $dir . '/' . basename( $log );
+}
 
 echo PHP_EOL, wp_json_encode(
 	[
@@ -82,11 +87,11 @@ PHP;
 	public function test_visitor_cannot_read_configured_debug_log( string $server ): void {
 		[ $site, $canary ] = $this->probe( $server );
 
-		if ( ! $site['file'] || ! str_starts_with( $site['log'], $site['root'] ) ) {
+		if ( ! str_starts_with( $site['log'], $site['root'] ) ) {
 			$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
 		}
 
-		$this->assertTrue( $site['written'], "WordPress on {$server} could not write {$site['log']}." );
+		$this->assert_logged( $server, $site );
 		$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
 	}
 
@@ -97,7 +102,7 @@ PHP;
 		[ $site, $canary ] = $this->probe( self::SERVER, 'wp-content/logs/debug.log' );
 
 		$this->assertSame( $site['root'] . 'wp-content/logs/debug.log', $site['log'] );
-		$this->assertTrue( $site['written'], 'WordPress on ' . self::SERVER . " could not write {$site['log']}." );
+		$this->assert_logged( self::SERVER, $site );
 		$this->assert_denied( self::SERVER, '/wp-content/logs/debug.log', $canary );
 	}
 
@@ -178,6 +183,16 @@ PHP;
 				unlink( $file );
 			}
 		}
+	}
+
+	/**
+	 * The probe's log exists: error_log() still returns true when it cannot create the file.
+	 *
+	 * @param array{log: string, root: string, file: bool, written: bool} $site What the probe reports.
+	 */
+	private function assert_logged( string $server, array $site ): void {
+		$this->assertTrue( $site['written'], "WordPress on {$server} could not write {$site['log']}." );
+		$this->assertTrue( $site['file'], "WordPress on {$server} could not create {$site['log']}." );
 	}
 
 	private function assert_denied( string $server, string $path, string $canary ): void {
