@@ -233,8 +233,8 @@ final class MediaTest extends TestCase {
 
 	/**
 	 * A duplicate import saved without attribution, as before it was stored, gets its credit from Unsplash when the
-	 * caller can edit it. A temporary Unsplash failure is an error, so a retry still completes the credit; the
-	 * attachment is returned as it is only when Unsplash no longer has the photo or the caller cannot edit it.
+	 * caller can edit it, and is returned as it is when the caller cannot edit it or the Unsplash lookup fails for any
+	 * reason, so an upgraded 1.x site keeps deduplicating while Unsplash rate-limits.
 	 *
 	 * @return void
 	 */
@@ -268,15 +268,15 @@ final class MediaTest extends TestCase {
 				'body'     => '{}',
 			];
 		};
-		$rate_limited = $import();
-		$this->assertInstanceOf( \WP_Error::class, $rate_limited );
-		$this->assertSame( 429, $rate_limited->get_error_data()['status'] );
-
-		$unsplash_code = 404;
-		$gone          = $import();
-		$this->assertIsArray( $gone );
-		$this->assertSame( 42, $gone['attachmentId'] );
-		$this->assertNull( $gone['photographerUrl'] );
+		foreach ( [ 429, 503, 404 ] as $code ) {
+			$unsplash_code = $code;
+			$unavailable   = $import();
+			$this->assertIsArray( $unavailable, (string) $code );
+			$this->assertSame( 42, $unavailable['attachmentId'], (string) $code );
+			$this->assertTrue( $unavailable['duplicate'], (string) $code );
+			$this->assertNull( $unavailable['photographer'], (string) $code );
+			$this->assertNull( $unavailable['photographerUrl'], (string) $code );
+		}
 
 		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static fn(): array => [
 			'response' => [ 'code' => 200 ],
