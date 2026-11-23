@@ -279,8 +279,16 @@ if ( ! function_exists( 'esc_html' ) ) {
 }
 
 if ( ! function_exists( 'apply_filters' ) ) {
+	/**
+	 * Return the value unchanged, or run the registered callbacks once a test sets `_bricks_mcp_test_run_filters`.
+	 *
+	 * @param string $tag     Filter name.
+	 * @param mixed  $value   Value to filter.
+	 * @param mixed  ...$args Extra filter arguments.
+	 * @return mixed
+	 */
 	function apply_filters( string $tag, mixed $value, mixed ...$args ): mixed {
-		return $value;
+		return empty( $GLOBALS['_bricks_mcp_test_run_filters'] ) ? $value : bricks_mcp_test_run_filter( $tag, $value, ...$args );
 	}
 }
 
@@ -321,7 +329,7 @@ if ( ! function_exists( 'add_filter' ) ) {
 /**
  * Run the callbacks registered for a filter in priority order, as WP_Hook does.
  *
- * The apply_filters() stub stays a passthrough so other tests are unaffected.
+ * The apply_filters() stub stays a passthrough unless a test sets `_bricks_mcp_test_run_filters`, so other tests are unaffected.
  *
  * @param string $hook_name Filter name.
  * @param mixed  $value     Value to filter.

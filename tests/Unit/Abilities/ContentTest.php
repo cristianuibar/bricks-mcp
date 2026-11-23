@@ -534,8 +534,9 @@ final class ContentTest extends TestCase {
 	 * @return void
 	 */
 	public function test_bricks_disable_filters_do_not_hide_stale_bricks_robots(): void {
-		// Run registered filters for calls from the abilities namespace, as WordPress would, in this separate test process only.
-		eval( 'namespace { final class RankMath {} } namespace BricksMCP\\Abilities { function apply_filters( string $tag, mixed $value, mixed ...$args ): mixed { return \\bricks_mcp_test_run_filter( $tag, $value, ...$args ); } }' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class and filter runner in this separate test process only.
+		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		// Run registered filters from the global apply_filters(), as WordPress would, so qualified and unqualified calls both see them.
+		$GLOBALS['_bricks_mcp_test_run_filters'] = true;
 		// Like `! is_page( 42 )`: true outside the page request, false on the published page.
 		add_filter( 'bricks/frontend/disable_seo', static fn(): bool => true );
 		add_filter( 'bricks/frontend/disable_opengraph', static fn(): bool => true );
