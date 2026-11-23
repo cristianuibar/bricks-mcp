@@ -350,24 +350,26 @@ final class UpdateCheckerTest extends TestCase {
 		$checksum_url = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/bricks-mcp.zip.sha256';
 		$other_url    = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/source.tar.gz.sha256';
 		$GLOBALS['_bricks_mcp_test_wp_remote_get_responses'] = [
-			'https://api.github.com/repos/cristianuibar/bricks-mcp/releases/latest' => [
+			'https://api.github.com/repos/cristianuibar/bricks-mcp/releases?per_page=20' => [
 				'response' => [ 'code' => 200 ],
 				'body'     => (string) wp_json_encode(
 					[
-						'tag_name' => 'v99.0.0',
-						'html_url' => 'https://github.com/cristianuibar/bricks-mcp/releases/tag/v99.0.0',
-						'assets'   => [
-							[
-								'name'                 => 'bricks-mcp.zip',
-								'browser_download_url' => self::PACKAGE_URL,
-							],
-							[
-								'name'                 => 'bricks-mcp.zip.sha256',
-								'browser_download_url' => $checksum_url,
-							],
-							[
-								'name'                 => 'source.tar.gz.sha256',
-								'browser_download_url' => $other_url,
+						[
+							'tag_name' => 'v99.0.0',
+							'html_url' => 'https://github.com/cristianuibar/bricks-mcp/releases/tag/v99.0.0',
+							'assets'   => [
+								[
+									'name'                 => 'bricks-mcp.zip',
+									'browser_download_url' => self::PACKAGE_URL,
+								],
+								[
+									'name'                 => 'bricks-mcp.zip.sha256',
+									'browser_download_url' => $checksum_url,
+								],
+								[
+									'name'                 => 'source.tar.gz.sha256',
+									'browser_download_url' => $other_url,
+								],
 							],
 						],
 					]
@@ -400,19 +402,21 @@ final class UpdateCheckerTest extends TestCase {
 
 		$other_url = 'https://github.com/cristianuibar/bricks-mcp/releases/download/v99.0.0/source.tar.gz.sha256';
 		$GLOBALS['_bricks_mcp_test_wp_remote_get_responses'] = [
-			'https://api.github.com/repos/cristianuibar/bricks-mcp/releases/latest' => [
+			'https://api.github.com/repos/cristianuibar/bricks-mcp/releases?per_page=20' => [
 				'response' => [ 'code' => 200 ],
 				'body'     => (string) wp_json_encode(
 					[
-						'tag_name' => 'v99.0.0',
-						'assets'   => [
-							[
-								'name'                 => 'bricks-mcp.zip',
-								'browser_download_url' => self::PACKAGE_URL,
-							],
-							[
-								'name'                 => 'source.tar.gz.sha256',
-								'browser_download_url' => $other_url,
+						[
+							'tag_name' => 'v99.0.0',
+							'assets'   => [
+								[
+									'name'                 => 'bricks-mcp.zip',
+									'browser_download_url' => self::PACKAGE_URL,
+								],
+								[
+									'name'                 => 'source.tar.gz.sha256',
+									'browser_download_url' => $other_url,
+								],
 							],
 						],
 					]
@@ -722,7 +726,7 @@ final class UpdateCheckerTest extends TestCase {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Helper: make the GitHub API stub return the given release JSON.
+	 * Helper: make the GitHub API stub return a release list holding the given release JSON.
 	 *
 	 * @param array<string,mixed> $release Decoded release payload.
 	 * @return void
@@ -730,7 +734,7 @@ final class UpdateCheckerTest extends TestCase {
 	private function stub_release( array $release ): void {
 		$GLOBALS['_bricks_mcp_test_wp_remote_get_return'] = [
 			'response' => [ 'code' => 200 ],
-			'body'     => (string) wp_json_encode( $release ),
+			'body'     => (string) wp_json_encode( [ $release ] ),
 		];
 	}
 
@@ -1218,5 +1222,155 @@ final class UpdateCheckerTest extends TestCase {
 			$this->assertSame( $update, $card['hasUpdateClass'], $label );
 			$this->assertTrue( $card['buttonEnabled'], $label );
 		}
+	}
+
+	/**
+	 * Helper: make the GitHub API stub return the given release list body.
+	 *
+	 * @param mixed $list Value JSON-encoded as the response body.
+	 * @return void
+	 */
+	private function stub_release_list( $list ): void {
+		$GLOBALS['_bricks_mcp_test_wp_remote_get_return'] = [
+			'response' => [ 'code' => 200 ],
+			'body'     => (string) wp_json_encode( $list ),
+		];
+		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_return'] = [
+			'response' => [ 'code' => 200 ],
+			'body'     => hash( 'sha256', 'zip' ) . "  bricks-mcp.zip\n",
+		];
+	}
+
+	/**
+	 * Helper: a release list entry with a trusted ZIP and checksum asset.
+	 *
+	 * @param string              $tag   Release tag.
+	 * @param array<string,mixed> $flags Extra fields such as draft or prerelease.
+	 * @return array<string,mixed>
+	 */
+	private function listed_release( string $tag, array $flags = [] ): array {
+		$base = 'https://github.com/cristianuibar/bricks-mcp/releases/download/' . $tag . '/';
+
+		return [
+			'tag_name' => $tag,
+			'assets'   => [
+				[
+					'name'                 => 'bricks-mcp.zip',
+					'browser_download_url' => $base . 'bricks-mcp.zip',
+				],
+				[
+					'name'                 => 'bricks-mcp.zip.sha256',
+					'browser_download_url' => $base . 'bricks-mcp.zip.sha256',
+				],
+			],
+		] + $flags;
+	}
+
+	/**
+	 * Helper: run check_update() for this plugin installed at 2.0.0.
+	 *
+	 * @return mixed
+	 */
+	private function run_check_update_from_2_0_0() {
+		return $this->checker->check_update(
+			false,
+			[
+				'Version'   => '2.0.0',
+				'UpdateURI' => 'https://github.com/cristianuibar/bricks-mcp',
+			],
+			'bricks-mcp/bricks-mcp.php',
+			[]
+		);
+	}
+
+	/**
+	 * Test: a 2.0.0 site is offered the highest stable release in the list, wherever it is listed,
+	 * even when GitHub flags a lower 1.5.2 release as "latest", and the list is requested with per_page.
+	 *
+	 * @return void
+	 */
+	public function test_check_update_offers_highest_stable_release_in_any_list_order(): void {
+		$orders = [
+			'bridge first' => [ '1.5.2', '2.0.1', '1.4.0' ],
+			'bridge last'  => [ '2.0.1', '1.4.0', '1.5.2' ],
+		];
+
+		foreach ( $orders as $label => $tags ) {
+			$GLOBALS['_bricks_mcp_test_transients'] = [];
+			$this->stub_release_list( array_map( fn( string $tag ) => $this->listed_release( 'v' . $tag ), $tags ) );
+
+			$result = $this->run_check_update_from_2_0_0();
+
+			$this->assertIsArray( $result, $label );
+			$this->assertSame( '2.0.1', $result['version'], $label );
+			$this->assertSame( 'bricks-mcp-verified+https://github.com/cristianuibar/bricks-mcp/releases/download/v2.0.1/bricks-mcp.zip', $result['package'], $label );
+		}
+
+		$this->assertSame( 'https://api.github.com/repos/cristianuibar/bricks-mcp/releases?per_page=20', $GLOBALS['_bricks_mcp_test_wp_remote_get_calls'][0]['url'] ?? null );
+	}
+
+	/**
+	 * Test: drafts, prereleases and entries whose tag is not a version are never offered, and a list
+	 * with no stable release above the installed version offers nothing.
+	 *
+	 * @return void
+	 */
+	public function test_check_update_ignores_drafts_prereleases_and_non_version_tags(): void {
+		$this->stub_release_list(
+			[
+				$this->listed_release( 'v3.0.0', [ 'draft' => true ] ),
+				$this->listed_release( 'v2.5.0', [ 'prerelease' => true ] ),
+				$this->listed_release( 'nightly' ),
+				$this->listed_release( 'v2.0.1' ),
+			]
+		);
+
+		$result = $this->run_check_update_from_2_0_0();
+
+		$this->assertIsArray( $result );
+		$this->assertSame( '2.0.1', $result['version'] );
+
+		$GLOBALS['_bricks_mcp_test_transients'] = [];
+		$this->stub_release_list(
+			[
+				$this->listed_release( 'v3.0.0', [ 'draft' => true ] ),
+				$this->listed_release( 'v2.5.0', [ 'prerelease' => true ] ),
+				$this->listed_release( 'nightly' ),
+			]
+		);
+
+		$this->assertFalse( $this->run_check_update_from_2_0_0() );
+		$this->assertSame( [], $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] ?? null );
+	}
+
+	/**
+	 * Test: a failed, empty or malformed release list is a failed check: nothing is offered and the failure is cached.
+	 *
+	 * @return void
+	 */
+	public function test_check_update_treats_malformed_release_list_as_failed_check(): void {
+		$bodies = [
+			'single release object' => $this->listed_release( 'v2.0.1' ),
+			'error object'          => [ 'message' => 'Not Found' ],
+			'empty list'            => [],
+			'non-release entries'   => [ 'v2.0.1', 7, null ],
+		];
+
+		foreach ( $bodies as $label => $body ) {
+			$GLOBALS['_bricks_mcp_test_transients'] = [];
+			$this->stub_release_list( $body );
+
+			$this->assertFalse( $this->run_check_update_from_2_0_0(), $label );
+			$this->assertSame( [], $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] ?? null, $label );
+		}
+
+		$GLOBALS['_bricks_mcp_test_transients']           = [];
+		$GLOBALS['_bricks_mcp_test_wp_remote_get_return'] = [
+			'response' => [ 'code' => 403 ],
+			'body'     => '[]',
+		];
+
+		$this->assertFalse( $this->run_check_update_from_2_0_0() );
+		$this->assertSame( [], $GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] ?? null );
 	}
 }

@@ -27,11 +27,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class UpdateChecker {
 
 	/**
-	 * GitHub Releases API URL for the latest release.
+	 * GitHub Releases API URL for the most recent releases.
 	 *
 	 * @var string
 	 */
-	private const GITHUB_API_URL = 'https://api.github.com/repos/cristianuibar/bricks-mcp/releases/latest';
+	private const GITHUB_API_URL = 'https://api.github.com/repos/cristianuibar/bricks-mcp/releases?per_page=20';
 
 	/**
 	 * Pattern a release asset URL must match: this repository's release downloads on github.com.
@@ -149,7 +149,7 @@ final class UpdateChecker {
 	/**
 	 * Get update data from cache or GitHub Releases API.
 	 *
-	 * Fetches the latest release from GitHub, extracts the version from
+	 * Fetches the highest-versioned stable release from GitHub, extracts the version from
 	 * `tag_name` (stripping a leading "v"), the download URL of the first
 	 * `.zip` asset, and the SHA-256 from the `<zip name>.sha256` asset.
 	 *
@@ -181,10 +181,27 @@ final class UpdateChecker {
 			return [];
 		}
 
-		$release = json_decode( wp_remote_retrieve_body( $response ), true );
+		$releases = json_decode( wp_remote_retrieve_body( $response ), true );
+		$release  = [];
+		$version  = '';
 
-		// Strip leading "v" from tag name (e.g. "v1.2.3" → "1.2.3").
-		$version = is_array( $release ) && is_string( $release['tag_name'] ?? null ) ? ltrim( $release['tag_name'], 'v' ) : '';
+		foreach ( is_array( $releases ) ? $releases : [] as $candidate ) {
+			if ( ! is_array( $candidate ) || ! empty( $candidate['draft'] ) || ! empty( $candidate['prerelease'] ) || ! is_string( $candidate['tag_name'] ?? null ) ) {
+				continue;
+			}
+
+			// Strip leading "v" from tag name (e.g. "v1.2.3" → "1.2.3").
+			$candidate_version = ltrim( $candidate['tag_name'], 'v' );
+
+			if ( 1 !== preg_match( '/^\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?\z/', $candidate_version ) ) {
+				continue;
+			}
+
+			if ( '' === $version || self::is_newer_version( $version, $candidate_version ) ) {
+				$release = $candidate;
+				$version = $candidate_version;
+			}
+		}
 
 		if ( '' === $version ) {
 			set_transient( self::TRANSIENT_KEY, [], 5 * MINUTE_IN_SECONDS );

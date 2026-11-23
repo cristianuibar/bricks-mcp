@@ -23,15 +23,17 @@ $GLOBALS['_bricks_mcp_test_wp_remote_get_return']      = [
 	'response' => [ 'code' => 200 ],
 	'body'     => (string) wp_json_encode(
 		[
-			'tag_name' => $bricks_mcp_tag,
-			'assets'   => [
-				[
-					'name'                 => 'bricks-mcp.zip',
-					'browser_download_url' => $bricks_mcp_base . 'bricks-mcp.zip',
-				],
-				[
-					'name'                 => 'bricks-mcp.zip.sha256',
-					'browser_download_url' => $bricks_mcp_base . 'bricks-mcp.zip.sha256',
+			[
+				'tag_name' => $bricks_mcp_tag,
+				'assets'   => [
+					[
+						'name'                 => 'bricks-mcp.zip',
+						'browser_download_url' => $bricks_mcp_base . 'bricks-mcp.zip',
+					],
+					[
+						'name'                 => 'bricks-mcp.zip.sha256',
+						'browser_download_url' => $bricks_mcp_base . 'bricks-mcp.zip.sha256',
+					],
 				],
 			],
 		]
