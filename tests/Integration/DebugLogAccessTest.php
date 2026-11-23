@@ -47,10 +47,15 @@ $log     = (string) ini_get( 'error_log' );
 $written = error_log( CANARY );
 clearstatcache();
 
-// Resolve the folder, so a log that could not be created still resolves. '' is stderr.
+// Resolve the nearest existing folder, so a log that could not be created still resolves. '' is stderr.
 if ( '' !== $log && 'syslog' !== $log ) {
-	$dir = realpath( dirname( $log ) );
-	$log = false === $dir ? $log : $dir . '/' . basename( $log );
+	$path = str_starts_with( $log, '/' ) ? $log : getcwd() . '/' . $log;
+	$rest = '';
+	while ( false === realpath( $path ) && dirname( $path ) !== $path ) {
+		$rest = '/' . basename( $path ) . $rest;
+		$path = dirname( $path );
+	}
+	$log = rtrim( (string) realpath( $path ), '/' ) . $rest;
 }
 
 echo PHP_EOL, wp_json_encode(
@@ -104,6 +109,17 @@ PHP;
 		$this->assertSame( $site['root'] . 'wp-content/logs/debug.log', $site['log'] );
 		$this->assert_logged( self::SERVER, $site );
 		$this->assert_denied( self::SERVER, '/wp-content/logs/debug.log', $canary );
+	}
+
+	/**
+	 * A log under the web root that WordPress cannot create is reported there, so the tests fail instead of skipping.
+	 */
+	public function test_uncreatable_debug_log_is_reported_under_web_root(): void {
+		$path     = 'wp-content/logs/bricks-mcp-missing-' . bin2hex( random_bytes( 8 ) ) . '/debug.log';
+		[ $site ] = $this->probe( self::SERVER, $path );
+
+		$this->assertSame( $site['root'] . $path, $site['log'] );
+		$this->assertFalse( $site['file'], "{$site['log']} was created." );
 	}
 
 	/**
