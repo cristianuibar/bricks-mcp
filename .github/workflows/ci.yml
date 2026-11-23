@@ -31,6 +31,9 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
+      - name: Audit dependencies
+        run: composer audit --locked --no-interaction
+
       - name: Run PHPCS
         run: |
           set -euo pipefail
