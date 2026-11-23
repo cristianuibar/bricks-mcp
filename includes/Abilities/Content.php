@@ -732,7 +732,7 @@ final class Content implements Module {
 	}
 
 	/**
-	 * Non-empty Bricks page settings among the given keys, robots as a directive list and the sharing image as its URL or dynamic tag.
+	 * Non-empty Bricks page settings among the given keys, robots as a directive list and the sharing image as its dynamic tag or URL.
 	 *
 	 * @param array<string, mixed> $page Page settings.
 	 * @param string[]             $keys Setting keys.
@@ -747,7 +747,8 @@ final class Content implements Module {
 			if ( self::BRICKS_ROBOTS_SETTING === $key ) {
 				$value = $this->bricks_robots( $page );
 			} elseif ( self::BRICKS_IMAGE_SETTING === $key ) {
-				$value = is_array( $value ) ? ( empty( $value['url'] ) ? ( $value['useDynamicData'] ?? null ) : $value['url'] ) : null;
+				// Bricks prints the dynamic image first and falls back to the saved URL.
+				$value = is_array( $value ) ? ( empty( $value['useDynamicData'] ) ? ( $value['url'] ?? null ) : $value['useDynamicData'] ) : null;
 			}
 
 			if ( ! is_array( $value ) ) {

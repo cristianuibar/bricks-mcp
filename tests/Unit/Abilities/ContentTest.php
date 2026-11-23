@@ -413,7 +413,8 @@ final class ContentTest extends TestCase {
 
 	/**
 	 * With SEOPress active, Bricks output that is still on and a noindex left by the Bricks fallback are reported until
-	 * the Bricks SEO and Open Graph output is turned off.
+	 * the Bricks SEO and Open Graph output is turned off. A sharing image with a saved URL and a dynamic tag reports the
+	 * tag, the image Bricks prints.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
@@ -428,7 +429,10 @@ final class ContentTest extends TestCase {
 			[
 				'metaRobots'      => [ 'noindex', 'nofollow' ],
 				'metaDescription' => 'Old Bricks description',
-				'sharingImage'    => [ 'useDynamicData' => '{featured_image}' ],
+				'sharingImage'    => [
+					'url'            => 'https://example.test/old-og.jpg',
+					'useDynamicData' => '{featured_image}',
+				],
 			]
 		);
 
