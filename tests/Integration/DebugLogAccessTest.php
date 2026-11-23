@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 namespace BricksMCP\Tests\Integration;
 
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -92,12 +93,7 @@ PHP;
 	public function test_visitor_cannot_read_configured_debug_log( string $server ): void {
 		[ $site, $canary ] = $this->probe( $server );
 
-		if ( ! str_starts_with( $site['log'], $site['root'] ) ) {
-			$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
-		}
-
-		$this->assert_logged( $server, $site );
-		$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
+		$this->assert_configured_log_denied( $server, $site, $canary );
 	}
 
 	/**
@@ -112,14 +108,22 @@ PHP;
 	}
 
 	/**
-	 * A log under the web root that WordPress cannot create is reported there, so the tests fail instead of skipping.
+	 * A configured log under the web root that WordPress cannot create fails the configured check, not a skip.
+	 *
+	 * The skip is an AssertionFailedError too, so only the creation failure's message passes.
 	 */
-	public function test_uncreatable_debug_log_is_reported_under_web_root(): void {
-		$path     = 'wp-content/logs/bricks-mcp-missing-' . bin2hex( random_bytes( 8 ) ) . '/debug.log';
-		[ $site ] = $this->probe( self::SERVER, $path );
+	public function test_uncreatable_configured_debug_log_fails_the_check(): void {
+		$path              = 'wp-content/logs/bricks-mcp-missing-' . bin2hex( random_bytes( 8 ) ) . '/debug.log';
+		[ $site, $canary ] = $this->probe( self::SERVER, $path );
 
-		$this->assertSame( $site['root'] . $path, $site['log'] );
-		$this->assertFalse( $site['file'], "{$site['log']} was created." );
+		try {
+			$this->assert_configured_log_denied( self::SERVER, $site, $canary );
+		} catch ( AssertionFailedError $e ) {
+			$this->assertStringContainsString( "could not create {$site['root']}{$path}.", $e->getMessage() );
+			return;
+		}
+
+		$this->fail( "The configured check passed for {$site['log']}, which was never created." );
 	}
 
 	/**
@@ -199,6 +203,20 @@ PHP;
 				unlink( $file );
 			}
 		}
+	}
+
+	/**
+	 * The configured check: a log under the web root is written, created and denied; any other log skips.
+	 *
+	 * @param array{log: string, root: string, file: bool, written: bool} $site What the probe reports.
+	 */
+	private function assert_configured_log_denied( string $server, array $site, string $canary ): void {
+		if ( ! str_starts_with( $site['log'], $site['root'] ) ) {
+			$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
+		}
+
+		$this->assert_logged( $server, $site );
+		$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
 	}
 
 	/**
