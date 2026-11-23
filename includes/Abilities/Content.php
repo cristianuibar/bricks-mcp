@@ -908,7 +908,8 @@ final class Content implements Module {
 		}
 
 		if ( array() !== $slim ) {
-			update_metadata( 'post', $post_id, 'slim_seo', $slim );
+			// Slashed because update_metadata() unslashes, which would drop literal backslashes from every stored field.
+			update_metadata( 'post', $post_id, 'slim_seo', wp_slash( $slim ) );
 		} elseif ( '' !== $stored && false !== $stored && ! $this->delete_post_meta_if_unchanged( $post_id, 'slim_seo', $stored ) ) {
 			return new \WP_Error( 'bricks_mcp_seo_write_failed', __( 'The database did not delete the cleared Slim SEO record, so its fields are still stored. Re-read the SEO before retrying.', 'bricks-mcp' ), [ 'status' => 500 ] );
 		}

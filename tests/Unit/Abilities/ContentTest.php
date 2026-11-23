@@ -1012,6 +1012,35 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Changing one Slim SEO field keeps the literal backslashes of the fields it leaves alone.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_write_keeps_backslashes_in_untouched_fields(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		$GLOBALS['_bricks_mcp_test_post_meta'][ self::POST_ID ]['slim_seo'] = [ 'title' => 'C:\\Docs' ];
+
+		$this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'noindex' => true ],
+			]
+		);
+
+		$this->assertSame(
+			[
+				'title'   => 'C:\\Docs',
+				'noindex' => 1,
+			],
+			get_post_meta( self::POST_ID, 'slim_seo', true )
+		);
+	}
+
+	/**
 	 * Clearing Slim SEO fields on a revision changes the revision's own record, not its parent's.
 	 *
 	 * @runInSeparateProcess
