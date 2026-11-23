@@ -21,7 +21,7 @@ https://your-site.com/wp-json/mcp/mcp-adapter-default-server
 
 1. Install and activate Bricks Builder 2.5+.
 2. Install and activate the MCP Adapter plugin.
-3. Download the latest ZIP from [GitHub Releases](https://github.com/cristianuibar/bricks-mcp/releases), then use Plugins > Add New > Upload Plugin and activate it.
+3. Download the ZIP of the newest **2.x** release from the [GitHub Releases](https://github.com/cristianuibar/bricks-mcp/releases) list, then use Plugins > Add New > Upload Plugin and activate it. Do not take the release marked "Latest": that is the 1.5.x bridge (see [Releases](#releases)).
 
 The plugin folder and slug stay `bricks-mcp`. New releases appear in the normal WordPress update screen. The updater reads GitHub Releases and verifies the ZIP's SHA-256 checksum before WordPress installs it.
 
@@ -193,6 +193,18 @@ composer test:unit   # unit tests only
 ```
 
 Unit tests use stubs for WordPress, the Abilities API and Bricks, so they do not need Bricks installed.
+
+## Releases
+
+GitHub's "Latest" release stays on the 1.5.x bridge line until the owner decides otherwise. Updaters in 1.5.1 and older install whatever release is marked latest, with no WordPress, Bricks or MCP Adapter check, so marking a 2.x release latest would force those sites onto 2.x. The 1.5.2 bridge and 2.x updaters read the releases list and pick the highest stable version themselves, so they do not depend on the latest flag.
+
+The release workflow uploads a 2.x build to a draft release. Publish it without making it latest:
+
+```bash
+gh release edit vX.Y.Z --draft=false --latest=false
+```
+
+A 1.x maintenance release from the `release/1.5` branch publishes immediately and becomes latest. That is intended.
 
 ## Extending
 
