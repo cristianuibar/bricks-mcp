@@ -235,7 +235,7 @@ final class Content implements Module {
 
 		return [
 			'label'               => __( 'Update SEO', 'bricks-mcp' ),
-			'description'         => __( 'Write SEO fields of a post or page to the active SEO plugin (Yoast SEO, Rank Math, SEOPress or Slim SEO), or to the Bricks page settings when none is active. Send only the fields to change; an empty string clears a text or URL field. Fields the source cannot store are listed in `unsupported` and ignored. Returns the fields before and after, and the same `warnings` as get-seo. Run get-seo first to see which fields the source supports.', 'bricks-mcp' ),
+			'description'         => __( 'Write SEO fields of a post or page to the active SEO plugin (Yoast SEO, Rank Math, SEOPress or Slim SEO), or to the Bricks page settings when none is active. Send only the fields to change; an empty string clears a text or URL field, and a URL WordPress does not accept (such as a data: or javascript: URL) fails the request without changing any field. Fields the source cannot store are listed in `unsupported` and ignored. Returns the fields before and after, and the same `warnings` as get-seo. Run get-seo first to see which fields the source supports.', 'bricks-mcp' ),
 			'category'            => self::CATEGORY,
 			'input_schema'        => [
 				'type'                 => 'object',
@@ -516,8 +516,13 @@ final class Content implements Module {
 	 * @return array<string, mixed>|\WP_Error
 	 */
 	private function update_seo( int $post_id, array $seo ): array|\WP_Error {
-		$source      = $this->detect_seo_source();
-		$requested   = $this->sanitize_seo_fields( $seo );
+		$source    = $this->detect_seo_source();
+		$requested = $this->sanitize_seo_fields( $seo );
+
+		if ( is_wp_error( $requested ) ) {
+			return $requested;
+		}
+
 		$supported   = $this->supported_seo_fields( $source );
 		$unsupported = array_values( array_diff( array_keys( $requested ), $supported ) );
 		$writable    = array_diff_key( $requested, array_flip( $unsupported ) );
@@ -545,10 +550,12 @@ final class Content implements Module {
 	/**
 	 * Keep only known SEO fields, sanitized by type.
 	 *
+	 * A URL that sanitizes to nothing is refused: written as empty, it would clear the stored URL.
+	 *
 	 * @param array<string, mixed> $seo Raw fields.
-	 * @return array<string, string|bool>
+	 * @return array<string, string|bool>|\WP_Error Error when a non-empty URL is not one WordPress accepts.
 	 */
-	private function sanitize_seo_fields( array $seo ): array {
+	private function sanitize_seo_fields( array $seo ): array|\WP_Error {
 		$clean = [];
 
 		foreach ( $seo as $field => $value ) {
@@ -556,6 +563,15 @@ final class Content implements Module {
 				$clean[ $field ] = sanitize_text_field( (string) $value );
 			} elseif ( in_array( $field, self::SEO_URL_FIELDS, true ) ) {
 				$clean[ $field ] = esc_url_raw( (string) $value );
+
+				if ( '' === $clean[ $field ] && '' !== trim( (string) $value ) ) {
+					return new \WP_Error(
+						'bricks_mcp_invalid_seo_url',
+						/* translators: %s: SEO field name */
+						sprintf( __( '%s is not a URL WordPress accepts, so no SEO field was changed. Send an http or https URL, or an empty string to clear the field.', 'bricks-mcp' ), $field ),
+						[ 'status' => 400 ]
+					);
+				}
 			} elseif ( in_array( $field, self::SEO_ROBOTS_FIELDS, true ) ) {
 				$clean[ $field ] = (bool) $value;
 			}
