@@ -15,7 +15,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
 
-foreach ( [ 'bricks_mcp_extensions_settings', 'bricks_mcp_version', 'bricks_mcp_activated_at', 'bricks_mcp_reconnect_notice' ] as $bricks_mcp_option ) {
+foreach ( [ 'bricks_mcp_extensions_settings', 'bricks_mcp_version', 'bricks_mcp_activated_at', 'bricks_mcp_reconnect_notice', 'bricks_mcp_unsplash_pending' ] as $bricks_mcp_option ) {
 	delete_option( $bricks_mcp_option );
 }
 

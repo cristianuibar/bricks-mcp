@@ -787,29 +787,41 @@ final class MediaTest extends TestCase {
 		$this->assertSame( [ $retried['attachmentId'] ], $attachment_ids() );
 		$this->assertSame( 'photo_77', get_post_meta( $retried['attachmentId'], '_unsplash_photo_id', true ) );
 
-		// When the cleanup delete fails too, the error names the leftover attachment.
-		unset( $GLOBALS['_bricks_mcp_test_posts'][ $retried['attachmentId'] ] );
-		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']        = [ '_unsplash_photo_id' ];
-		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail']   = true;
-		$kept_error = $import();
-		$this->assertInstanceOf( \WP_Error::class, $kept_error );
-		$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $kept_error->get_error_code() );
-		$this->assertSame( 500, $kept_error->get_error_data()['status'] );
-		$kept_id = $kept_error->get_error_data()['attachmentId'];
-		$this->assertSame( [ $kept_id ], $attachment_ids() );
+		// When the cleanup delete fails too, the error names the leftover attachment, and a retry completes it
+		// instead of uploading a second one: after a photographer URL failure, and when every meta write fails.
+		foreach ( [ [ '_unsplash_photographer_url' ], true ] as $failing_keys ) {
+			$label = wp_json_encode( $failing_keys );
+			$GLOBALS['_bricks_mcp_test_posts']                             = array_diff_key( $GLOBALS['_bricks_mcp_test_posts'], array_flip( $attachment_ids() ) );
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']       = $failing_keys;
+			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail']   = true;
+			$kept_error = $import();
+			$this->assertInstanceOf( \WP_Error::class, $kept_error, $label );
+			$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $kept_error->get_error_code(), $label );
+			$this->assertSame( 500, $kept_error->get_error_data()['status'], $label );
+			$kept_id = $kept_error->get_error_data()['attachmentId'];
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+			$this->assertSame( '', get_post_meta( $kept_id, '_unsplash_photographer_url', true ), $label );
 
-		// Retrying that photo completes the kept attachment rather than uploading a second one.
-		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']      = false;
-		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
-		$completed = $import();
-		$this->assertIsArray( $completed );
-		$this->assertSame( $kept_id, $completed['attachmentId'] );
-		$this->assertFalse( $completed['duplicate'] );
-		$this->assertSame( 15, $completed['postId'] );
-		$this->assertSame( 'Pat', $completed['photographer'] );
-		$this->assertSame( [ $kept_id ], $attachment_ids() );
-		$this->assertSame( 'photo_77', get_post_meta( $kept_id, '_unsplash_photo_id', true ) );
-		$this->assertSame( $kept_id, $import()['attachmentId'] );
+			// A retry whose meta writes fail again keeps the upload, which may already be in use, even though deletion now works.
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = true;
+			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
+			$repeat_error = $import();
+			$this->assertInstanceOf( \WP_Error::class, $repeat_error, $label );
+			$this->assertSame( $kept_id, $repeat_error->get_error_data()['attachmentId'], $label );
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			$completed = $import();
+			$this->assertIsArray( $completed, $label );
+			$this->assertSame( $kept_id, $completed['attachmentId'], $label );
+			$this->assertFalse( $completed['duplicate'], $label );
+			$this->assertSame( 15, $completed['postId'], $label );
+			$this->assertSame( 'Pat', $completed['photographer'], $label );
+			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $completed['photographerUrl'], $label );
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+			$this->assertSame( 'photo_77', get_post_meta( $kept_id, '_unsplash_photo_id', true ), $label );
+			$this->assertSame( $kept_id, $import()['attachmentId'], $label );
+		}
 
 		unset( $GLOBALS['_bricks_mcp_test_posts'][ $kept_id ] );
 		$GLOBALS['_bricks_mcp_test_media_wp_update_post_fail'] = true;
