@@ -23,6 +23,8 @@ final class ContentTest extends TestCase {
 
 	private const POST_ID = 10;
 
+	private const YOAST_FAKE = "final class WPSEO_Options { public static function get( string \$key, mixed \$default = null ): mixed { return \$GLOBALS['_bricks_mcp_test_yoast_options'][ \$key ] ?? \$default; } }";
+
 	/**
 	 * Reset in-memory WordPress state and register the content abilities.
 	 *
@@ -198,7 +200,7 @@ final class ContentTest extends TestCase {
 	 * @return void
 	 */
 	public function test_yoast_seo_round_trip_with_audit(): void {
-		eval( 'final class WPSEO_Options {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		eval( self::YOAST_FAKE ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
 
 		$write = $this->call(
 			'bricks-mcp/update-seo',
@@ -226,6 +228,102 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Yoast keeps noindex in three states: 1 noindex, 2 index, anything else the post type default. noindex:false must
+	 * force index, and get-seo reports what the page serves.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_yoast_noindex_false_forces_index_over_a_noindex_post_type_default(): void {
+		eval( self::YOAST_FAKE ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		$GLOBALS['_bricks_mcp_test_yoast_options'] = [ 'noindex-page' => true ];
+		$noindex                                  = static fn( array $read ): bool => $read['fields']['noindex'];
+
+		$inherited = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'noindex' => false ] ] );
+		$forced_index = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+		$stored_index = get_post_meta( self::POST_ID, '_yoast_wpseo_meta-robots-noindex', true );
+
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'nofollow' => false ] ] );
+		$stored_follow = get_post_meta( self::POST_ID, '_yoast_wpseo_meta-robots-nofollow', true );
+
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'noindex' => true ] ] );
+		$forced_noindex = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+
+		$this->assertTrue( $noindex( $inherited ) );
+		$this->assertSame( '2', $stored_index );
+		$this->assertSame( '', $stored_follow );
+		$this->assertFalse( $noindex( $forced_index ) );
+		$this->assertSame( '1', get_post_meta( self::POST_ID, '_yoast_wpseo_meta-robots-noindex', true ) );
+		$this->assertTrue( $noindex( $forced_noindex ) );
+	}
+
+	/**
+	 * Rank Math ignores its Twitter fields while the use-Facebook toggle is on, so writing one must switch it off.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_rank_math_twitter_write_switches_off_the_use_facebook_toggle(): void {
+		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		$toggle = static fn(): mixed => get_post_meta( self::POST_ID, 'rank_math_twitter_use_facebook', true );
+
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'ogTitle' => 'Share title' ] ] );
+		$after_og = $toggle();
+
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'twitterTitle' => 'Tweet title' ] ] );
+
+		$this->assertSame( '', $after_og );
+		$this->assertSame( 'off', $toggle() );
+	}
+
+	/**
+	 * Rank Math prefers the stored image ID, so writing or clearing a social image must keep the ID in step with the URL.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_rank_math_social_image_write_keeps_the_image_id_in_sync(): void {
+		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, 'rank_math_facebook_image_id', 99 );
+		update_post_meta( self::POST_ID, 'rank_math_twitter_image_id', 99 );
+
+		$library = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'ogImage'      => 'https://example.test/uploads/20.jpg',
+					'twitterImage' => 'https://cdn.example.com/outside.jpg',
+					'ogTitle'      => 'Share title',
+				],
+			]
+		);
+		$stored  = [
+			get_post_meta( self::POST_ID, 'rank_math_facebook_image_id', true ),
+			get_post_meta( self::POST_ID, 'rank_math_twitter_image_id', true ),
+		];
+
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'ogImage' => '' ] ] );
+		$read = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
+
+		$this->assertSame( [ 'ogImage', 'twitterImage', 'ogTitle' ], $library['updated'] );
+		$this->assertSame( [], $library['unsupported'] );
+		$this->assertSame( [ 20, '' ], $stored );
+		$this->assertSame( '', get_post_meta( self::POST_ID, 'rank_math_facebook_image_id', true ) );
+		$this->assertSame( '', $read['fields']['ogImage'] );
+		$this->assertSame( 'https://cdn.example.com/outside.jpg', $read['fields']['twitterImage'] );
+		$this->assertSame( 'Share title', $read['fields']['ogTitle'] );
+	}
+
+	/**
 	 * SEO plugins with a stored image, and a write whose image URL WordPress rejects.
 	 *
 	 * @return array<string, array{0: string, 1: string, 2: mixed, 3: array<string, string>}>
@@ -242,7 +340,7 @@ final class ContentTest extends TestCase {
 				],
 			],
 			'Yoast image as a javascript URL' => [
-				'final class WPSEO_Options {}',
+				self::YOAST_FAKE,
 				'_yoast_wpseo_opengraph-image',
 				'https://example.com/og.jpg',
 				[
@@ -426,7 +524,7 @@ final class ContentTest extends TestCase {
 	 * @return void
 	 */
 	public function test_second_active_seo_plugin_is_reported(): void {
-		eval( 'namespace { final class WPSEO_Options {} } namespace SlimSEO\MetaTags { final class Title {} }' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares fake plugin classes in this separate test process only.
+		eval( 'namespace { ' . self::YOAST_FAKE . ' } namespace SlimSEO\MetaTags { final class Title {} }' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares fake plugin classes in this separate test process only.
 		update_option(
 			'bricks_global_settings',
 			[

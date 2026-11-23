@@ -41,11 +41,16 @@ final class Content implements Module {
 			'focusKeyword'       => '_yoast_wpseo_focuskw',
 		],
 		'rankmath' => [
-			'title'        => 'rank_math_title',
-			'description'  => 'rank_math_description',
-			'canonical'    => 'rank_math_canonical_url',
-			'focusKeyword' => 'rank_math_focus_keyword',
-			'ogImage'      => 'rank_math_facebook_image',
+			'title'              => 'rank_math_title',
+			'description'        => 'rank_math_description',
+			'canonical'          => 'rank_math_canonical_url',
+			'focusKeyword'       => 'rank_math_focus_keyword',
+			'ogTitle'            => 'rank_math_facebook_title',
+			'ogDescription'      => 'rank_math_facebook_description',
+			'ogImage'            => 'rank_math_facebook_image',
+			'twitterTitle'       => 'rank_math_twitter_title',
+			'twitterDescription' => 'rank_math_twitter_description',
+			'twitterImage'       => 'rank_math_twitter_image',
 		],
 		'seopress' => [
 			'title'              => '_seopress_titles_title',
@@ -74,6 +79,11 @@ final class Content implements Module {
 	private const SEO_ROBOTS_ON_VALUE = [
 		'yoast'    => '1',
 		'seopress' => 'yes',
+	];
+
+	private const RANK_MATH_IMAGE_ID_KEYS = [
+		'ogImage'      => 'rank_math_facebook_image_id',
+		'twitterImage' => 'rank_math_twitter_image_id',
 	];
 
 	private const RANK_MATH_POSITIVE_DIRECTIVES = [
@@ -817,6 +827,10 @@ final class Content implements Module {
 			$robots[ $field ] = (string) get_post_meta( $post_id, $meta_key, true ) === self::SEO_ROBOTS_ON_VALUE[ $source ];
 		}
 
+		if ( 'yoast' === $source && ! in_array( (string) get_post_meta( $post_id, self::SEO_ROBOTS_META_KEYS['yoast']['noindex'], true ), [ '1', '2' ], true ) ) {
+			$robots['noindex'] = (bool) \WPSEO_Options::get( 'noindex-' . get_post_type( $post_id ), false );
+		}
+
 		return $robots;
 	}
 
@@ -840,6 +854,29 @@ final class Content implements Module {
 		foreach ( self::SEO_META_KEYS[ $source ] as $field => $meta_key ) {
 			if ( array_key_exists( $field, $fields ) ) {
 				update_post_meta( $post_id, $meta_key, $fields[ $field ] );
+			}
+		}
+
+		if ( 'rankmath' === $source ) {
+			foreach ( self::RANK_MATH_IMAGE_ID_KEYS as $field => $id_key ) {
+				if ( ! array_key_exists( $field, $fields ) ) {
+					continue;
+				}
+
+				$image_id = '' === $fields[ $field ] ? 0 : attachment_url_to_postid( $fields[ $field ] );
+
+				if ( $image_id > 0 ) {
+					update_post_meta( $post_id, $id_key, $image_id );
+				} else {
+					delete_post_meta( $post_id, $id_key );
+				}
+			}
+
+			foreach ( [ 'twitterTitle', 'twitterDescription', 'twitterImage' ] as $field ) {
+				if ( '' !== ( $fields[ $field ] ?? '' ) ) {
+					update_post_meta( $post_id, 'rank_math_twitter_use_facebook', 'off' );
+					break;
+				}
 			}
 		}
 
@@ -876,7 +913,9 @@ final class Content implements Module {
 
 		foreach ( self::SEO_ROBOTS_META_KEYS[ $source ] as $field => $meta_key ) {
 			if ( array_key_exists( $field, $fields ) ) {
-				update_post_meta( $post_id, $meta_key, $fields[ $field ] ? self::SEO_ROBOTS_ON_VALUE[ $source ] : '' );
+				$off_value = 'yoast' === $source && 'noindex' === $field ? '2' : '';
+
+				update_post_meta( $post_id, $meta_key, $fields[ $field ] ? self::SEO_ROBOTS_ON_VALUE[ $source ] : $off_value );
 			}
 		}
 	}
