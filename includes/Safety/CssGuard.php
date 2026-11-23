@@ -52,14 +52,14 @@ final class CssGuard {
 		. '|(?:[\w\x00\x80-\xff-]|\\\\(?:[0-9a-f]{1,6}(?:\r\n|[ \t\r\n\f])?|[^\r\n\f0-9a-f]))++~is';
 
 	/**
-	 * Element keys a structural move changes.
+	 * Element keys that list children, which a move changes in the old and new parent.
 	 *
 	 * @var string[]
 	 */
-	private const STRUCTURE_KEYS = [ 'parent', 'children', 'slotChildren' ];
+	private const CHILD_KEYS = [ 'children', 'slotChildren' ];
 
 	/**
-	 * Stored elements by post ID and element ID, without their structure keys, while a move saves them.
+	 * Stored elements by post ID and element ID, without their child keys, while a move saves them.
 	 *
 	 * @var array<int, array<int|string, array<string, mixed>>>
 	 */
@@ -69,8 +69,10 @@ final class CssGuard {
 	 * Run a save that changes only the structure of stored elements.
 	 *
 	 * While the callback runs, `bricks/set-page-elements` for the post skips elements that
-	 * match a stored element apart from their structure keys, so CSS already stored does not
-	 * block the move. Changed and new elements are still checked.
+	 * match a stored element apart from their child keys and whose ancestors all do too, so CSS
+	 * already stored does not block the move. Changed and new elements, and every element whose
+	 * ancestors changed, such as a moved subtree that may leave a members-only container, are
+	 * still checked.
 	 *
 	 * @param int                              $post_id Post ID.
 	 * @param array<int, array<string, mixed>> $elements Stored elements, verified against their document digest.
@@ -82,7 +84,7 @@ final class CssGuard {
 		$stored   = [];
 		foreach ( $elements as $element ) {
 			if ( is_array( $element ) && ( is_string( $element['id'] ?? null ) || is_int( $element['id'] ?? null ) ) ) {
-				$stored[ $element['id'] ] = array_diff_key( $element, array_flip( self::STRUCTURE_KEYS ) );
+				$stored[ $element['id'] ] = self::without_child_keys( $element );
 			}
 		}
 
@@ -134,7 +136,22 @@ final class CssGuard {
 	}
 
 	/**
-	 * Replace elements that match the stored ones apart from their structure with null, keeping their indexes.
+	 * Get an element without its child keys, with any root parent as 0.
+	 *
+	 * @param array<string, mixed> $element Element.
+	 * @return array<string, mixed>
+	 */
+	private static function without_child_keys( array $element ): array {
+		$element = array_diff_key( $element, array_flip( self::CHILD_KEYS ) );
+		if ( in_array( $element['parent'] ?? 0, [ 0, '', '0' ], true ) ) {
+			$element['parent'] = 0;
+		}
+
+		return $element;
+	}
+
+	/**
+	 * Replace elements that match the stored ones in place apart from their child keys with null, keeping their indexes.
 	 *
 	 * @param mixed $input Normalized `bricks/set-page-elements` input.
 	 * @return mixed
@@ -145,14 +162,45 @@ final class CssGuard {
 			return $input;
 		}
 
+		// An ID that appears more than once matches no stored element.
+		$by_id = [];
+		foreach ( $input['elements'] as $element ) {
+			$id = is_array( $element ) ? $element['id'] ?? null : null;
+			if ( is_string( $id ) || is_int( $id ) ) {
+				$by_id[ $id ] = array_key_exists( $id, $by_id ) ? null : self::without_child_keys( $element );
+			}
+		}
+
+		$in_place = [];
 		foreach ( $input['elements'] as $index => $element ) {
 			$id = is_array( $element ) ? $element['id'] ?? null : null;
-			if ( ( is_string( $id ) || is_int( $id ) ) && isset( $stored[ $id ] ) && array_diff_key( $element, array_flip( self::STRUCTURE_KEYS ) ) === $stored[ $id ] ) {
+			if ( ( is_string( $id ) || is_int( $id ) ) && $this->is_stored_in_place( $id, $by_id, $stored, $in_place ) ) {
 				$input['elements'][ $index ] = null;
 			}
 		}
 
 		return $input;
+	}
+
+	/**
+	 * Check whether an element and all its ancestors match their stored elements, parents included.
+	 *
+	 * @param int|string                                   $id Element ID.
+	 * @param array<int|string, array<string, mixed>|null> $by_id Input elements without child keys, null for a repeated ID.
+	 * @param array<int|string, array<string, mixed>>      $stored Stored elements without child keys.
+	 * @param array<int|string, bool>                      $in_place Results so far, by element ID.
+	 * @return bool
+	 */
+	private function is_stored_in_place( int|string $id, array $by_id, array $stored, array &$in_place ): bool {
+		if ( ! isset( $in_place[ $id ] ) ) {
+			// Marked first, so a cyclic hierarchy reads as changed.
+			$in_place[ $id ] = false;
+			$parent          = $stored[ $id ]['parent'] ?? null;
+			$in_place[ $id ] = isset( $by_id[ $id ], $stored[ $id ] ) && $by_id[ $id ] === $stored[ $id ]
+				&& ( 0 === $parent || ( ( is_string( $parent ) || is_int( $parent ) ) && $this->is_stored_in_place( $parent, $by_id, $stored, $in_place ) ) );
+		}
+
+		return $in_place[ $id ];
 	}
 
 	/**

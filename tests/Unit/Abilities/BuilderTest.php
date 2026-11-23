@@ -161,6 +161,22 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( 1, $this->save_count );
 	}
 
+	public function test_move_to_another_parent_blocks_stored_css_in_the_moved_subtree(): void {
+		$this->saved_elements[0]['settings'] = [ '_conditions' => [ [ [ 'key' => 'user_logged_in', 'value' => true ] ] ] ];
+		$this->saved_elements[2]['settings'] = [ 'text' => '<style>@import "example.css";</style>Members only' ];
+		$stored                              = $this->saved_elements;
+		$GLOBALS['_bricks_mcp_test_safety_filters'] = [];
+		( new CssGuard() )->init();
+		$GLOBALS['_bricks_mcp_test_abilities']['bricks/set-page-elements'] = make_safety_ability( 'bricks/set-page-elements', wp_get_ability( 'bricks/set-page-elements' )->get_args() );
+
+		$result = $this->move( 'firstt', 0 );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( [ 'status' => 400, 'path' => 'elements.2.settings.text.style.0', 'pattern' => 'import' ], $result->get_error_data() );
+		$this->assertSame( 0, $this->save_count );
+		$this->assertSame( $stored, $this->saved_elements );
+	}
+
 	public function test_move_out_of_a_component_clears_the_slot_reference(): void {
 		$this->saved_elements[0]['cid']          = 'cmpabc';
 		$this->saved_elements[0]['slotChildren'] = [ 'slotta' => [ 'firstt', 'second' ] ];
