@@ -525,11 +525,14 @@ final class Builder implements Module {
 		$name_pattern = '/\A' . preg_quote( $name, '/' ) . '\z/iu';
 
 		foreach ( array_column( $categories, 'name' ) as $existing ) {
-			// A legacy name with invalid UTF-8 cannot equal the sanitized name, and the u pattern cannot read it.
-			if ( ! is_string( $existing ) || ! mb_check_encoding( $existing, 'UTF-8' ) ) {
+			if ( ! is_string( $existing ) ) {
 				continue;
 			}
 			$match = preg_match( $name_pattern, $existing );
+			// A legacy name with invalid UTF-8 cannot equal the sanitized name, and the u pattern cannot read it.
+			if ( false === $match && PREG_BAD_UTF8_ERROR === preg_last_error() ) {
+				continue;
+			}
 			if ( false === $match ) {
 				return new WP_Error( 'bricks_mcp_category_compare_failed', __( 'The existing category names could not be checked for duplicates.', 'bricks-mcp' ), [ 'status' => 500 ] );
 			}

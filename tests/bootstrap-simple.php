@@ -20,7 +20,9 @@ define( 'BRICKS_MCP_PLUGIN_URL', 'http://localhost/wp-content/plugins/bricks-mcp
 defined( 'BRICKS_MCP_PLUGIN_BASENAME' ) || define( 'BRICKS_MCP_PLUGIN_BASENAME', 'bricks-mcp/bricks-mcp.php' );
 
 // Like wp_set_internal_encoding(): WordPress sets mbstring's encoding to the blog charset, not the runner's default_charset.
-mb_internal_encoding( 'UTF-8' );
+if ( function_exists( 'mb_internal_encoding' ) ) {
+	mb_internal_encoding( 'UTF-8' );
+}
 
 // Load global-namespace WordPress function stubs; wp-functions.php first, then the rest alphabetically.
 require_once __DIR__ . '/stubs/wp-functions.php';

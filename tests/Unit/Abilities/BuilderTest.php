@@ -358,6 +358,23 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ ...$stored, $category ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
+	public function test_category_creation_works_without_mbstring(): void {
+		// -n loads no extensions, so mbstring is absent as on a host without it; the fixture defines only core's compat mb_strlen().
+		$output = [];
+		$status = 1;
+		exec( escapeshellarg( PHP_BINARY ) . ' -n ' . escapeshellarg( __DIR__ . '/fixtures/category-without-mbstring.php' ) . ' 2>&1', $output, $status );
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertSame(
+			[
+				'mbstring'   => false,
+				'results'    => [ 'bricks_mcp_duplicate_category', 'Layout' ],
+				'categories' => [ bin2hex( "Lay\xC3out" ), bin2hex( 'Existing' ), bin2hex( 'Layout' ) ],
+			],
+			json_decode( implode( "\n", $output ), true )
+		);
+	}
+
 	public function test_category_deletion_uncategorizes_its_classes(): void {
 		$remaining = [ 'id' => 'otherc', 'name' => 'Other' ];
 		$classes   = [
