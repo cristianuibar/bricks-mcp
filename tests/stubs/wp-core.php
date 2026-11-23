@@ -105,6 +105,12 @@ if ( ! function_exists( 'get_post_meta' ) ) {
 	}
 }
 
+if ( ! function_exists( 'metadata_exists' ) ) {
+	function metadata_exists( string $meta_type, int $object_id, string $meta_key ): bool {
+		return array_key_exists( $meta_key, $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ?? [] );
+	}
+}
+
 if ( ! function_exists( 'wp_is_post_revision' ) ) {
 	function wp_is_post_revision( mixed $post ): int|false {
 		$found = get_post( $post );

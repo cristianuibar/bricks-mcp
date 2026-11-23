@@ -1242,6 +1242,30 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Clearing a Slim SEO field deletes a stored empty-string record, so a later unique insert of the meta is not blocked.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_clear_deletes_an_empty_string_record(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, 'slim_seo', '' );
+
+		$result = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'title' => '' ],
+			]
+		);
+
+		$this->assertNotInstanceOf( \WP_Error::class, $result );
+		$this->assertFalse( metadata_exists( 'post', self::POST_ID, 'slim_seo' ) );
+	}
+
+	/**
 	 * Changing one Slim SEO field keeps the literal backslashes of the fields it leaves alone.
 	 *
 	 * @runInSeparateProcess
