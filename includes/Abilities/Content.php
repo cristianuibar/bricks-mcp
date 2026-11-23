@@ -81,11 +81,6 @@ final class Content implements Module {
 		'seopress' => 'yes',
 	];
 
-	private const SEO_ROBOTS_OFF_VALUE = [
-		'yoast'    => '2',
-		'seopress' => '',
-	];
-
 	private const RANK_MATH_IMAGE_ID_KEYS = [
 		'ogImage'      => 'rank_math_facebook_image_id',
 		'twitterImage' => 'rank_math_twitter_image_id',
@@ -868,6 +863,13 @@ final class Content implements Module {
 					delete_post_meta( $post_id, $id_key );
 				}
 			}
+
+			foreach ( [ 'twitterTitle', 'twitterDescription', 'twitterImage' ] as $field ) {
+				if ( '' !== ( $fields[ $field ] ?? '' ) ) {
+					update_post_meta( $post_id, 'rank_math_twitter_use_facebook', 'off' );
+					break;
+				}
+			}
 		}
 
 		$this->write_plugin_robots( $post_id, $source, $fields );
@@ -903,7 +905,9 @@ final class Content implements Module {
 
 		foreach ( self::SEO_ROBOTS_META_KEYS[ $source ] as $field => $meta_key ) {
 			if ( array_key_exists( $field, $fields ) ) {
-				update_post_meta( $post_id, $meta_key, $fields[ $field ] ? self::SEO_ROBOTS_ON_VALUE[ $source ] : self::SEO_ROBOTS_OFF_VALUE[ $source ] );
+				$off_value = 'yoast' === $source && 'noindex' === $field ? '2' : '';
+
+				update_post_meta( $post_id, $meta_key, $fields[ $field ] ? self::SEO_ROBOTS_ON_VALUE[ $source ] : $off_value );
 			}
 		}
 	}

@@ -247,14 +247,39 @@ final class ContentTest extends TestCase {
 		$forced_index = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
 		$stored_index = get_post_meta( self::POST_ID, '_yoast_wpseo_meta-robots-noindex', true );
 
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'nofollow' => false ] ] );
+		$stored_follow = get_post_meta( self::POST_ID, '_yoast_wpseo_meta-robots-nofollow', true );
+
 		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'noindex' => true ] ] );
 		$forced_noindex = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
 
 		$this->assertTrue( $noindex( $inherited ) );
 		$this->assertSame( '2', $stored_index );
+		$this->assertSame( '', $stored_follow );
 		$this->assertFalse( $noindex( $forced_index ) );
 		$this->assertSame( '1', get_post_meta( self::POST_ID, '_yoast_wpseo_meta-robots-noindex', true ) );
 		$this->assertTrue( $noindex( $forced_noindex ) );
+	}
+
+	/**
+	 * Rank Math ignores its Twitter fields while the use-Facebook toggle is on, so writing one must switch it off.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_rank_math_twitter_write_switches_off_the_use_facebook_toggle(): void {
+		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		$toggle = static fn(): mixed => get_post_meta( self::POST_ID, 'rank_math_twitter_use_facebook', true );
+
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'ogTitle' => 'Share title' ] ] );
+		$after_og = $toggle();
+
+		$this->call( 'bricks-mcp/update-seo', [ 'postId' => self::POST_ID, 'seo' => [ 'twitterTitle' => 'Tweet title' ] ] );
+
+		$this->assertSame( '', $after_og );
+		$this->assertSame( 'off', $toggle() );
 	}
 
 	/**
