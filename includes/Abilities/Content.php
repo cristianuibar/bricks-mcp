@@ -954,11 +954,11 @@ final class Content implements Module {
 	 *
 	 * Like Slim SEO's own editor, a cleared field drops its key, noindex is stored as 1, and an empty array deletes the meta.
 	 * The metadata functions keep a revision's write on the revision; the post meta ones would redirect it to the parent.
-	 * The delete matches the value read in one statement, so a record saved after the read is kept.
+	 * The delete matches the value read in one statement, so a record saved after the read is kept and the clear fails as not applied.
 	 *
 	 * @param int                        $post_id Post ID.
 	 * @param array<string, string|bool> $fields  Fields to write.
-	 * @return true|\WP_Error Error when the database refuses the delete.
+	 * @return true|\WP_Error Error when the database refuses the delete or a newer save keeps the record.
 	 */
 	private function write_slim_seo( int $post_id, array $fields ): bool|\WP_Error {
 		$stored = get_post_meta( $post_id, 'slim_seo', true );
@@ -979,8 +979,22 @@ final class Content implements Module {
 		if ( array() !== $slim ) {
 			// Slashed because update_metadata() unslashes, which would drop literal backslashes from every stored field.
 			update_metadata( 'post', $post_id, 'slim_seo', wp_slash( $slim ) );
-		} elseif ( '' !== $stored && false !== $stored && ! $this->delete_post_meta_if_unchanged( $post_id, 'slim_seo', $stored ) ) {
+
+			return true;
+		}
+
+		if ( '' === $stored || false === $stored ) {
+			return true;
+		}
+
+		$deleted = $this->delete_post_meta_if_unchanged( $post_id, 'slim_seo', $stored );
+
+		if ( false === $deleted ) {
 			return new \WP_Error( 'bricks_mcp_seo_write_failed', __( 'The database did not delete the cleared Slim SEO record, so its fields are still stored. Re-read the SEO before retrying.', 'bricks-mcp' ), [ 'status' => 500 ] );
+		}
+
+		if ( 0 === $deleted && '' !== get_post_meta( $post_id, 'slim_seo', true ) ) {
+			return new \WP_Error( 'bricks_mcp_seo_changed', __( 'The Slim SEO record was saved again while it was being cleared, so the newer save was kept and nothing was cleared. Re-read the SEO before retrying.', 'bricks-mcp' ), [ 'status' => 409 ] );
 		}
 
 		return true;
@@ -996,9 +1010,9 @@ final class Content implements Module {
 	 * @param int    $post_id  Post ID; a revision keeps its own row.
 	 * @param string $meta_key Meta key.
 	 * @param mixed  $value    Value read before the delete.
-	 * @return bool False when the database refused the DELETE; true when it ran, even if a newer save kept the row.
+	 * @return int|false Rows deleted, 0 when the row is gone or a newer save kept it; false when the database refused the DELETE.
 	 */
-	private function delete_post_meta_if_unchanged( int $post_id, string $meta_key, mixed $value ): bool {
+	private function delete_post_meta_if_unchanged( int $post_id, string $meta_key, mixed $value ): int|false {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- delete_metadata() cannot match the value in its DELETE; the meta cache is cleared below.
@@ -1012,7 +1026,7 @@ final class Content implements Module {
 		);
 		wp_cache_delete( $post_id, 'post_meta' );
 
-		return false !== $deleted;
+		return false === $deleted ? false : (int) $deleted;
 	}
 
 	/**
