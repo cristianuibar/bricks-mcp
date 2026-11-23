@@ -35,20 +35,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require tagged commit on main or a release branch
+      - name: Require tagged commit on main
         env:
           TAG_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          BRANCHES="origin/main $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release/*')"
-          for BRANCH in $BRANCHES; do
-            if git rev-parse --verify --quiet "refs/remotes/${BRANCH}" >/dev/null \
-              && git merge-base --is-ancestor "$TAG_SHA" "refs/remotes/${BRANCH}"; then
-              echo "Tagged commit is on ${BRANCH}"
-              exit 0
-            fi
-          done
-          echo "Tagged commit is not on origin/main or origin/release/*" >&2
+          if git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null \
+            && git merge-base --is-ancestor "$TAG_SHA" refs/remotes/origin/main; then
+            echo "Tagged commit is on origin/main"
+            exit 0
+          fi
+          echo "Tagged commit is not on origin/main" >&2
           exit 1
 
       - name: Set up PHP
@@ -116,12 +113,17 @@ jobs:
         run: |
           set -euo pipefail
           RELEASES="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
-          if jq -s -e --arg tag "$TAG" 'flatten | any(.tag_name == $tag)' <<<"$RELEASES" >/dev/null; then
+          STATE="$(jq -s -r --arg tag "$TAG" 'flatten | map(select(.tag_name == $tag)) | if length == 0 then "none" elif any(.draft | not) then "published" else "draft" end' <<<"$RELEASES")"
+          if [ "$STATE" != none ]; then
+            CLOBBER=()
+            if [ "$STATE" = draft ]; then
+              CLOBBER=(--clobber)
+            fi
             gh release upload "$TAG" \
               build/bricks-mcp.zip \
               build/bricks-mcp.zip.sha256 \
               --repo "$GITHUB_REPOSITORY" \
-              --clobber
+              "${CLOBBER[@]}"
           else
             gh release create "$TAG" \
               build/bricks-mcp.zip \
