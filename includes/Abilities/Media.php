@@ -221,9 +221,16 @@ final class Media implements Module {
 
 		$post_id     = isset( $input['postId'] ) ? (int) $input['postId'] : 0;
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
-		$pending     = null !== $existing_id && '' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true );
-		if ( null !== $existing_id && ! $pending ) {
-			return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
+		$pending     = false;
+		if ( null !== $existing_id ) {
+			$pending = '' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true );
+			// The credit URL is saved last. An unmarked attachment without it predates stored attribution, or lost
+			// its pending mark along with the attribution: complete it when this caller can, else return it as is.
+			$uncredited = ! $pending && '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
+			$completing = $pending || ( $uncredited && current_user_can( 'edit_post', $existing_id ) && '' !== $this->get_unsplash_api_key() );
+			if ( ! $completing ) {
+				return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
+			}
 		}
 
 		// Uploading again would duplicate the attachment, so only a user who can complete it may continue.
@@ -247,20 +254,8 @@ final class Media implements Module {
 		$photo     = $this->unsplash_get_json( $photo_url, $api_key );
 
 		if ( is_wp_error( $photo ) ) {
-			return $photo;
-		}
-
-		$image_url = '';
-		if ( isset( $photo['urls'] ) && is_array( $photo['urls'] ) ) {
-			$image_url = (string) ( $photo['urls']['regular'] ?? $photo['urls']['full'] ?? '' );
-		}
-
-		if ( '' === $image_url ) {
-			return new \WP_Error(
-				'bricks_mcp_unsplash_no_url',
-				__( 'Unsplash photo response did not include a downloadable image URL.', 'bricks-mcp' ),
-				[ 'status' => 502 ]
-			);
+			// An unmarked attachment may predate stored attribution, and still deduplicates when Unsplash cannot credit it.
+			return null !== $existing_id && ! $pending ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
 		}
 
 		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
@@ -278,17 +273,30 @@ final class Media implements Module {
 			self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY => $photographer_url,
 		];
 
-		if ( $pending ) {
+		if ( null !== $existing_id ) {
 			// The attachment may already be in use, so a failure here keeps it for the next retry.
 			$recorded = $this->record_unsplash_attribution( $existing_id, $attribution );
 			if ( is_wp_error( $recorded ) ) {
 				return $recorded;
 			}
 
-			// The earlier call reported a failure, so this call is the one that completed the import.
+			// After a marked failure the earlier call reported an error, so this call is the one that completed the import.
 			$completed = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 
-			return is_wp_error( $completed ) ? $completed : array_merge( $completed, [ 'duplicate' => false ] );
+			return is_wp_error( $completed ) || ! $pending ? $completed : array_merge( $completed, [ 'duplicate' => false ] );
+		}
+
+		$image_url = '';
+		if ( isset( $photo['urls'] ) && is_array( $photo['urls'] ) ) {
+			$image_url = (string) ( $photo['urls']['regular'] ?? $photo['urls']['full'] ?? '' );
+		}
+
+		if ( '' === $image_url ) {
+			return new \WP_Error(
+				'bricks_mcp_unsplash_no_url',
+				__( 'Unsplash photo response did not include a downloadable image URL.', 'bricks-mcp' ),
+				[ 'status' => 502 ]
+			);
 		}
 
 		$downloaded = $this->download_unsplash_image( $image_url, $photo_id );
@@ -351,8 +359,8 @@ final class Media implements Module {
 			return $this->unsplash_meta_error( $error_data );
 		}
 
-		// The pending mark lets a retry complete a failed attribution. If it does not persist, a retry still finds
-		// this attachment by its photo ID and returns it without the attribution instead of uploading again.
+		// The pending mark lets any retry complete a failed attribution. If it does not persist, a retry still finds
+		// this attachment by its photo ID, without a credit URL, and completes it when the caller can edit it.
 		$this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_PENDING_META_KEY => '1' ] );
 
 		$recorded = $this->record_unsplash_attribution( $attachment_id, $attribution );

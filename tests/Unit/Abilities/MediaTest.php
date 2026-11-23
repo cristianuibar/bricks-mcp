@@ -232,6 +232,69 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
+	 * A duplicate import saved without attribution, as before it was stored, gets its credit from Unsplash when the
+	 * caller can edit it, and is still returned as it is when Unsplash cannot be reached or the caller cannot edit it.
+	 *
+	 * @return void
+	 */
+	public function test_import_unsplash_dedup_completes_missing_attribution(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 42,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'post_parent' => 7,
+			],
+			[ '_unsplash_photo_id' => 'dup_99' ]
+		);
+		$GLOBALS['_bricks_mcp_test_get_posts_return'] = [ 42 ];
+		wp_register_ability(
+			'bricks/upload-media',
+			[ 'execute_callback' => static fn(): array => [ 'id' => 999 ] ]
+		);
+		$import = static fn(): array|\WP_Error => wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'dup_99' ] );
+
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static fn(): array => [
+			'response' => [ 'code' => 404 ],
+			'headers'  => [ 'content-type' => 'application/json' ],
+			'body'     => '{}',
+		];
+		$unreachable = $import();
+		$this->assertIsArray( $unreachable );
+		$this->assertSame( 42, $unreachable['attachmentId'] );
+		$this->assertNull( $unreachable['photographerUrl'] );
+
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static fn(): array => [
+			'response' => [ 'code' => 200 ],
+			'headers'  => [ 'content-type' => 'application/json' ],
+			'body'     => (string) wp_json_encode(
+				[
+					'id'   => 'dup_99',
+					'user' => [
+						'name'  => 'Jane Doe',
+						'links' => [ 'html' => 'https://unsplash.com/@jane' ],
+					],
+				]
+			),
+		];
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] = false;
+		$read_only = $import();
+		$this->assertSame( 42, $read_only['attachmentId'] );
+		$this->assertNull( $read_only['photographerUrl'] );
+		$this->assertSame( '', get_post_meta( 42, '_unsplash_photographer_url', true ) );
+
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] );
+		$completed = $import();
+		$this->assertIsArray( $completed );
+		$this->assertSame( 42, $completed['attachmentId'] );
+		$this->assertTrue( $completed['duplicate'] );
+		$this->assertSame( 'Jane Doe', $completed['photographer'] );
+		$this->assertSame( 'https://unsplash.com/@jane?utm_source=bricks_mcp&utm_medium=referral', $completed['photographerUrl'] );
+		$this->assertSame( 'https://unsplash.com/@jane?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( 42, '_unsplash_photographer_url', true ) );
+	}
+
+	/**
 	 * Unsplash user payloads with the photographer name both imports should report.
 	 *
 	 * @return array<string, array{0: array<string, mixed>, 1: string|null}>
@@ -872,7 +935,7 @@ final class MediaTest extends TestCase {
 		}
 
 		// A rejected pending mark does not hide the upload: with deletion refused, a retry returns the same attachment
-		// instead of uploading a second one. Alone, the mark failure does not fail the import.
+		// instead of uploading a second one, with its attribution completed. Alone, the mark failure does not fail the import.
 		foreach ( [ [ '_unsplash_attribution_pending' ], [ '_unsplash_attribution_pending', '_unsplash_photographer_url' ] ] as $failing_keys ) {
 			$label = (string) wp_json_encode( $failing_keys );
 			$clear_attachments();
@@ -895,6 +958,8 @@ final class MediaTest extends TestCase {
 			$retry = $import();
 			$this->assertIsArray( $retry, $label );
 			$this->assertSame( $first_id, $retry['attachmentId'], $label );
+			$this->assertSame( 'Pat', $retry['photographer'], $label );
+			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $retry['photographerUrl'], $label );
 			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
 		}
 
