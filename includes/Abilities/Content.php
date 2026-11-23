@@ -675,8 +675,8 @@ final class Content implements Module {
 				continue;
 			}
 
-			$keys     = implode( ', ', array_keys( $stale ) );
-			$robots   = (array) ( $stale[ self::BRICKS_ROBOTS_SETTING ] ?? [] );
+			$keys   = implode( ', ', array_keys( $stale ) );
+			$robots = (array) ( $stale[ self::BRICKS_ROBOTS_SETTING ] ?? [] );
 			// Crawlers read robots directives case-insensitively, so a stored NOINDEX blocks indexing too.
 			$blocking = array_values( array_filter( $robots, static fn( string $directive ): bool => in_array( strtolower( trim( $directive ) ), self::ROBOTS_BLOCKING_DIRECTIVES, true ) ) );
 			$kept     = array_values( array_diff( $robots, $blocking ) );
