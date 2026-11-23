@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 namespace BricksMCP\Tests\Integration;
 
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -46,7 +47,17 @@ chdir( ABSPATH );
 $log     = (string) ini_get( 'error_log' );
 $written = error_log( CANARY );
 clearstatcache();
-$log = (string) realpath( $log ) ?: $log;
+
+// Resolve the nearest existing folder, so a log that could not be created still resolves. '' is stderr.
+if ( '' !== $log && 'syslog' !== $log ) {
+	$path = str_starts_with( $log, '/' ) ? $log : getcwd() . '/' . $log;
+	$rest = '';
+	while ( false === realpath( $path ) && dirname( $path ) !== $path ) {
+		$rest = '/' . basename( $path ) . $rest;
+		$path = dirname( $path );
+	}
+	$log = rtrim( (string) realpath( $path ), '/' ) . $rest;
+}
 
 echo PHP_EOL, wp_json_encode(
 	[
@@ -82,12 +93,7 @@ PHP;
 	public function test_visitor_cannot_read_configured_debug_log( string $server ): void {
 		[ $site, $canary ] = $this->probe( $server );
 
-		if ( ! $site['file'] || ! str_starts_with( $site['log'], $site['root'] ) ) {
-			$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
-		}
-
-		$this->assertTrue( $site['written'], "WordPress on {$server} could not write {$site['log']}." );
-		$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
+		$this->assert_configured_log_denied( $server, $site, $canary );
 	}
 
 	/**
@@ -97,8 +103,27 @@ PHP;
 		[ $site, $canary ] = $this->probe( self::SERVER, 'wp-content/logs/debug.log' );
 
 		$this->assertSame( $site['root'] . 'wp-content/logs/debug.log', $site['log'] );
-		$this->assertTrue( $site['written'], 'WordPress on ' . self::SERVER . " could not write {$site['log']}." );
+		$this->assert_logged( self::SERVER, $site );
 		$this->assert_denied( self::SERVER, '/wp-content/logs/debug.log', $canary );
+	}
+
+	/**
+	 * A configured log under the web root that WordPress cannot create fails the configured check, not a skip.
+	 *
+	 * The skip is an AssertionFailedError too, so only the creation failure's message passes.
+	 */
+	public function test_uncreatable_configured_debug_log_fails_the_check(): void {
+		$path              = 'wp-content/logs/bricks-mcp-missing-' . bin2hex( random_bytes( 8 ) ) . '/debug.log';
+		[ $site, $canary ] = $this->probe( self::SERVER, $path );
+
+		try {
+			$this->assert_configured_log_denied( self::SERVER, $site, $canary );
+		} catch ( AssertionFailedError $e ) {
+			$this->assertStringContainsString( "could not create {$site['root']}{$path}.", $e->getMessage() );
+			return;
+		}
+
+		$this->fail( "The configured check passed for {$site['log']}, which was never created." );
 	}
 
 	/**
@@ -178,6 +203,30 @@ PHP;
 				unlink( $file );
 			}
 		}
+	}
+
+	/**
+	 * The configured check: a log under the web root is written, created and denied; any other log skips.
+	 *
+	 * @param array{log: string, root: string, file: bool, written: bool} $site What the probe reports.
+	 */
+	private function assert_configured_log_denied( string $server, array $site, string $canary ): void {
+		if ( ! str_starts_with( $site['log'], $site['root'] ) ) {
+			$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
+		}
+
+		$this->assert_logged( $server, $site );
+		$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
+	}
+
+	/**
+	 * The probe's log exists: error_log() still returns true when it cannot create the file.
+	 *
+	 * @param array{log: string, root: string, file: bool, written: bool} $site What the probe reports.
+	 */
+	private function assert_logged( string $server, array $site ): void {
+		$this->assertTrue( $site['written'], "WordPress on {$server} could not write {$site['log']}." );
+		$this->assertTrue( $site['file'], "WordPress on {$server} could not create {$site['log']}." );
 	}
 
 	private function assert_denied( string $server, string $path, string $canary ): void {
