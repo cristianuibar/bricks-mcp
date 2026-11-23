@@ -10,7 +10,8 @@ declare(strict_types=1);
 
 // Define plugin constants for testing.
 define( 'ABSPATH', '/tmp/wordpress/' );
-define( 'BRICKS_MCP_VERSION', '2.0.0' );
+// A fixture may define a different installed version first (e.g. one with build metadata).
+defined( 'BRICKS_MCP_VERSION' ) || define( 'BRICKS_MCP_VERSION', '2.0.0' );
 define( 'BRICKS_MCP_MIN_PHP_VERSION', '8.2' );
 define( 'BRICKS_MCP_MIN_WP_VERSION', '7.1' );
 define( 'BRICKS_MCP_PLUGIN_DIR', dirname( __DIR__ ) . '/' );

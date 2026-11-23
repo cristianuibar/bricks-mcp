@@ -1174,4 +1174,49 @@ final class UpdateCheckerTest extends TestCase {
 
 		unset( $_REQUEST['nonce'] );
 	}
+
+	/**
+	 * Test: after Check Now, the Settings card shows an Update link only for a release with
+	 * a newer version core, so build metadata ("+build.7") on an equal version shows none.
+	 *
+	 * Runs the AJAX handler in a separate PHP process for each installed version, then
+	 * clicks Check Now in assets/js/admin-updates.js (under node) with that response.
+	 *
+	 * @return void
+	 */
+	public function test_check_now_shows_update_link_only_for_newer_version_core(): void {
+		$node = trim( (string) shell_exec( 'command -v node' ) );
+		if ( '' === $node ) {
+			$this->markTestSkipped( 'node is required to run the Settings page script.' );
+		}
+
+		$cases = [
+			[ '2.1.0+build.6', 'v2.1.0+build.7', false ],
+			[ '2.0.0', 'v2.0.0+build.7', false ],
+			[ '2.1.0+build.6', 'v2.1.0', false ],
+			[ '2.1.0+build.6', 'v2.0.9+build.9', false ],
+			[ '2.1.0+build.6', 'v2.1.1+build.1', true ],
+		];
+
+		foreach ( $cases as [ $installed, $tag, $update ] ) {
+			$label  = $installed . ' -> ' . $tag;
+			$output = [];
+			$status = 1;
+			exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.php' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $tag ) . ' 2>&1', $output, $status );
+			$this->assertSame( 0, $status, $label . "\n" . implode( "\n", $output ) );
+			$response = implode( "\n", $output );
+
+			$output = [];
+			$status = 1;
+			exec( escapeshellarg( $node ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.js' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $response ) . ' 2>&1', $output, $status );
+			$this->assertSame( 0, $status, $label . "\n" . implode( "\n", $output ) );
+			$card = json_decode( implode( "\n", $output ), true );
+
+			$this->assertSame( 'bricks_mcp_check_update', $card['action'], $label );
+			$this->assertSame( $update, str_contains( $card['html'], '>Update</a>' ), $label . ': ' . $card['html'] );
+			$this->assertSame( ! $update, str_contains( $card['html'], 'up to date' ), $label . ': ' . $card['html'] );
+			$this->assertSame( $update, $card['hasUpdateClass'], $label );
+			$this->assertTrue( $card['buttonEnabled'], $label );
+		}
+	}
 }
