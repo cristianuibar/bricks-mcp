@@ -661,8 +661,9 @@ final class Content implements Module {
 
 			$keys     = implode( ', ', array_keys( $stale ) );
 			$robots   = (array) ( $stale[ self::BRICKS_ROBOTS_SETTING ] ?? [] );
-			$blocking = array_values( array_intersect( self::ROBOTS_BLOCKING_DIRECTIVES, $robots ) );
-			$kept     = array_values( array_diff( $robots, self::ROBOTS_BLOCKING_DIRECTIVES ) );
+			// Crawlers read robots directives case-insensitively, so a stored NOINDEX blocks indexing too.
+			$blocking = array_values( array_filter( $robots, static fn( string $directive ): bool => in_array( strtolower( trim( $directive ) ), self::ROBOTS_BLOCKING_DIRECTIVES, true ) ) );
+			$kept     = array_values( array_diff( $robots, $blocking ) );
 			/* translators: 1: Bricks page setting keys, 2: SEO plugin name */
 			$message = sprintf( __( 'The Bricks page settings of this post still hold %1$s, which Bricks prints next to %2$s.', 'bricks-mcp' ), $keys, $source );
 			$fix     = sprintf( 'Clear %1$s with bricks/set-page-settings by sending each as null', $keys );
