@@ -55,7 +55,6 @@ build/
 
 # Internal project docs (kept locally, not published)
 CLAUDE.md
-AGENTS.md
 docs/internal/
 docs/COURSE_CURRICULUM.md
 docs/MARKETING_PLAN.md
