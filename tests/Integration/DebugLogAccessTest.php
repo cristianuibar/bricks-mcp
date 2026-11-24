@@ -52,21 +52,28 @@ $log     = (string) ini_get( 'error_log' );
 $written = error_log( CANARY );
 clearstatcache();
 
-// Resolve the nearest existing folder, so a log that could not be created still resolves. '' is stderr.
-if ( '' !== $log && 'syslog' !== $log ) {
-	$path = str_starts_with( $log, '/' ) ? $log : getcwd() . '/' . $log;
-	$rest = '';
-	while ( false === realpath( $path ) && dirname( $path ) !== $path ) {
-		$rest = '/' . basename( $path ) . $rest;
-		$path = dirname( $path );
+// Drop . and .. by name without following symlinks: a URL maps to the path, not to where a link points.
+$normalize = static function ( string $path ): string {
+	$parts = [];
+	foreach ( explode( '/', $path ) as $part ) {
+		if ( '..' === $part ) {
+			array_pop( $parts );
+		} elseif ( '' !== $part && '.' !== $part ) {
+			$parts[] = $part;
+		}
 	}
-	$log = rtrim( (string) realpath( $path ), '/' ) . $rest;
+	return '/' . implode( '/', $parts );
+};
+
+// '' is stderr.
+if ( '' !== $log && 'syslog' !== $log ) {
+	$log = $normalize( str_starts_with( $log, '/' ) ? $log : getcwd() . '/' . $log );
 }
 
 echo PHP_EOL, wp_json_encode(
 	[
 		'log'     => $log,
-		'root'    => realpath( ABSPATH ) . '/',
+		'root'    => rtrim( $normalize( ABSPATH ), '/' ) . '/',
 		'file'    => is_file( $log ),
 		'written' => $written,
 	]
@@ -109,6 +116,27 @@ PHP;
 		$this->assertSame( $site['root'] . 'wp-content/logs/debug.log', $site['log'] );
 		$this->assert_logged( self::SERVER, $site );
 		$this->assert_denied( self::SERVER, '/wp-content/logs/debug.log', $canary );
+	}
+
+	/**
+	 * A log under the web root that is a symlink to a file outside it is checked at its URL, not skipped.
+	 *
+	 * The target sits in the tests site's own /tmp, so it is created by the probe's write and
+	 * keeps one fixed name there, getting a canary line per run like any other log.
+	 */
+	public function test_visitor_cannot_read_debug_log_symlinked_outside_the_web_root(): void {
+		$name = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.log';
+		$link = dirname( __DIR__, 2 ) . '/logs/' . $name;
+		symlink( '/tmp/bricks-mcp-access-test.log', $link );
+
+		try {
+			[ $site, $canary ] = $this->probe( self::SERVER, "wp-content/logs/{$name}" );
+
+			$this->assertSame( "{$site['root']}wp-content/logs/{$name}", $site['log'] );
+			$this->assert_configured_log_denied( self::SERVER, $site, $canary );
+		} finally {
+			unlink( $link );
+		}
 	}
 
 	/**
