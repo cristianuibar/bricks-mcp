@@ -142,15 +142,19 @@ PHP;
 	public function test_visitor_cannot_read_debug_log_symlinked_outside_the_web_root(): void {
 		$name = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.log';
 		$link = dirname( __DIR__, 2 ) . '/logs/' . $name;
-		symlink( '/tmp/bricks-mcp-access-test.log', $link );
 
 		try {
+			$this->create_symlink( '/tmp/bricks-mcp-access-test.log', $link );
 			[ $site, $canary ] = $this->probe( self::SERVER, "wp-content/logs/{$name}" );
 
 			$this->assertSame( "{$site['root']}wp-content/logs/{$name}", $site['log'] );
+			// The site sees the link: a regular file left in its place would report itself as its target.
+			$this->assertSame( '/tmp/bricks-mcp-access-test.log', $site['target'] );
 			$this->assert_configured_log_denied( self::SERVER, $site, $canary );
 		} finally {
-			unlink( $link );
+			if ( is_link( $link ) || file_exists( $link ) ) {
+				unlink( $link );
+			}
 		}
 	}
 
@@ -166,9 +170,9 @@ PHP;
 		$name   = $folder . '.log';
 		$link   = dirname( __DIR__, 2 ) . '/logs/' . $name;
 		mkdir( $dir );
-		symlink( "{$dir}/debug.log", $link );
 
 		try {
+			$this->create_symlink( "{$dir}/debug.log", $link );
 			[ $site, $canary ] = $this->probe( self::SERVER, "wp-content/logs/{$name}" );
 			$this->assertSame( "{$site['root']}wp-content/plugins/bricks-mcp/{$folder}/debug.log", $site['target'] );
 
@@ -179,7 +183,9 @@ PHP;
 				return;
 			}
 		} finally {
-			unlink( $link );
+			if ( is_link( $link ) || file_exists( $link ) ) {
+				unlink( $link );
+			}
 			if ( file_exists( "{$dir}/debug.log" ) ) {
 				unlink( "{$dir}/debug.log" );
 			}
@@ -187,6 +193,27 @@ PHP;
 		}
 
 		$this->fail( "The configured check passed for {$site['log']}, which writes to the served {$site['target']}." );
+	}
+
+	/**
+	 * A symlink the mount rejects fails before the probe runs, instead of letting it log to a regular file at the link's path.
+	 *
+	 * The regular file already at the link's path makes symlink() fail here, as such a mount would.
+	 */
+	public function test_symlink_the_mount_rejects_fails(): void {
+		$link = dirname( __DIR__, 2 ) . '/logs/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.log';
+		file_put_contents( $link, '' );
+
+		try {
+			$this->create_symlink( '/tmp/bricks-mcp-access-test.log', $link );
+		} catch ( AssertionFailedError $e ) {
+			$this->assertStringContainsString( "Could not create the symlink {$link}", $e->getMessage() );
+			return;
+		} finally {
+			unlink( $link );
+		}
+
+		$this->fail( "The symlink check passed for the regular file {$link}." );
 	}
 
 	/**
@@ -544,6 +571,13 @@ PHP;
 		preg_match( '#^HTTP/\S+ (\d{3})#', stream_get_meta_data( $stream )['wrapper_data'][0], $matches );
 
 		return [ (int) $matches[1], $stream ];
+	}
+
+	/**
+	 * Links a log to its target, failing when the mount rejects symlinks: the probe would log to a regular file there instead.
+	 */
+	private function create_symlink( string $target, string $link ): void {
+		$this->assertTrue( @symlink( $target, $link ) && is_link( $link ), "Could not create the symlink {$link}: does its mount allow symlinks?" );
 	}
 
 	/**
