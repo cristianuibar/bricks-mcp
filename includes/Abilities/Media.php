@@ -223,10 +223,9 @@ final class Media implements Module {
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 		$pending     = false;
 		if ( null !== $existing_id ) {
-			// The credit URL is saved after the photographer name, so an attachment without it lacks its attribution. This
-			// import names its upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is
-			// an unfinished import even if its pending mark failed. Releases before stored attribution kept the Unsplash
-			// file name.
+			// The credit URL is saved last, so an attachment without it lacks its attribution. This import names its
+			// upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is an unfinished
+			// import even if its pending mark failed. Releases before stored attribution kept the Unsplash file name.
 			$uncredited = '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
 			$pending    = $uncredited && (
 				'' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true )
@@ -238,18 +237,6 @@ final class Media implements Module {
 			if ( ! $completing ) {
 				return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
-		}
-
-		// Uploading again would duplicate the attachment, so only a user who can complete it may continue.
-		if ( $pending && ! current_user_can( 'edit_post', $existing_id ) ) {
-			return new \WP_Error(
-				'bricks_mcp_unsplash_import_incomplete',
-				__( 'An earlier import of this Unsplash photo left an attachment without its attribution. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
-				[
-					'status'       => 403,
-					'attachmentId' => $existing_id,
-				]
-			);
 		}
 
 		$api_key = $this->get_unsplash_api_key();
@@ -281,6 +268,20 @@ final class Media implements Module {
 		];
 
 		if ( null !== $existing_id ) {
+			// A user who cannot edit an unfinished import gets it with the credit from Unsplash, which only an editor
+			// saves on it, rather than a second upload of the photo.
+			if ( ! current_user_can( 'edit_post', $existing_id ) ) {
+				$reused = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
+
+				return is_wp_error( $reused ) ? $reused : array_merge(
+					$reused,
+					[
+						'photographer'    => '' !== $photographer ? $photographer : null,
+						'photographerUrl' => $photographer_url,
+					]
+				);
+			}
+
 			// The attachment may already be in use, so a failure here keeps it for the next retry.
 			$recorded = $this->record_unsplash_attribution( $existing_id, $attribution );
 			if ( is_wp_error( $recorded ) ) {
@@ -355,23 +356,24 @@ final class Media implements Module {
 			);
 		}
 
-		// The photo ID goes last, so no retry finds this attachment before its attribution is complete. Until then
-		// nothing uses it, so a failure removes it: a retry would otherwise duplicate it, or be refused by it.
-		if ( ! $this->write_unsplash_meta( $attachment_id, array_merge( $attribution, [ self::UNSPLASH_META_KEY => $photo_id ] ) ) ) {
+		// The photo ID goes first, so a retry finds this attachment by it; only a failure here leaves it unfindable.
+		if ( ! $this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_META_KEY => $photo_id ] ) ) {
+			// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
 			$error_data = [ 'status' => 500 ];
 			if ( ! wp_delete_attachment( $attachment_id, true ) ) {
 				$error_data['attachmentId'] = $attachment_id;
-				// WordPress deletes the meta before the post, so mark the kept upload for a retry to find and complete it.
-				$this->write_unsplash_meta(
-					$attachment_id,
-					[
-						self::UNSPLASH_META_KEY         => $photo_id,
-						self::UNSPLASH_PENDING_META_KEY => '1',
-					]
-				);
 			}
 
 			return $this->unsplash_meta_error( $error_data );
+		}
+
+		// The pending mark lets any retry complete a failed attribution. If it does not persist, a retry still finds
+		// this attachment by its photo ID, without a credit URL, and completes it when the caller can edit it.
+		$this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_PENDING_META_KEY => '1' ] );
+
+		$recorded = $this->record_unsplash_attribution( $attachment_id, $attribution );
+		if ( is_wp_error( $recorded ) ) {
+			return $recorded;
 		}
 
 		if ( $post_id > 0 ) {
