@@ -67,6 +67,7 @@ final class MediaTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
 		$GLOBALS['_bricks_mcp_test_media_before_delete_attachment']  = null;
 		$GLOBALS['_bricks_mcp_test_media_on_update_post_meta_fail']  = null;
+		$GLOBALS['_bricks_mcp_test_media_delete_post_meta_fail']     = false;
 	}
 
 	/**
@@ -1140,6 +1141,40 @@ final class MediaTest extends TestCase {
 			$this->assertSame( 'Pat', $retry['photographer'], $label );
 			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $retry['photographerUrl'], $label );
 			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
+		}
+
+		// A pending mark that WordPress fails to delete after the attribution saves, on a fresh import or on the retry that
+		// completes a kept upload, does not leave the photo unfinished: another author, who can neither edit nor read it,
+		// gets it with its credit rather than a refusal, and an editor gets it as a duplicate.
+		foreach ( [ 'fresh', 'retry' ] as $completion ) {
+			$clear_attachments();
+			if ( 'retry' === $completion ) {
+				$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+				$this->assertInstanceOf( \WP_Error::class, $import(), $completion );
+				$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			}
+			$GLOBALS['_bricks_mcp_test_media_delete_post_meta_fail'] = [ '_unsplash_attribution_pending' ];
+			$completed = $import();
+			$GLOBALS['_bricks_mcp_test_media_delete_post_meta_fail'] = false;
+			$this->assertIsArray( $completed, $completion );
+			$this->assertFalse( $completed['duplicate'], $completion );
+			$completed_id = $completed['attachmentId'];
+			$this->assertSame( '1', get_post_meta( $completed_id, '_unsplash_attribution_pending', true ), $completion );
+
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $completed_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $completed_id ] = false;
+			$other_author = $import();
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $completed_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $completed_id ] );
+			$this->assertIsArray( $other_author, $completion );
+			$this->assertSame( $completed_id, $other_author['attachmentId'], $completion );
+			$this->assertTrue( $other_author['duplicate'], $completion );
+			$this->assertSame( 'Pat', $other_author['photographer'], $completion );
+			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $other_author['photographerUrl'], $completion );
+
+			$editor = $import();
+			$this->assertSame( $completed_id, $editor['attachmentId'], $completion );
+			$this->assertTrue( $editor['duplicate'], $completion );
+			$this->assertSame( [ $completed_id ], $attachment_ids(), $completion );
 		}
 
 		// Another retry that completes the kept upload while this retry waits on Unsplash leaves one attachment:

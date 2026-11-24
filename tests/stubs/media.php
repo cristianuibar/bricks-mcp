@@ -116,6 +116,26 @@ namespace BricksMCP\Abilities {
 		}
 	}
 
+	if ( ! function_exists( __NAMESPACE__ . '\delete_post_meta' ) ) {
+		/**
+		 * Allow Media tests to simulate failed post meta deletes without affecting other tests.
+		 * The fail flag is a list of the meta keys whose deletes fail, leaving the stored value.
+		 *
+		 * @param int    $post_id Post ID.
+		 * @param string $key     Meta key.
+		 * @param mixed  $value   Meta value.
+		 * @return bool
+		 */
+		function delete_post_meta( int $post_id, string $key, mixed $value = '' ): bool {
+			$fail = $GLOBALS['_bricks_mcp_test_media_delete_post_meta_fail'] ?? false;
+			if ( is_array( $fail ) && in_array( $key, $fail, true ) ) {
+				return false;
+			}
+
+			return \delete_post_meta( $post_id, $key, $value );
+		}
+	}
+
 	if ( ! function_exists( __NAMESPACE__ . '\wp_delete_attachment' ) ) {
 		/**
 		 * Allow Media tests to simulate a failed attachment delete without affecting other tests.
