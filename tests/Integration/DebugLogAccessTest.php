@@ -26,6 +26,11 @@ final class DebugLogAccessTest extends TestCase {
 	private const SERVER = 'tests-wordpress';
 
 	/**
+	 * Seconds a request may wait for its response or for the next part of its body.
+	 */
+	private const TIMEOUT = 10;
+
+	/**
 	 * Logs a canary through the requesting site's WordPress and reports where it went.
 	 *
 	 * Both sites serve the plugin checkout, so each one runs it with its own wp-config.php.
@@ -299,6 +304,29 @@ PHP;
 	}
 
 	/**
+	 * A 403 response that stalls before its trailing canary fails the check instead of passing on the part it sent.
+	 */
+	public function test_stalled_response_fails_the_check(): void {
+		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
+		$page   = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.php';
+		$file   = dirname( __DIR__, 2 ) . '/' . $page;
+		// A length, like a static file's, so the body is not chunked and a read that times out returns nothing.
+		$code = "<?php\nhttp_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;\n";
+		file_put_contents( $file, sprintf( $code, 65536 + strlen( $canary ), self::TIMEOUT + 5, var_export( $canary, true ) ) );
+
+		try {
+			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/' . $page, $canary );
+		} catch ( AssertionFailedError $e ) {
+			$this->assertStringContainsString( 'timed out before the end of its body', $e->getMessage() );
+			return;
+		} finally {
+			unlink( $file );
+		}
+
+		$this->fail( 'The check passed for a response that stalled before its canary.' );
+	}
+
+	/**
 	 * Runs the probe on a site.
 	 *
 	 * @return array{array{log: string, root: string, file: bool, written: bool}, string} What it reports, and its canary.
@@ -362,7 +390,7 @@ PHP;
 	}
 
 	/**
-	 * The request is refused and its body, read in chunks so a large log fits in memory, holds no canary.
+	 * The request is refused and its whole body, read in chunks so a large log fits in memory, holds no canary.
 	 */
 	private function assert_denied( string $server, string $path, string $canary ): void {
 		[ $status, $stream ] = $this->open( $server, $path );
@@ -379,6 +407,8 @@ PHP;
 				$tail  = substr( $chunk, -( strlen( $canary ) - 1 ) );
 			} while ( ! $found && '' !== $read );
 			$this->assertFalse( $found, "{$server}{$path} served the canary." );
+			// A read that times out also returns '', leaving the rest of the body unchecked.
+			$this->assertFalse( stream_get_meta_data( $stream )['timed_out'], "{$server}{$path} timed out before the end of its body." );
 		} finally {
 			fclose( $stream );
 		}
@@ -406,7 +436,7 @@ PHP;
 	 */
 	private function open( string $server, string $path ): array {
 		$url     = 'http://' . $server . implode( '/', array_map( 'rawurlencode', explode( '/', $path ) ) );
-		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => 10 ] ] );
+		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => self::TIMEOUT ] ] );
 		$stream  = fopen( $url, 'rb', false, $context );
 		$this->assertNotFalse( $stream, "{$server} did not answer." );
 
