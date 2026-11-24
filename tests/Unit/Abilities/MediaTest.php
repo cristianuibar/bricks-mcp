@@ -66,6 +66,7 @@ final class MediaTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_media_wp_update_post_fail']   = false;
 		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
 		$GLOBALS['_bricks_mcp_test_media_before_delete_attachment']  = null;
+		$GLOBALS['_bricks_mcp_test_media_on_update_post_meta_fail']  = null;
 	}
 
 	/**
@@ -785,7 +786,8 @@ final class MediaTest extends TestCase {
 		$image_url                                      = 'https://images.unsplash.com/photo-77?w=1080';
 		$api_code                                       = 200;
 		$on_api_fetch                                   = null;
-		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$api_code, &$on_api_fetch ): array {
+		$photographer                                   = 'Pat';
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$api_code, &$on_api_fetch, &$photographer ): array {
 			if ( $image_url === $url ) {
 				return [
 					'response' => [ 'code' => 200 ],
@@ -806,9 +808,10 @@ final class MediaTest extends TestCase {
 				'headers'  => [ 'content-type' => 'application/json' ],
 				'body'     => (string) wp_json_encode(
 					[
-						'id'   => 'photo_77',
-						'urls' => [ 'regular' => $image_url ],
-						'user' => [ 'name' => 'Pat' ],
+						'id'              => 'photo_77',
+						'alt_description' => 'Red barn',
+						'urls'            => [ 'regular' => $image_url ],
+						'user'            => [ 'name' => $photographer ],
 					]
 				),
 			];
@@ -829,7 +832,14 @@ final class MediaTest extends TestCase {
 							'post_parent' => 0,
 						],
 						// WordPress stores the sanitized file path with the attachment, adding -N when the name is taken.
-						[ '_wp_attached_file' => '2026/11/' . preg_replace( '/-+/', '-', str_replace( '.', '-' . $id . '.', $input['filename'] ) ) ]
+						[
+							'_wp_attached_file'        => '2026/11/' . preg_replace( '/-+/', '-', str_replace( '.', '-' . $id . '.', $input['filename'] ) ),
+							'_wp_attachment_metadata'  => [
+								'width'  => 1080,
+								'height' => 720,
+							],
+							'_wp_attachment_image_alt' => $input['alt'] ?? '',
+						]
 					);
 
 					return [
@@ -913,6 +923,87 @@ final class MediaTest extends TestCase {
 		$this->assertSame( [ $retried['attachmentId'] ], $attachment_ids() );
 		$this->assertSame( 'photo_77', get_post_meta( $retried['attachmentId'], '_unsplash_photo_id', true ) );
 
+		// A failed photographer URL write keeps the upload, which an editor may already have picked from the media
+		// library, intact, even where a cleanup delete would strip its meta and then fail. Another author, who cannot edit
+		// it, gets it with its credit instead of a refusal or a second upload, and an editor's retry completes it.
+		foreach ( [ false, 'after_meta' ] as $delete_fail ) {
+			$label = (string) wp_json_encode( $delete_fail );
+			$clear_attachments();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = [ '_unsplash_photographer_url' ];
+			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = $delete_fail;
+			$GLOBALS['_bricks_mcp_test_media_on_update_post_meta_fail']  = static function ( int $upload_id ): void {
+				update_post_meta( 15, '_thumbnail_id', $upload_id );
+			};
+			$kept_error = $import();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = false;
+			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
+			$this->assertInstanceOf( \WP_Error::class, $kept_error, $label );
+			$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $kept_error->get_error_code(), $label );
+			$kept_id = $kept_error->get_error_data()['attachmentId'];
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+			$this->assertSame( $kept_id, (int) get_post_meta( 15, '_thumbnail_id', true ), $label );
+
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
+			$other_author = $import();
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] );
+			$this->assertIsArray( $other_author, $label );
+			$this->assertSame( $kept_id, $other_author['attachmentId'], $label );
+			$this->assertTrue( $other_author['duplicate'], $label );
+			$this->assertSame( 0, $other_author['postId'], $label );
+			$this->assertSame( 'Pat', $other_author['photographer'], $label );
+			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $other_author['photographerUrl'], $label );
+			$this->assertSame( '', get_post_meta( $kept_id, '_unsplash_photographer_url', true ), $label );
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+
+			// An author who cannot read it either, as when an editor attached it to a private post, is refused without
+			// its caption, parent or ID, and gets no second upload, also when the editor attaches it during the lookup.
+			foreach ( [ false, true ] as $during_lookup ) {
+				$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
+				$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = $during_lookup;
+				$on_api_fetch = $during_lookup ? static function () use ( $kept_id ): void {
+					$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = false;
+				} : null;
+				$unreadable = $import();
+				unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] );
+				$this->assertInstanceOf( \WP_Error::class, $unreadable, $label . $during_lookup );
+				$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $unreadable->get_error_code(), $label . $during_lookup );
+				$this->assertSame( [ 'status' => 403 ], $unreadable->get_error_data(), $label . $during_lookup );
+				$this->assertSame( [ $kept_id ], $attachment_ids(), $label . $during_lookup );
+			}
+
+			// The same holds when an editor attaches it to the import's target post and makes that post private during
+			// the lookup, although the permission check loaded the target post into the request's cache before.
+			$GLOBALS['_bricks_mcp_test_post_cache']                            = [];
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = static function () use ( $kept_id ): bool {
+				$parent_id = get_post( $kept_id )->post_parent;
+				return 0 === $parent_id || 'private' !== get_post( $parent_id )->post_status;
+			};
+			$target_status = get_post( 15 )->post_status;
+			$on_api_fetch  = static function () use ( $kept_id ): void {
+				$GLOBALS['_bricks_mcp_test_posts'][ $kept_id ]->post_parent = 15;
+				$GLOBALS['_bricks_mcp_test_posts'][15]->post_status         = 'private';
+			};
+			$privatized = $import();
+			$GLOBALS['_bricks_mcp_test_post_cache']                    = null;
+			$GLOBALS['_bricks_mcp_test_posts'][ $kept_id ]->post_parent = 0;
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_status         = $target_status;
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] );
+			$this->assertInstanceOf( \WP_Error::class, $privatized, $label );
+			$this->assertSame( [ 'status' => 403 ], $privatized->get_error_data(), $label );
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+
+			$editor = $import();
+			$this->assertIsArray( $editor, $label );
+			$this->assertSame( $kept_id, $editor['attachmentId'], $label );
+			$this->assertFalse( $editor['duplicate'], $label );
+			$this->assertSame( 15, $editor['postId'], $label );
+			$this->assertSame( 'Red barn', $editor['alt'], $label );
+			$this->assertSame( [ 1080, 720 ], [ $editor['width'], $editor['height'] ], $label );
+			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( $kept_id, '_unsplash_photographer_url', true ), $label );
+			delete_post_meta( 15, '_thumbnail_id' );
+		}
+
 		// A retry that runs while the failed import deletes its upload cannot find that upload, so it uploads its own,
 		// which stays: the cleanup never deletes an attachment that a retry has returned.
 		$clear_attachments();
@@ -930,6 +1021,26 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 'photo_77', get_post_meta( $concurrent['attachmentId'], '_unsplash_photo_id', true ) );
 		$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $concurrent['photographerUrl'] );
 
+		// An editor's retry that runs as the attribution write fails, and sees the photographer renamed, completes the
+		// unfinished upload, which stays: a failed import never deletes an attachment that a retry has returned.
+		$clear_attachments();
+		$concurrent = null;
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']   = [ '_unsplash_photographer' ];
+		$GLOBALS['_bricks_mcp_test_media_on_update_post_meta_fail'] = static function () use ( $import, &$concurrent, &$photographer ): void {
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			$photographer = 'Pat Lee';
+			$concurrent   = $import();
+		};
+		$cleaned = $import();
+		$this->assertInstanceOf( \WP_Error::class, $cleaned );
+		$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $cleaned->get_error_code() );
+		$this->assertIsArray( $concurrent );
+		$this->assertSame( $cleaned->get_error_data()['attachmentId'], $concurrent['attachmentId'] );
+		$this->assertSame( [ $concurrent['attachmentId'] ], $attachment_ids() );
+		$this->assertSame( 15, get_post( $concurrent['attachmentId'] )->post_parent );
+		$this->assertSame( 'Pat Lee', get_post_meta( $concurrent['attachmentId'], '_unsplash_photographer', true ) );
+		$photographer = 'Pat';
+
 		// When the photographer URL write fails, the upload is kept with its photo ID, and a retry completes it
 		// instead of uploading a second one. No cleanup delete runs that could strip its meta and then fail, and
 		// a photo ID that WordPress's file name sanitizing would alter is found the same way.
@@ -945,21 +1056,13 @@ final class MediaTest extends TestCase {
 			$this->assertSame( [ $kept_id ], $attachment_ids(), $photo_id );
 			$this->assertSame( '', get_post_meta( $kept_id, '_unsplash_photographer_url', true ), $photo_id );
 
-			// A user who cannot edit the kept upload is refused rather than given a second upload.
+			// A user who cannot edit the kept upload gets it with its credit rather than a second upload.
 			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']             = false;
 			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
-			$refused = $import( $photo_id );
+			$reused = $import( $photo_id );
 			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] );
-			$this->assertInstanceOf( \WP_Error::class, $refused, $photo_id );
-			$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $refused->get_error_code(), $photo_id );
-			$this->assertSame(
-				[
-					'status'       => 403,
-					'attachmentId' => $kept_id,
-				],
-				$refused->get_error_data(),
-				$photo_id
-			);
+			$this->assertSame( $kept_id, $reused['attachmentId'], $photo_id );
+			$this->assertSame( 'Pat', $reused['photographer'], $photo_id );
 			$this->assertSame( [ $kept_id ], $attachment_ids(), $photo_id );
 
 			// A retry whose meta writes fail again keeps the upload, which may already be in use, even though deletion now works.
@@ -1007,9 +1110,10 @@ final class MediaTest extends TestCase {
 			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
 
 			// Without its mark the upload is still an unfinished import, not a legacy one: a retry that cannot fetch the
-			// credit (rate-limited, or the photo is gone) or a user who cannot edit it gets an error, not null credits.
+			// credit (rate-limited, or the photo is gone) gets an error, not null credits, and a user who cannot edit it
+			// gets it with its credit.
 			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $first_id ] = false;
-			$refused = $import();
+			$other_author = $import();
 			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $first_id ] );
 			$failed_codes = [];
 			foreach ( [ 429, 404 ] as $code ) {
@@ -1017,12 +1121,11 @@ final class MediaTest extends TestCase {
 				$failed_codes[] = $import();
 			}
 			$api_code = 200;
+			$this->assertSame( $first_id, $other_author['attachmentId'], $label );
+			$this->assertSame( 'Pat', $other_author['photographer'], $label );
 			if ( 1 === count( $failing_keys ) ) {
-				$this->assertSame( $first_id, $refused['attachmentId'], $label );
 				$this->assertSame( [ $first_id, $first_id ], array_column( $failed_codes, 'attachmentId' ), $label );
 			} else {
-				$this->assertInstanceOf( \WP_Error::class, $refused, $label );
-				$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $refused->get_error_code(), $label );
 				$this->assertSame(
 					[ 429, 404 ],
 					array_map( static fn( $failed ): int => $failed instanceof \WP_Error ? $failed->get_error_data()['status'] : 0, $failed_codes ),

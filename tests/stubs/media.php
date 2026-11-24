@@ -91,7 +91,8 @@ namespace BricksMCP\Abilities {
 	if ( ! function_exists( __NAMESPACE__ . '\update_post_meta' ) ) {
 		/**
 		 * Allow Media tests to simulate failed post meta writes without affecting other tests.
-		 * The fail flag is true for every key, or a list of the meta keys whose writes fail.
+		 * The fail flag is true for every key, or a list of the meta keys whose writes fail. A callable in
+		 * `_bricks_mcp_test_media_on_update_post_meta_fail` runs once when a write fails, as a concurrent request would.
 		 *
 		 * @param int    $post_id    Post ID.
 		 * @param string $key        Meta key.
@@ -102,6 +103,12 @@ namespace BricksMCP\Abilities {
 		function update_post_meta( int $post_id, string $key, mixed $value, mixed $prev_value = '' ): int|bool {
 			$fail = $GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] ?? false;
 			if ( true === $fail || ( is_array( $fail ) && in_array( $key, $fail, true ) ) ) {
+				$concurrent = $GLOBALS['_bricks_mcp_test_media_on_update_post_meta_fail'] ?? null;
+				if ( is_callable( $concurrent ) ) {
+					$GLOBALS['_bricks_mcp_test_media_on_update_post_meta_fail'] = null;
+					$concurrent( $post_id, $key );
+				}
+
 				return false;
 			}
 
