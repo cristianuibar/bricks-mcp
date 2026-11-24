@@ -783,13 +783,21 @@ final class MediaTest extends TestCase {
 
 		$image_url                                      = 'https://images.unsplash.com/photo-77?w=1080';
 		$api_code                                       = 200;
-		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$api_code ): array {
+		$on_api_fetch                                   = null;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$api_code, &$on_api_fetch ): array {
 			if ( $image_url === $url ) {
 				return [
 					'response' => [ 'code' => 200 ],
 					'headers'  => [ 'content-type' => 'image/webp' ],
 					'body'     => 'RIFFwebpdata',
 				];
+			}
+
+			// Runs once, while this call waits on Unsplash, as a concurrent request would.
+			if ( null !== $on_api_fetch ) {
+				$concurrent   = $on_api_fetch;
+				$on_api_fetch = null;
+				$concurrent();
 			}
 
 			return [
@@ -1001,6 +1009,29 @@ final class MediaTest extends TestCase {
 			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $retry['photographerUrl'], $label );
 			$this->assertSame( [ $first_id ], $attachment_ids(), $label );
 		}
+
+		// Another retry that completes the kept upload while this retry waits on Unsplash leaves one attachment:
+		// this retry returns the repaired upload instead of uploading a second one.
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = [ '_unsplash_photographer_url' ];
+		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = 'after_meta';
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = false;
+		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$kept_id      = $kept_error->get_error_data()['attachmentId'];
+		$concurrent   = null;
+		$on_api_fetch = static function () use ( $import, &$concurrent ): void {
+			$concurrent = $import();
+		};
+		$raced = $import();
+		$this->assertIsArray( $concurrent );
+		$this->assertSame( $kept_id, $concurrent['attachmentId'] );
+		$this->assertIsArray( $raced );
+		$this->assertSame( $kept_id, $raced['attachmentId'] );
+		$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $raced['photographerUrl'] );
+		$this->assertSame( [ $kept_id ], $attachment_ids() );
+		$this->assertSame( 'photo_77', get_post_meta( $kept_id, '_unsplash_photo_id', true ) );
 
 		// An ordinary upload that shares the import's file name is left alone, and the import uploads its own.
 		$clear_attachments();
