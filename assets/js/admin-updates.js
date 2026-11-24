@@ -176,9 +176,10 @@
 						}
 					} else if (data.data.blocked_version) {
 						// A newer release whose checksum could not be verified is not "up to date".
+						// Translations may use the positional %1$s instead of %s.
 						var blocked = (bricksMcpUpdates.i18n && bricksMcpUpdates.i18n.updateBlocked) || 'v%s found, but its checksum could not be verified. Check again later.';
 						html += ' &mdash; <span class="bricks-mcp-update-blocked">' +
-							escapeHtml(blocked.replace('%s', data.data.blocked_version)) + '</span>';
+							escapeHtml(blocked.replace(/%(?:1\$)?s/g, function() { return data.data.blocked_version; })) + '</span>';
 						if (versionCard) {
 							versionCard.classList.remove('bricks-mcp-version-card--has-update');
 						}
