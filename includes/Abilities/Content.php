@@ -747,8 +747,10 @@ final class Content implements Module {
 			if ( self::BRICKS_ROBOTS_SETTING === $key ) {
 				$value = $this->bricks_robots( $page );
 			} elseif ( self::BRICKS_IMAGE_SETTING === $key ) {
-				// Bricks prints the dynamic image first and falls back to the saved URL.
-				$value = is_array( $value ) ? ( empty( $value['useDynamicData'] ) ? ( $value['url'] ?? null ) : $value['useDynamicData'] ) : null;
+				// Bricks prints the dynamic image first and falls back to the saved URL; a whitespace-only tag names no image.
+				$tag   = is_array( $value ) ? ( $value['useDynamicData'] ?? null ) : null;
+				$tag   = is_string( $tag ) ? trim( $tag ) : $tag;
+				$value = is_array( $value ) ? ( empty( $tag ) ? ( $value['url'] ?? null ) : $tag ) : null;
 			}
 
 			if ( ! is_array( $value ) ) {
