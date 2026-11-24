@@ -65,6 +65,7 @@ final class MediaTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
 		$GLOBALS['_bricks_mcp_test_media_wp_update_post_fail']   = false;
 		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
+		$GLOBALS['_bricks_mcp_test_media_before_delete_attachment']  = null;
 	}
 
 	/**
@@ -900,6 +901,23 @@ final class MediaTest extends TestCase {
 		$this->assertIsArray( $retried );
 		$this->assertSame( [ $retried['attachmentId'] ], $attachment_ids() );
 		$this->assertSame( 'photo_77', get_post_meta( $retried['attachmentId'], '_unsplash_photo_id', true ) );
+
+		// A retry that runs while the failed import deletes its upload cannot find that upload, so it uploads its own,
+		// which stays: the cleanup never deletes an attachment that a retry has returned.
+		$clear_attachments();
+		$concurrent = null;
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']    = [ '_unsplash_photo_id' ];
+		$GLOBALS['_bricks_mcp_test_media_before_delete_attachment'] = static function () use ( $import, &$concurrent ): void {
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			$concurrent = $import();
+		};
+		$cleaned = $import();
+		$this->assertInstanceOf( \WP_Error::class, $cleaned );
+		$this->assertSame( [ 'status' => 500 ], $cleaned->get_error_data() );
+		$this->assertIsArray( $concurrent );
+		$this->assertSame( [ $concurrent['attachmentId'] ], $attachment_ids() );
+		$this->assertSame( 'photo_77', get_post_meta( $concurrent['attachmentId'], '_unsplash_photo_id', true ) );
+		$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $concurrent['photographerUrl'] );
 
 		// When the photographer URL write fails, the upload is kept with its photo ID, and a retry completes it
 		// instead of uploading a second one. No cleanup delete runs that could strip its meta and then fail, and
