@@ -31,6 +31,11 @@ final class DebugLogAccessTest extends TestCase {
 	private const TIMEOUT = 10;
 
 	/**
+	 * Seconds the stalled response test waits for the next part of its body, so its run does not wait for TIMEOUT.
+	 */
+	private const STALL_TIMEOUT = 1;
+
+	/**
 	 * Logs a canary through the requesting site's WordPress and reports where it went.
 	 *
 	 * Both sites serve the plugin checkout, so each one runs it with its own wp-config.php.
@@ -436,11 +441,13 @@ PHP;
 		// A length, like a static file's, so the body is not chunked and a read that times out returns nothing.
 		$code = "<?php\nhttp_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;\n";
 		file_put_contents( $file, sprintf( $code, 65536 + strlen( $canary ), self::TIMEOUT + 5, var_export( $canary, true ) ) );
+		$start = hrtime( true );
 
 		try {
-			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/' . $page, $canary );
+			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/' . $page, $canary, self::STALL_TIMEOUT );
 		} catch ( AssertionFailedError $e ) {
 			$this->assertStringContainsString( 'timed out before the end of its body', $e->getMessage() );
+			$this->assertLessThan( self::TIMEOUT, ( hrtime( true ) - $start ) / 1e9, 'The stalled check waited for the full request timeout.' );
 			return;
 		} finally {
 			unlink( $file );
@@ -575,9 +582,11 @@ PHP;
 
 	/**
 	 * The request is refused and its whole body, read in chunks so a large log fits in memory, holds no canary.
+	 *
+	 * @param int $timeout Seconds to wait for the response and for each part of its body.
 	 */
-	private function assert_denied( string $server, string $path, string $canary ): void {
-		[ $status, $stream ] = $this->open( $server, $path );
+	private function assert_denied( string $server, string $path, string $canary, int $timeout = self::TIMEOUT ): void {
+		[ $status, $stream ] = $this->open( $server, $path, $timeout );
 
 		try {
 			$this->assertSame( 403, $status, $server . $path );
@@ -616,11 +625,12 @@ PHP;
 	/**
 	 * Requests a file by its path under the web root, each segment URL-encoded, without reading its body.
 	 *
+	 * @param int $timeout Seconds to wait for the response and for each part of its body.
 	 * @return array{int, resource}
 	 */
-	private function open( string $server, string $path ): array {
+	private function open( string $server, string $path, int $timeout = self::TIMEOUT ): array {
 		$url     = 'http://' . $server . implode( '/', array_map( 'rawurlencode', explode( '/', $path ) ) );
-		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => self::TIMEOUT ] ] );
+		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => $timeout ] ] );
 		$stream  = fopen( $url, 'rb', false, $context );
 		$this->assertNotFalse( $stream, "{$server} did not answer." );
 
