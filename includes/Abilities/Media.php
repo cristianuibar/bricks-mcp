@@ -371,6 +371,21 @@ final class Media implements Module {
 
 		$recorded = $this->record_unsplash_attribution( $attachment_id, $attribution );
 		if ( is_wp_error( $recorded ) ) {
+			// Nothing uses this upload yet, so remove it: a retry by a user who cannot edit it would be refused. The photo
+			// ID goes first, so a retry that runs during the delete uploads its own attachment instead of returning this one.
+			if ( delete_post_meta( $attachment_id, self::UNSPLASH_META_KEY ) && wp_delete_attachment( $attachment_id, true ) ) {
+				return $this->unsplash_meta_error( [ 'status' => 500 ] );
+			}
+
+			// The upload stays. WordPress deletes the meta before the post, so mark it again for a retry to complete it.
+			$this->write_unsplash_meta(
+				$attachment_id,
+				[
+					self::UNSPLASH_META_KEY         => $photo_id,
+					self::UNSPLASH_PENDING_META_KEY => '1',
+				]
+			);
+
 			return $recorded;
 		}
 
@@ -1084,7 +1099,7 @@ final class Media implements Module {
 	/**
 	 * Save the photographer attribution of an attachment marked with its photo ID, then clear its pending mark.
 	 *
-	 * On failure the attachment stays, as it may already be in use, and a retry finds it by the photo ID.
+	 * On failure the attachment is left as it is, and a retry finds it by the photo ID.
 	 *
 	 * @param int                  $attachment_id Attachment ID.
 	 * @param array<string,string> $attribution   Attribution meta values by key.

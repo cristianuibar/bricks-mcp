@@ -913,26 +913,49 @@ final class MediaTest extends TestCase {
 		$this->assertSame( [ $retried['attachmentId'] ], $attachment_ids() );
 		$this->assertSame( 'photo_77', get_post_meta( $retried['attachmentId'], '_unsplash_photo_id', true ) );
 
+		// A failed photographer URL write on a fresh upload removes it as well, since nothing uses it yet: another
+		// author, who could not edit that upload, imports the photo instead of being refused.
+		$clear_attachments();
+		$failed_id = $next_id;
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+		$attribution_error = $import();
+		$this->assertInstanceOf( \WP_Error::class, $attribution_error );
+		$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $attribution_error->get_error_code() );
+		$this->assertSame( [ 'status' => 500 ], $attribution_error->get_error_data() );
+		$this->assertSame( [], $attachment_ids() );
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']            = false;
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $failed_id ] = false;
+		$other_author = $import();
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $failed_id ] );
+		$this->assertIsArray( $other_author );
+		$this->assertNotSame( $failed_id, $other_author['attachmentId'] );
+		$this->assertFalse( $other_author['duplicate'] );
+		$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $other_author['photographerUrl'] );
+		$this->assertSame( [ $other_author['attachmentId'] ], $attachment_ids() );
+
 		// A retry that runs while the failed import deletes its upload cannot find that upload, so it uploads its own,
 		// which stays: the cleanup never deletes an attachment that a retry has returned.
-		$clear_attachments();
-		$concurrent = null;
-		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']    = [ '_unsplash_photo_id' ];
-		$GLOBALS['_bricks_mcp_test_media_before_delete_attachment'] = static function () use ( $import, &$concurrent ): void {
-			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
-			$concurrent = $import();
-		};
-		$cleaned = $import();
-		$this->assertInstanceOf( \WP_Error::class, $cleaned );
-		$this->assertSame( [ 'status' => 500 ], $cleaned->get_error_data() );
-		$this->assertIsArray( $concurrent );
-		$this->assertSame( [ $concurrent['attachmentId'] ], $attachment_ids() );
-		$this->assertSame( 'photo_77', get_post_meta( $concurrent['attachmentId'], '_unsplash_photo_id', true ) );
-		$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $concurrent['photographerUrl'] );
+		foreach ( [ [ '_unsplash_photo_id' ], [ '_unsplash_photographer_url' ] ] as $failing_keys ) {
+			$label = (string) wp_json_encode( $failing_keys );
+			$clear_attachments();
+			$concurrent = null;
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']    = $failing_keys;
+			$GLOBALS['_bricks_mcp_test_media_before_delete_attachment'] = static function () use ( $import, &$concurrent ): void {
+				$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+				$concurrent = $import();
+			};
+			$cleaned = $import();
+			$this->assertInstanceOf( \WP_Error::class, $cleaned, $label );
+			$this->assertSame( [ 'status' => 500 ], $cleaned->get_error_data(), $label );
+			$this->assertIsArray( $concurrent, $label );
+			$this->assertSame( [ $concurrent['attachmentId'] ], $attachment_ids(), $label );
+			$this->assertSame( 'photo_77', get_post_meta( $concurrent['attachmentId'], '_unsplash_photo_id', true ), $label );
+			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $concurrent['photographerUrl'], $label );
+		}
 
-		// When the photographer URL write fails, the upload is kept with its photo ID, and a retry completes it
-		// instead of uploading a second one. No cleanup delete runs that could strip its meta and then fail, and
-		// a photo ID that WordPress's file name sanitizing would alter is found the same way.
+		// When the photographer URL write fails and the upload cannot be deleted, it is kept with its photo ID, and a
+		// retry completes it instead of uploading a second one, even after the failed delete stripped its meta. A photo
+		// ID that WordPress's file name sanitizing would alter is found the same way.
 		foreach ( [ 'photo_77', '-photo_77' ] as $photo_id ) {
 			$clear_attachments();
 			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = [ '_unsplash_photographer_url' ];
