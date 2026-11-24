@@ -34,6 +34,8 @@ function bricks_mcp_test_reset(): void {
 	$GLOBALS['_bricks_mcp_test_actions']            = [];
 	// An array turns on the request's post cache in get_post(), as WordPress keeps it; null leaves it off.
 	$GLOBALS['_bricks_mcp_test_post_cache'] = null;
+	// An array turns on the request's post meta cache in get_post_meta(), as WordPress keeps it; null leaves it off.
+	$GLOBALS['_bricks_mcp_test_post_meta_cache'] = null;
 }
 
 bricks_mcp_test_reset();
@@ -98,6 +100,9 @@ if ( ! function_exists( 'clean_post_cache' ) ) {
 		if ( is_array( $GLOBALS['_bricks_mcp_test_post_cache'] ?? null ) ) {
 			unset( $GLOBALS['_bricks_mcp_test_post_cache'][ $post instanceof WP_Post ? $post->ID : $post ] );
 		}
+		if ( is_array( $GLOBALS['_bricks_mcp_test_post_meta_cache'] ?? null ) ) {
+			unset( $GLOBALS['_bricks_mcp_test_post_meta_cache'][ $post instanceof WP_Post ? $post->ID : $post ] );
+		}
 	}
 }
 
@@ -111,6 +116,10 @@ if ( ! function_exists( 'get_post_type' ) ) {
 if ( ! function_exists( 'get_post_meta' ) ) {
 	function get_post_meta( int $post_id, string $key = '', bool $single = false ): mixed {
 		$meta = $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] ?? [];
+		if ( is_array( $GLOBALS['_bricks_mcp_test_post_meta_cache'] ?? null ) ) {
+			// Like WordPress, the first read caches all of the post's meta, kept until a meta write or clean_post_cache().
+			$meta = $GLOBALS['_bricks_mcp_test_post_meta_cache'][ $post_id ] ??= $meta;
+		}
 		if ( '' === $key ) {
 			return array_map( static fn( $value ) => [ $value ], $meta );
 		}
@@ -139,10 +148,13 @@ if ( ! function_exists( 'update_metadata' ) ) {
 		// WordPress unslashes meta values before storing them.
 		$meta_value = wp_unslash( $meta_value );
 		$meta       = $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ?? [];
-		// Like WordPress, an unchanged value returns false without a query.
-		if ( array_key_exists( $meta_key, $meta ) && $meta[ $meta_key ] === $meta_value ) {
+		// Like WordPress, a value unchanged from the one in the request's meta cache returns false without a query.
+		$cached = is_array( $GLOBALS['_bricks_mcp_test_post_meta_cache'] ?? null ) ? ( $GLOBALS['_bricks_mcp_test_post_meta_cache'][ $object_id ] ?? $meta ) : $meta;
+		if ( array_key_exists( $meta_key, $cached ) && $cached[ $meta_key ] === $meta_value ) {
 			return false;
 		}
+		// Otherwise, like WordPress, it writes and then clears the post's meta cache.
+		unset( $GLOBALS['_bricks_mcp_test_post_meta_cache'][ $object_id ] );
 		$data = [
 			'post_id'    => $object_id,
 			'meta_key'   => $meta_key,
@@ -167,7 +179,8 @@ if ( ! function_exists( 'delete_metadata' ) ) {
 		if ( '' !== $meta_value && null !== $meta_value && false !== $meta_value && (string) maybe_serialize( $meta_value ) !== (string) maybe_serialize( $meta[ $meta_key ] ) ) {
 			return false;
 		}
-		// Then, like WordPress, it deletes the selected row by ID, whatever the row holds by now.
+		// Then, like WordPress, it deletes the selected row by ID, whatever the row holds by now, and clears the meta cache.
+		unset( $GLOBALS['_bricks_mcp_test_post_meta_cache'][ $object_id ] );
 		return (bool) $GLOBALS['wpdb']->delete(
 			$GLOBALS['wpdb']->postmeta,
 			[

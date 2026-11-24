@@ -255,9 +255,20 @@ final class Media implements Module {
 		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
 			? sanitize_text_field( $photo['user']['name'] )
 			: '';
-		if ( null !== $existing_id && '' === $photographer ) {
-			// A name saved by an earlier attempt is kept rather than erased by a response without one.
-			$photographer = (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, true );
+		if ( null !== $existing_id ) {
+			// The request may hold the attachment, its meta or its parent post from before the Unsplash request, such as
+			// the target post loaded by the permission check, so the checks below read them afresh.
+			clean_post_cache( $existing_id );
+			$existing_parent = (int) ( get_post( $existing_id )->post_parent ?? 0 );
+			if ( $existing_parent > 0 ) {
+				clean_post_cache( $existing_parent );
+			}
+
+			if ( '' === $photographer ) {
+				// A name saved by an earlier attempt, or by a repair that finished meanwhile, is kept rather than
+				// erased or replaced by a response without one.
+				$photographer = (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, true );
+			}
 		}
 		$photographer_url = $this->with_unsplash_utm(
 			isset( $photo['user']['links']['html'] ) && is_string( $photo['user']['links']['html'] ) && '' !== $photo['user']['links']['html']
@@ -272,14 +283,6 @@ final class Media implements Module {
 		];
 
 		if ( null !== $existing_id ) {
-			// The request may hold the attachment or its parent post from before the Unsplash request, such as the target
-			// post loaded by the permission check, so the checks below read both afresh.
-			clean_post_cache( $existing_id );
-			$existing_parent = (int) ( get_post( $existing_id )->post_parent ?? 0 );
-			if ( $existing_parent > 0 ) {
-				clean_post_cache( $existing_parent );
-			}
-
 			// Saving a credit marks the attachment complete, so a response without the photo's user cannot complete it.
 			$malformed = ! is_array( $photo['user'] ?? null );
 
