@@ -1155,6 +1155,8 @@ final class Media implements Module {
 				'post_status'    => 'inherit',
 				'meta_key'       => self::UNSPLASH_META_KEY, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- Bounded 1-row lookup for Unsplash deduplication.
 				'meta_value'     => $photo_id, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- Bounded 1-row lookup for Unsplash deduplication.
+				// Photo IDs are case-sensitive, but MySQL compares meta values without case, so the one row could be a case variant.
+				'meta_type'      => 'BINARY',
 				'posts_per_page' => 1,
 				'fields'         => 'ids',
 			]
