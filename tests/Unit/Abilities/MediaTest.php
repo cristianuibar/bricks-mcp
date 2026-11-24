@@ -311,6 +311,100 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
+	 * A malformed Unsplash response during a repair neither erases the saved photographer name nor marks the credit
+	 * complete (#269), and a legacy attachment is still returned as it is to a caller who can still see it.
+	 *
+	 * @return void
+	 */
+	public function test_import_unsplash_repair_keeps_saved_credit_on_malformed_response(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 42,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'post_parent' => 7,
+			],
+			[
+				'_unsplash_photo_id'            => 'dup_99',
+				'_unsplash_attribution_pending' => '1',
+				'_unsplash_photographer'        => 'Pat',
+			]
+		);
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 43,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'post_parent' => 7,
+			],
+			[
+				'_unsplash_photo_id' => 'legacy_1',
+				'_wp_attached_file'  => '2024/05/photo-1506744038136-46273834b3fb.jpg',
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_get_posts_return'] = static fn( array $args ): array => 'legacy_1' === $args['meta_value'] ? [ 43 ] : [ 42 ];
+		wp_register_ability(
+			'bricks/upload-media',
+			[ 'execute_callback' => static fn(): array => [ 'id' => 999 ] ]
+		);
+		$import = static fn( string $photo_id = 'dup_99' ): array|\WP_Error => wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => $photo_id ] );
+
+		$body                                           = '{}';
+		$on_api_fetch                                   = null;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function () use ( &$body, &$on_api_fetch ): array {
+			if ( null !== $on_api_fetch ) {
+				$on_api_fetch();
+			}
+
+			return [
+				'response' => [ 'code' => 200 ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => $body,
+			];
+		};
+
+		$malformed = $import();
+		$this->assertInstanceOf( \WP_Error::class, $malformed );
+		$this->assertSame( 'bricks_mcp_unsplash_parse_error', $malformed->get_error_code() );
+		$this->assertSame( 'Pat', get_post_meta( 42, '_unsplash_photographer', true ) );
+		$this->assertSame( '', get_post_meta( 42, '_unsplash_photographer_url', true ) );
+		$this->assertSame( '1', get_post_meta( 42, '_unsplash_attribution_pending', true ) );
+
+		$legacy = $import( 'legacy_1' );
+		$this->assertIsArray( $legacy );
+		$this->assertSame( 43, $legacy['attachmentId'] );
+		$this->assertTrue( $legacy['duplicate'] );
+		$this->assertNull( $legacy['photographerUrl'] );
+		$this->assertSame( '', get_post_meta( 43, '_unsplash_photographer_url', true ) );
+
+		// A caller who loses access to the legacy attachment while waiting on Unsplash does not get its details.
+		$on_api_fetch = static function (): void {
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][43] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][43] = false;
+		};
+		$revoked      = $import( 'legacy_1' );
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][43], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][43] );
+		$on_api_fetch = null;
+		$this->assertInstanceOf( \WP_Error::class, $revoked );
+		$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $revoked->get_error_code() );
+
+		// A photo whose user has no name keeps the name saved by the earlier attempt.
+		$body      = (string) wp_json_encode(
+			[
+				'id'   => 'dup_99',
+				'user' => [ 'links' => [ 'html' => 'https://unsplash.com/@pat' ] ],
+			]
+		);
+		$completed = $import();
+		$this->assertIsArray( $completed );
+		$this->assertSame( 42, $completed['attachmentId'] );
+		$this->assertSame( 'Pat', $completed['photographer'] );
+		$this->assertSame( 'Pat', get_post_meta( 42, '_unsplash_photographer', true ) );
+		$this->assertSame( 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( 42, '_unsplash_photographer_url', true ) );
+	}
+
+	/**
 	 * Unsplash user payloads with the photographer name both imports should report.
 	 *
 	 * @return array<string, array{0: array<string, mixed>, 1: string|null}>

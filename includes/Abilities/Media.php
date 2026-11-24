@@ -255,6 +255,10 @@ final class Media implements Module {
 		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
 			? sanitize_text_field( $photo['user']['name'] )
 			: '';
+		if ( null !== $existing_id && '' === $photographer ) {
+			// A name saved by an earlier attempt is kept rather than erased by a response without one.
+			$photographer = (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, true );
+		}
 		$photographer_url = $this->with_unsplash_utm(
 			isset( $photo['user']['links']['html'] ) && is_string( $photo['user']['links']['html'] ) && '' !== $photo['user']['links']['html']
 				? $photo['user']['links']['html']
@@ -276,6 +280,9 @@ final class Media implements Module {
 				clean_post_cache( $existing_parent );
 			}
 
+			// Saving a credit marks the attachment complete, so a response without the photo's user cannot complete it.
+			$malformed = ! is_array( $photo['user'] ?? null );
+
 			// A user who can read but not edit an unfinished import gets it with the credit from Unsplash, which only an
 			// editor saves on it, rather than a second upload of the photo.
 			if ( ! current_user_can( 'edit_post', $existing_id ) ) {
@@ -291,13 +298,22 @@ final class Media implements Module {
 
 				$reused = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 
-				return is_wp_error( $reused ) ? $reused : array_merge(
+				return is_wp_error( $reused ) || $malformed ? $reused : array_merge(
 					$reused,
 					[
 						'photographer'    => '' !== $photographer ? $photographer : null,
 						'photographerUrl' => $photographer_url,
 					]
 				);
+			}
+
+			if ( $malformed ) {
+				// As for other Unsplash failures, a legacy attachment is returned as it is.
+				return $pending ? new \WP_Error(
+					'bricks_mcp_unsplash_parse_error',
+					__( 'Unexpected response format from the Unsplash API.', 'bricks-mcp' ),
+					[ 'status' => 502 ]
+				) : $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
 
 			// The attachment may already be in use, so a failure here keeps it for the next retry.
