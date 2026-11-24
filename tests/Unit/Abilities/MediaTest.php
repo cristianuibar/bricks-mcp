@@ -1081,6 +1081,29 @@ final class MediaTest extends TestCase {
 		$this->assertSame( [ $retried['attachmentId'] ], $attachment_ids() );
 		$this->assertSame( 'photo_77', get_post_meta( $retried['attachmentId'], '_unsplash_photo_id', true ) );
 
+		// When WordPress refuses that delete, also after stripping the meta, the error names the upload it left behind.
+		foreach ( [ true, 'after_meta' ] as $delete_fail ) {
+			$label = (string) wp_json_encode( $delete_fail );
+			$clear_attachments();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = [ '_unsplash_photo_id' ];
+			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = $delete_fail;
+			$refused = $import();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = false;
+			$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
+			$this->assertInstanceOf( \WP_Error::class, $refused, $label );
+			$this->assertSame( 'bricks_mcp_unsplash_meta_failed', $refused->get_error_code(), $label );
+			$left = $attachment_ids();
+			$this->assertCount( 1, $left, $label );
+			$this->assertSame(
+				[
+					'status'       => 500,
+					'attachmentId' => $left[0],
+				],
+				$refused->get_error_data(),
+				$label
+			);
+		}
+
 		// A failed photographer URL write keeps the upload, which an editor may already have picked from the media
 		// library, intact, even where a cleanup delete would strip its meta and then fail. Another author, who cannot edit
 		// it, gets it with its credit instead of a refusal or a second upload, and an editor's retry completes it.
