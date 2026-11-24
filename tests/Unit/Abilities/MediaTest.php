@@ -845,10 +845,11 @@ final class MediaTest extends TestCase {
 				static fn( $post ): bool => 'attachment' === $post->post_type
 			)
 		);
-		// The attachment lookup matches the post status and stored meta like a WordPress query: an exact
-		// meta_key/meta_value, or meta_query clauses using REGEXP (case-insensitive, as in MySQL) and NOT EXISTS.
-		$GLOBALS['_bricks_mcp_test_get_posts_return'] = static fn( array $args ): array => array_values(
-			array_filter(
+		// The attachment lookup matches the post status and stored meta like a WordPress query on MySQL: meta_key/meta_value
+		// or meta_query clauses using = and REGEXP (both case-insensitive unless the type is BINARY) and NOT EXISTS. It
+		// returns the newest matches first, up to posts_per_page.
+		$GLOBALS['_bricks_mcp_test_get_posts_return'] = static function ( array $args ) use ( $attachment_ids ): array {
+			$matched = array_filter(
 				$attachment_ids(),
 				static function ( int $id ) use ( $args ): bool {
 					if ( ! in_array( $GLOBALS['_bricks_mcp_test_posts'][ $id ]->post_status, (array) ( $args['post_status'] ?? 'inherit' ), true ) ) {
@@ -859,14 +860,16 @@ final class MediaTest extends TestCase {
 						[
 							'key'   => $args['meta_key'],
 							'value' => $args['meta_value'],
+							'type'  => $args['meta_type'] ?? 'CHAR',
 						],
 					];
 					foreach ( $clauses as $clause ) {
-						$compare = $clause['compare'] ?? '=';
-						$matches = match ( $compare ) {
+						$binary  = 'BINARY' === ( $clause['type'] ?? 'CHAR' );
+						$stored  = $meta[ $clause['key'] ] ?? null;
+						$matches = match ( $clause['compare'] ?? '=' ) {
 							'NOT EXISTS' => ! array_key_exists( $clause['key'], $meta ),
-							'REGEXP'     => array_key_exists( $clause['key'], $meta ) && 1 === preg_match( '#' . $clause['value'] . '#i', (string) $meta[ $clause['key'] ] ),
-							default      => ( $meta[ $clause['key'] ] ?? null ) === $clause['value'],
+							'REGEXP'     => null !== $stored && 1 === preg_match( '#' . $clause['value'] . '#' . ( $binary ? '' : 'i' ), (string) $stored ),
+							default      => null !== $stored && ( $binary ? (string) $stored === $clause['value'] : 0 === strcasecmp( (string) $stored, $clause['value'] ) ),
 						};
 						if ( ! $matches ) {
 							return false;
@@ -875,8 +878,12 @@ final class MediaTest extends TestCase {
 
 					return true;
 				}
-			)
-		);
+			);
+			rsort( $matched );
+			$limit = (int) ( $args['posts_per_page'] ?? -1 );
+
+			return $limit > 0 ? array_slice( $matched, 0, $limit ) : $matched;
+		};
 		$import         = static fn( string $photo_id = 'photo_77' ): array|\WP_Error => wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute(
 			[
 				'photoId' => $photo_id,
@@ -1054,6 +1061,52 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $raced['photographerUrl'] );
 		$this->assertSame( [ $kept_id ], $attachment_ids() );
 		$this->assertSame( 'photo_77', get_post_meta( $kept_id, '_unsplash_photo_id', true ) );
+
+		// Photo IDs are case-sensitive. Newer imports of case variants of the photo ID do not hide the kept upload from
+		// its retry, and an import of another case variant uploads its own attachment instead of returning one of them.
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = [ '_unsplash_photographer_url' ];
+		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = 'after_meta';
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = false;
+		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$kept_id  = $kept_error->get_error_data()['attachmentId'];
+		$variants = [ 'Photo_77', 'pHoto_77', 'phOto_77', 'phoTo_77', 'photO_77', 'PHoto_77', 'PhOto_77', 'PhoTo_77', 'PhotO_77', 'PHOTO_77' ];
+		foreach ( $variants as $offset => $variant ) {
+			bricks_mcp_test_add_post(
+				[
+					'ID'          => 900 + $offset,
+					'post_type'   => 'attachment',
+					'post_status' => 'inherit',
+					'post_parent' => 0,
+				],
+				[
+					'_unsplash_photo_id'         => $variant,
+					'_unsplash_photographer'     => 'Sam',
+					'_unsplash_photographer_url' => 'https://unsplash.com/@sam?utm_source=bricks_mcp&utm_medium=referral',
+				]
+			);
+		}
+		$variant_ids = range( 900, 909 );
+		$completed   = $import();
+		$this->assertIsArray( $completed );
+		$this->assertSame( $kept_id, $completed['attachmentId'] );
+		$this->assertFalse( $completed['duplicate'] );
+		$this->assertSame( 'Pat', $completed['photographer'] );
+		$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( $kept_id, '_unsplash_photographer_url', true ) );
+		$this->assertSame( array_merge( [ $kept_id ], $variant_ids ), $attachment_ids() );
+		$this->assertSame( $kept_id, $import()['attachmentId'] );
+		$this->assertSame( 900, $import( 'Photo_77' )['attachmentId'] );
+		$fresh_variant = $import( 'PHOTo_77' );
+		$this->assertIsArray( $fresh_variant );
+		$this->assertNotContains( $fresh_variant['attachmentId'], array_merge( [ $kept_id ], $variant_ids ) );
+		$this->assertFalse( $fresh_variant['duplicate'] );
+		$this->assertSame( 'PHOTo_77', get_post_meta( $fresh_variant['attachmentId'], '_unsplash_photo_id', true ) );
+		unset( $GLOBALS['_bricks_mcp_test_posts'][ $fresh_variant['attachmentId'] ] );
+		foreach ( $variant_ids as $variant_id ) {
+			unset( $GLOBALS['_bricks_mcp_test_posts'][ $variant_id ], $GLOBALS['_bricks_mcp_test_post_meta'][ $variant_id ] );
+		}
 
 		// A kept upload that an editor trashes before the retry is not returned as the import: WordPress purges
 		// trashed media later, so the retry uploads an attachment of its own, which outlives the purge.
