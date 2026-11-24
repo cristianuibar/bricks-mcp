@@ -336,17 +336,18 @@ PHP;
 	 *
 	 * @dataProvider large_responses
 	 */
-	public function test_large_response_fails_the_check_within_memory( string $htaccess, string $failure ): void {
+	public function test_large_response_fails_the_check_within_memory( string $htaccess, string $served, string $failure ): void {
 		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
 		$folder = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
 		$dir    = dirname( __DIR__, 2 ) . '/' . $folder;
 		mkdir( $dir );
 		file_put_contents( "{$dir}/.htaccess", str_replace( 'FOLDER', $folder, $htaccess ) );
-		$this->write_large_file( "{$dir}/debug.log", $canary );
-		$this->write_large_file( "{$dir}/denied.txt", $canary );
+		// Only the file the response sends is large: a denied log is never sent, so it holds the canary alone.
+		file_put_contents( "{$dir}/debug.log", $canary . "\n" );
 		$limit = ini_get( 'memory_limit' );
 
 		try {
+			$this->write_large_file( "{$dir}/{$served}", $canary );
 			$this->assertNotFalse( ini_set( 'memory_limit', (string) ( memory_get_usage( true ) + 16 * 1024 * 1024 ) ) );
 			$this->assert_denied( self::SERVER, "/wp-content/plugins/bricks-mcp/{$folder}/debug.log", $canary );
 		} catch ( AssertionFailedError $e ) {
@@ -354,8 +355,11 @@ PHP;
 			return;
 		} finally {
 			ini_set( 'memory_limit', $limit );
-			unlink( "{$dir}/debug.log" );
-			unlink( "{$dir}/denied.txt" );
+			foreach ( [ 'debug.log', 'denied.txt' ] as $file ) {
+				if ( file_exists( "{$dir}/{$file}" ) ) {
+					unlink( "{$dir}/{$file}" );
+				}
+			}
 			unlink( "{$dir}/.htaccess" );
 			rmdir( $dir );
 		}
@@ -364,16 +368,31 @@ PHP;
 	}
 
 	/**
-	 * @return array<string, array{string, string}>
+	 * @return array<string, array{string, string, string}>
 	 */
 	public static function large_responses(): array {
 		return [
-			'served log'  => [ "Require all granted\n", 'Failed asserting that 200 is identical to 403' ],
+			'served log'  => [ "Require all granted\n", 'debug.log', 'Failed asserting that 200 is identical to 403' ],
 			'denial page' => [
 				"<Files \"debug.log\">\nRequire all denied\n</Files>\nErrorDocument 403 /wp-content/plugins/bricks-mcp/FOLDER/denied.txt\n",
+				'denied.txt',
 				'served the canary',
 			],
 		];
+	}
+
+	/**
+	 * A large fixture the disk fills before its canary fails, instead of leaving a log the check finds clean.
+	 */
+	public function test_large_fixture_cut_short_by_a_full_disk_fails(): void {
+		try {
+			$this->write_large_file( '/dev/full', 'diagnostic canary ' . bin2hex( random_bytes( 8 ) ) );
+		} catch ( AssertionFailedError $e ) {
+			$this->assertStringContainsString( 'Could not write the whole fixture /dev/full', $e->getMessage() );
+			return;
+		}
+
+		$this->fail( 'The fixture writer passed on a disk with no space left.' );
 	}
 
 	/**
@@ -528,15 +547,19 @@ PHP;
 	}
 
 	/**
-	 * Writes a 64 MB file that ends with the canary, without holding it in memory.
+	 * Writes a 64 MiB file that ends with the canary, without holding it in memory.
+	 *
+	 * A short disk fails here: a file cut off before its canary would pass the check it exists to fail.
 	 */
 	private function write_large_file( string $file, string $canary ): void {
 		$handle = fopen( $file, 'wb' );
 		$line   = str_repeat( 'x', 1023 ) . "\n";
+		$size   = 0;
 		for ( $i = 0; $i < 64 * 1024; $i++ ) {
-			fwrite( $handle, $line );
+			$size += (int) @fwrite( $handle, $line );
 		}
-		fwrite( $handle, $canary . "\n" );
+		$size += (int) @fwrite( $handle, $canary . "\n" );
 		fclose( $handle );
+		$this->assertSame( 64 * 1024 * 1024 + strlen( $canary ) + 1, $size, "Could not write the whole fixture {$file}: is the disk full?" );
 	}
 }
