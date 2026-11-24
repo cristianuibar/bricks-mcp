@@ -412,6 +412,64 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * SEO plugins with the meta keys of the focus keyword and of noindex, a parent's indexed robots value and the noindex
+	 * value a revision gets.
+	 *
+	 * @return array<string, array{0: string, 1: string, 2: string, 3: mixed, 4: mixed}>
+	 */
+	public static function revision_keyword_writes(): array {
+		return [
+			'Yoast SEO' => [ self::YOAST_FAKE, '_yoast_wpseo_focuskw', '_yoast_wpseo_meta-robots-noindex', '2', '1' ],
+			'Rank Math' => [ 'final class RankMath {}', 'rank_math_focus_keyword', 'rank_math_robots', [ 'index' ], [ 'noindex' ] ],
+			'SEOPress'  => [ 'function seopress_init() {}', '_seopress_analysis_target_kw', '_seopress_robots_index', '', 'yes' ],
+		];
+	}
+
+	/**
+	 * Updating a revision writes the keywords and noindex to the revision it reads back, not to its parent.
+	 *
+	 * @param string $plugin          Fake plugin declaration.
+	 * @param string $keyword_key     Meta key of the focus keyword.
+	 * @param string $robots_key      Meta key holding noindex.
+	 * @param mixed  $parent_robots   Parent's indexed robots value.
+	 * @param mixed  $revision_robots Robots value the revision gets.
+	 * @return void
+	 */
+	#[DataProvider( 'revision_keyword_writes' )]
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_seo_write_to_a_revision_keeps_the_parent_meta( string $plugin, string $keyword_key, string $robots_key, mixed $parent_robots, mixed $revision_robots ): void {
+		eval( $plugin ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin in this separate test process only.
+		update_post_meta( self::POST_ID, $keyword_key, 'local garden,garden design' );
+		update_post_meta( self::POST_ID, $robots_key, $parent_robots );
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 30,
+				'post_type'   => 'revision',
+				'post_parent' => self::POST_ID,
+			]
+		);
+
+		$write = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => 30,
+				'seo'    => [
+					'focusKeyword' => 'roof repair',
+					'noindex'      => true,
+				],
+			]
+		);
+
+		$this->assertSame( 'roof repair', $write['after']['focusKeyword'] );
+		$this->assertTrue( $write['after']['noindex'] );
+		$this->assertSame( 'roof repair', get_post_meta( 30, $keyword_key, true ) );
+		$this->assertSame( $revision_robots, get_post_meta( 30, $robots_key, true ) );
+		$this->assertSame( 'local garden,garden design', get_post_meta( self::POST_ID, $keyword_key, true ) );
+		$this->assertSame( $parent_robots, get_post_meta( self::POST_ID, $robots_key, true ) );
+	}
+
+	/**
 	 * With SEOPress active, Bricks output that is still on and a noindex left by the Bricks fallback are reported until
 	 * the Bricks SEO and Open Graph output is turned off. A sharing image with a saved URL and a dynamic tag reports the
 	 * tag, the image Bricks prints, and a whitespace-only tag reports the URL.

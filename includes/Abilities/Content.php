@@ -844,6 +844,8 @@ final class Content implements Module {
 	/**
 	 * Write already sanitized, supported fields.
 	 *
+	 * The metadata functions keep a revision's write on the revision it is read from; the post meta ones would redirect it to the parent.
+	 *
 	 * @param int                        $post_id Post ID.
 	 * @param string                     $source  SEO source.
 	 * @param array<string, string|bool> $fields  Fields to write.
@@ -860,7 +862,7 @@ final class Content implements Module {
 
 		foreach ( self::SEO_META_KEYS[ $source ] as $field => $meta_key ) {
 			if ( array_key_exists( $field, $fields ) ) {
-				update_post_meta( $post_id, $meta_key, $fields[ $field ] );
+				update_metadata( 'post', $post_id, $meta_key, $fields[ $field ] );
 			}
 		}
 
@@ -873,15 +875,15 @@ final class Content implements Module {
 				$image_id = '' === $fields[ $field ] ? 0 : attachment_url_to_postid( $fields[ $field ] );
 
 				if ( $image_id > 0 ) {
-					update_post_meta( $post_id, $id_key, $image_id );
+					update_metadata( 'post', $post_id, $id_key, $image_id );
 				} else {
-					delete_post_meta( $post_id, $id_key );
+					delete_metadata( 'post', $post_id, $id_key );
 				}
 			}
 
 			foreach ( [ 'twitterTitle', 'twitterDescription', 'twitterImage' ] as $field ) {
 				if ( '' !== ( $fields[ $field ] ?? '' ) ) {
-					update_post_meta( $post_id, 'rank_math_twitter_use_facebook', 'off' );
+					update_metadata( 'post', $post_id, 'rank_math_twitter_use_facebook', 'off' );
 					break;
 				}
 			}
@@ -912,7 +914,7 @@ final class Content implements Module {
 			}
 
 			if ( array_intersect( self::SEO_ROBOTS_FIELDS, array_keys( $fields ) ) ) {
-				update_post_meta( $post_id, 'rank_math_robots', $robots );
+				update_metadata( 'post', $post_id, 'rank_math_robots', $robots );
 			}
 
 			return;
@@ -922,7 +924,7 @@ final class Content implements Module {
 			if ( array_key_exists( $field, $fields ) ) {
 				$off_value = 'yoast' === $source && 'noindex' === $field ? '2' : '';
 
-				update_post_meta( $post_id, $meta_key, $fields[ $field ] ? self::SEO_ROBOTS_ON_VALUE[ $source ] : $off_value );
+				update_metadata( 'post', $post_id, $meta_key, $fields[ $field ] ? self::SEO_ROBOTS_ON_VALUE[ $source ] : $off_value );
 			}
 		}
 	}
