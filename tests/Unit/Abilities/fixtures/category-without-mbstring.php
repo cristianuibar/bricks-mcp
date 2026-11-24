@@ -2,9 +2,10 @@
 /**
  * Loads the unit test bootstrap without mbstring and creates categories next to stored legacy names.
  *
- * Executed by BuilderTest in a PHP process started with -n, so mbstring is not loaded. Only
- * WordPress's compat mb_strlen() is defined, as on a site without the extension. Prints a JSON
- * result with each ability reply and the stored category names.
+ * Executed by BuilderTest in a PHP process started with -n and every mbstring function disabled,
+ * so none is callable even when mbstring is compiled in. Only WordPress's compat mb_strlen() is
+ * defined, as on a site without the extension. Prints a JSON result with the internal mb_*
+ * functions still available, each ability reply and the stored category names.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
@@ -41,7 +42,7 @@ foreach ( [ 'EXISTING', 'Layout' ] as $bricks_mcp_category ) {
 
 echo wp_json_encode(
 	[
-		'mbstring'   => extension_loaded( 'mbstring' ),
+		'mbstring'   => array_values( array_filter( get_defined_functions()['internal'], static fn( string $bricks_mcp_function ): bool => str_starts_with( $bricks_mcp_function, 'mb_' ) ) ),
 		'results'    => $bricks_mcp_results,
 		'categories' => array_map( 'bin2hex', array_column( get_option( 'bricks_global_classes_categories', [] ), 'name' ) ),
 	]

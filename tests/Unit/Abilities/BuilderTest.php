@@ -375,15 +375,16 @@ final class BuilderTest extends TestCase {
 	}
 
 	public function test_category_creation_works_without_mbstring(): void {
-		// -n loads no extensions, so mbstring is absent as on a host without it; the fixture defines only core's compat mb_strlen().
-		$output = [];
-		$status = 1;
-		exec( escapeshellarg( PHP_BINARY ) . ' -n ' . escapeshellarg( __DIR__ . '/fixtures/category-without-mbstring.php' ) . ' 2>&1', $output, $status );
+		// -n drops a shared mbstring and disable_functions removes a compiled-in one, as on a host without it; the fixture defines only core's compat mb_strlen().
+		$disabled = implode( ',', get_extension_funcs( 'mbstring' ) ?: [] );
+		$output   = [];
+		$status   = 1;
+		exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $disabled ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/category-without-mbstring.php' ) . ' 2>&1', $output, $status );
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertSame(
 			[
-				'mbstring'   => false,
+				'mbstring'   => [],
 				'results'    => [ 'bricks_mcp_duplicate_category', 'Layout' ],
 				'categories' => [ bin2hex( "Lay\xC3out" ), bin2hex( 'Existing' ), bin2hex( 'Layout' ) ],
 			],
