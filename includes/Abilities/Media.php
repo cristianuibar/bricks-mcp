@@ -239,15 +239,6 @@ final class Media implements Module {
 			}
 		}
 
-		// Uploading again would duplicate the attachment, and its details are not shown to a user who cannot read it.
-		if ( $pending && ! current_user_can( 'edit_post', $existing_id ) && ! current_user_can( 'read_post', $existing_id ) ) {
-			return new \WP_Error(
-				'bricks_mcp_unsplash_import_incomplete',
-				__( 'An earlier import of this Unsplash photo left an attachment without its attribution. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
-				[ 'status' => 403 ]
-			);
-		}
-
 		$api_key = $this->get_unsplash_api_key();
 		if ( '' === $api_key ) {
 			return $this->missing_unsplash_key_error();
@@ -280,6 +271,16 @@ final class Media implements Module {
 			// A user who can read but not edit an unfinished import gets it with the credit from Unsplash, which only an
 			// editor saves on it, rather than a second upload of the photo.
 			if ( ! current_user_can( 'edit_post', $existing_id ) ) {
+				// Uploading again would duplicate the attachment, and its details are not shown to a user who cannot read
+				// it. Checked after the Unsplash request, since an editor may attach it to a private post meanwhile.
+				if ( ! current_user_can( 'read_post', $existing_id ) ) {
+					return new \WP_Error(
+						'bricks_mcp_unsplash_import_incomplete',
+						__( 'An earlier import of this Unsplash photo left an attachment without its attribution. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
+						[ 'status' => 403 ]
+					);
+				}
+
 				$reused = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 
 				return is_wp_error( $reused ) ? $reused : array_merge(

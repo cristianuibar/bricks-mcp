@@ -956,15 +956,20 @@ final class MediaTest extends TestCase {
 			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
 
 			// An author who cannot read it either, as when an editor attached it to a private post, is refused without
-			// its caption, parent or ID, and gets no second upload.
-			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
-			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = false;
-			$unreadable = $import();
-			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] );
-			$this->assertInstanceOf( \WP_Error::class, $unreadable, $label );
-			$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $unreadable->get_error_code(), $label );
-			$this->assertSame( [ 'status' => 403 ], $unreadable->get_error_data(), $label );
-			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+			// its caption, parent or ID, and gets no second upload, also when the editor attaches it during the lookup.
+			foreach ( [ false, true ] as $during_lookup ) {
+				$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
+				$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = $during_lookup;
+				$on_api_fetch = $during_lookup ? static function () use ( $kept_id ): void {
+					$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = false;
+				} : null;
+				$unreadable = $import();
+				unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] );
+				$this->assertInstanceOf( \WP_Error::class, $unreadable, $label . $during_lookup );
+				$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $unreadable->get_error_code(), $label . $during_lookup );
+				$this->assertSame( [ 'status' => 403 ], $unreadable->get_error_data(), $label . $during_lookup );
+				$this->assertSame( [ $kept_id ], $attachment_ids(), $label . $during_lookup );
+			}
 
 			$editor = $import();
 			$this->assertIsArray( $editor, $label );
