@@ -137,8 +137,22 @@ if ( ! function_exists( 'wp_is_post_revision' ) ) {
 if ( ! function_exists( 'update_metadata' ) ) {
 	function update_metadata( string $meta_type, int $object_id, string $meta_key, mixed $meta_value, mixed $prev_value = '' ): int|bool {
 		// WordPress unslashes meta values before storing them.
-		$GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ][ $meta_key ] = wp_unslash( $meta_value );
-		return true;
+		$meta_value = wp_unslash( $meta_value );
+		$meta       = $GLOBALS['_bricks_mcp_test_post_meta'][ $object_id ] ?? [];
+		// Like WordPress, an unchanged value returns false without a query.
+		if ( array_key_exists( $meta_key, $meta ) && $meta[ $meta_key ] === $meta_value ) {
+			return false;
+		}
+		$data = [
+			'post_id'    => $object_id,
+			'meta_key'   => $meta_key,
+			'meta_value' => $meta_value,
+		];
+		// Then it updates the existing row, or adds one through add_metadata(), and returns false when the query fails.
+		if ( array_key_exists( $meta_key, $meta ) ) {
+			return (bool) $GLOBALS['wpdb']->update( $GLOBALS['wpdb']->postmeta, [ 'meta_value' => $meta_value ], array_diff_key( $data, [ 'meta_value' => true ] ) );
+		}
+		return $GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->postmeta, $data ) ? $GLOBALS['wpdb']->insert_id : false;
 	}
 }
 
@@ -177,6 +191,49 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 		/** @var string Character set of the meta_value column: utf8mb4 or latin1. */
 		public string $meta_value_charset = 'utf8mb4';
+
+		/** @var int ID of the last inserted row. */
+		public int $insert_id = 0;
+
+		/**
+		 * Insert a post meta row. The in-memory store keeps the value unserialized.
+		 *
+		 * @param string               $table  Table name.
+		 * @param array<string, mixed> $data   Column values.
+		 * @param string[]|string|null $format Formats.
+		 * @return int|false Rows inserted.
+		 */
+		public function insert( string $table, array $data, array|string|null $format = null ): int|false {
+			if ( $this->postmeta !== $table ) {
+				return false;
+			}
+			$GLOBALS['_bricks_mcp_test_post_meta'][ (int) $data['post_id'] ][ (string) $data['meta_key'] ] = $data['meta_value'];
+			++$this->insert_id;
+			return 1;
+		}
+
+		/**
+		 * Update the post meta row matching post_id and meta_key.
+		 *
+		 * @param string                $table        Table name.
+		 * @param array<string, mixed>  $data         Column values to set.
+		 * @param array<string, mixed>  $where        Column values to match.
+		 * @param string[]|string|null  $format       Formats of $data.
+		 * @param string[]|string|null  $where_format Formats of $where.
+		 * @return int|false Rows changed; 0 when the row already held the value, like MySQL.
+		 */
+		public function update( string $table, array $data, array $where, array|string|null $format = null, array|string|null $where_format = null ): int|false {
+			$post_id  = (int) $where['post_id'];
+			$meta_key = (string) $where['meta_key'];
+			if ( $this->postmeta !== $table || ! array_key_exists( $meta_key, $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] ?? [] ) ) {
+				return 0;
+			}
+			if ( (string) maybe_serialize( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $meta_key ] ) === (string) maybe_serialize( $data['meta_value'] ) ) {
+				return 0;
+			}
+			$GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ][ $meta_key ] = $data['meta_value'];
+			return 1;
+		}
 
 		/**
 		 * Delete the post meta row matching post_id and meta_key, and meta_value when given.
