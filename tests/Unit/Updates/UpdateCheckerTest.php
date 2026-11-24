@@ -1199,18 +1199,20 @@ final class UpdateCheckerTest extends TestCase {
 		}
 
 		$cases = [
-			[ '2.1.0+build.6', 'v2.1.0+build.7', 'current', '' ],
-			[ '2.0.0', 'v2.0.0+build.7', 'current', '' ],
-			[ '2.1.0+build.6', 'v2.1.0', 'current', '' ],
-			[ '2.1.0+build.6', 'v2.0.9+build.9', 'current', '' ],
-			[ '2.1.0+build.6', 'v2.1.1+build.1', 'update', '' ],
-			[ '2.1.0', 'v2.1.1', 'blocked', 'checksum-timeout' ],
-			[ '2.1.0', 'v2.1.0', 'current', 'checksum-timeout' ],
+			[ '2.1.0+build.6', 'v2.1.0+build.7', 'current', '', '' ],
+			[ '2.0.0', 'v2.0.0+build.7', 'current', '', '' ],
+			[ '2.1.0+build.6', 'v2.1.0', 'current', '', '' ],
+			[ '2.1.0+build.6', 'v2.0.9+build.9', 'current', '', '' ],
+			[ '2.1.0+build.6', 'v2.1.1+build.1', 'update', '', '' ],
+			[ '2.1.0', 'v2.1.1', 'blocked', 'checksum-timeout', '' ],
+			[ '2.1.0', 'v2.1.0', 'current', 'checksum-timeout', '' ],
+			// A translation with the positional placeholder still names the blocked release.
+			[ '2.1.0', 'v2.1.1', 'blocked', 'checksum-timeout', 'v%1$s found, but its checksum could not be verified. Check again later.' ],
 		];
 
-		foreach ( $cases as [ $installed, $tag, $state, $mode ] ) {
+		foreach ( $cases as [ $installed, $tag, $state, $mode, $blocked_text ] ) {
 			$update = 'update' === $state;
-			$label  = $installed . ' -> ' . $tag . ' ' . $mode;
+			$label  = $installed . ' -> ' . $tag . ' ' . $mode . ' ' . $blocked_text;
 			$output = [];
 			$status = 1;
 			exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.php' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $tag ) . ' ' . escapeshellarg( $mode ) . ' 2>&1', $output, $status );
@@ -1219,7 +1221,7 @@ final class UpdateCheckerTest extends TestCase {
 
 			$output = [];
 			$status = 1;
-			exec( escapeshellarg( $node ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.js' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $response ) . ' 2>&1', $output, $status );
+			exec( escapeshellarg( $node ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/check-now.js' ) . ' ' . escapeshellarg( $installed ) . ' ' . escapeshellarg( $response ) . ' ' . escapeshellarg( (string) wp_json_encode( '' === $blocked_text ? [] : [ 'updateBlocked' => $blocked_text ] ) ) . ' 2>&1', $output, $status );
 			$this->assertSame( 0, $status, $label . "\n" . implode( "\n", $output ) );
 			$card = json_decode( implode( "\n", $output ), true );
 

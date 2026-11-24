@@ -3,7 +3,7 @@
  *
  * Loads assets/js/admin-updates.js against a minimal DOM, answers its fetch
  * with the JSON body passed as argv[3], and prints what the version card shows.
- * Usage: node check-now.js <installed version> <response JSON>.
+ * Usage: node check-now.js <installed version> <response JSON> [<i18n JSON>].
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
@@ -17,6 +17,7 @@ var vm = require('vm');
 
 var currentVersion = process.argv[2];
 var response = JSON.parse(process.argv[3]);
+var i18n = process.argv[4] ? JSON.parse(process.argv[4]) : {};
 
 function element() {
 	var classes = new Set();
@@ -75,7 +76,7 @@ var context = vm.createContext({
 		nonce: 'nonce_bricks_mcp_settings_nonce',
 		currentVersion: currentVersion,
 		updateCoreUrl: 'http://localhost/wp-admin/update-core.php',
-		i18n: {}
+		i18n: i18n
 	}
 });
 
