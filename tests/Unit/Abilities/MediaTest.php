@@ -825,6 +825,7 @@ final class MediaTest extends TestCase {
 						[
 							'ID'          => $id,
 							'post_type'   => 'attachment',
+							'post_status' => 'inherit',
 							'post_parent' => 0,
 						],
 						// WordPress stores the sanitized file path with the attachment, adding -N when the name is taken.
@@ -844,12 +845,15 @@ final class MediaTest extends TestCase {
 				static fn( $post ): bool => 'attachment' === $post->post_type
 			)
 		);
-		// The attachment lookup matches stored meta like a WordPress meta query: an exact meta_key/meta_value,
-		// or meta_query clauses using REGEXP (case-insensitive, as in MySQL) and NOT EXISTS.
+		// The attachment lookup matches the post status and stored meta like a WordPress query: an exact
+		// meta_key/meta_value, or meta_query clauses using REGEXP (case-insensitive, as in MySQL) and NOT EXISTS.
 		$GLOBALS['_bricks_mcp_test_get_posts_return'] = static fn( array $args ): array => array_values(
 			array_filter(
 				$attachment_ids(),
 				static function ( int $id ) use ( $args ): bool {
+					if ( ! in_array( $GLOBALS['_bricks_mcp_test_posts'][ $id ]->post_status, (array) ( $args['post_status'] ?? 'inherit' ), true ) ) {
+						return false;
+					}
 					$meta    = $GLOBALS['_bricks_mcp_test_post_meta'][ $id ] ?? [];
 					$clauses = $args['meta_query'] ?? [
 						[
@@ -1051,12 +1055,39 @@ final class MediaTest extends TestCase {
 		$this->assertSame( [ $kept_id ], $attachment_ids() );
 		$this->assertSame( 'photo_77', get_post_meta( $kept_id, '_unsplash_photo_id', true ) );
 
+		// A kept upload that an editor trashes before the retry is not returned as the import: WordPress purges
+		// trashed media later, so the retry uploads an attachment of its own, which outlives the purge.
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = [ '_unsplash_photographer_url' ];
+		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = 'after_meta';
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']     = false;
+		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$trashed_id = $kept_error->get_error_data()['attachmentId'];
+		// As wp_trash_post() does with MEDIA_TRASH on.
+		$GLOBALS['_bricks_mcp_test_posts'][ $trashed_id ]->post_status                 = 'trash';
+		$GLOBALS['_bricks_mcp_test_post_meta'][ $trashed_id ]['_wp_trash_meta_status'] = 'inherit';
+		$after_trash = $import();
+		$this->assertIsArray( $after_trash );
+		$this->assertNotSame( $trashed_id, $after_trash['attachmentId'] );
+		$this->assertFalse( $after_trash['duplicate'] );
+		$this->assertSame( 15, $after_trash['postId'] );
+		$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $after_trash['photographerUrl'] );
+		unset( $GLOBALS['_bricks_mcp_test_posts'][ $trashed_id ], $GLOBALS['_bricks_mcp_test_post_meta'][ $trashed_id ] );
+		$this->assertSame( [ $after_trash['attachmentId'] ], $attachment_ids() );
+		$this->assertSame( 'photo_77', get_post_meta( $after_trash['attachmentId'], '_unsplash_photo_id', true ) );
+		$after_purge = $import();
+		$this->assertSame( $after_trash['attachmentId'], $after_purge['attachmentId'] );
+		$this->assertTrue( $after_purge['duplicate'] );
+
 		// An ordinary upload that shares the import's file name is left alone, and the import uploads its own.
 		$clear_attachments();
 		bricks_mcp_test_add_post(
 			[
 				'ID'          => 500,
 				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
 				'post_parent' => 0,
 			],
 			[ '_wp_attached_file' => '2026/10/unsplash-photo_77.webp' ]
