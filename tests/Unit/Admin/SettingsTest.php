@@ -166,10 +166,21 @@ final class SettingsTest extends TestCase {
 			$this->assertFalse( str_contains( $html, 'up to date' ), $label );
 		}
 
-		$GLOBALS['_bricks_mcp_test_transients'] = [];
+		// Up to date means a checked release is not newer, not an empty cache: an expired check proves nothing.
+		$GLOBALS['_bricks_mcp_test_transients']['bricks_mcp_update_data'] = [
+			'version'        => BRICKS_MCP_VERSION,
+			'package'        => $package,
+			'url'            => 'https://github.com/cristianuibar/bricks-mcp/releases/tag/v' . BRICKS_MCP_VERSION,
+			'sha256'         => $hash,
+			'sha256_package' => $package,
+		];
 		ob_start();
 		( new Settings() )->render_settings_page();
-		$this->assertStringContainsString( 'up to date', (string) ob_get_clean() );
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'up to date', $html );
+		$this->assertStringNotContainsString( 'bricks-mcp-update-available', $html );
+		$this->assertStringNotContainsString( 'bricks-mcp-update-blocked', $html );
 	}
 
 	/**
