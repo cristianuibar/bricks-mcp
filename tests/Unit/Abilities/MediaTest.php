@@ -66,6 +66,7 @@ final class MediaTest extends TestCase {
 		$GLOBALS['_bricks_mcp_test_media_wp_update_post_fail']   = false;
 		$GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] = false;
 		$GLOBALS['_bricks_mcp_test_media_before_delete_attachment']  = null;
+		$GLOBALS['_bricks_mcp_test_media_on_update_post_meta_fail']  = null;
 	}
 
 	/**
@@ -785,7 +786,8 @@ final class MediaTest extends TestCase {
 		$image_url                                      = 'https://images.unsplash.com/photo-77?w=1080';
 		$api_code                                       = 200;
 		$on_api_fetch                                   = null;
-		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$api_code, &$on_api_fetch ): array {
+		$photographer                                   = 'Pat';
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$api_code, &$on_api_fetch, &$photographer ): array {
 			if ( $image_url === $url ) {
 				return [
 					'response' => [ 'code' => 200 ],
@@ -808,7 +810,7 @@ final class MediaTest extends TestCase {
 					[
 						'id'   => 'photo_77',
 						'urls' => [ 'regular' => $image_url ],
-						'user' => [ 'name' => 'Pat' ],
+						'user' => [ 'name' => $photographer ],
 					]
 				),
 			];
@@ -952,6 +954,26 @@ final class MediaTest extends TestCase {
 			$this->assertSame( 'photo_77', get_post_meta( $concurrent['attachmentId'], '_unsplash_photo_id', true ), $label );
 			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $concurrent['photographerUrl'], $label );
 		}
+
+		// An editor's retry that runs as the attribution write fails, and sees the photographer renamed, cannot find the
+		// unfinished upload, so it uploads its own, which stays: the cleanup never deletes an attachment that a retry has
+		// completed and returned.
+		$clear_attachments();
+		$concurrent = null;
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail']   = [ '_unsplash_photographer' ];
+		$GLOBALS['_bricks_mcp_test_media_on_update_post_meta_fail'] = static function () use ( $import, &$concurrent, &$photographer ): void {
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			$photographer = 'Pat Lee';
+			$concurrent   = $import();
+		};
+		$cleaned = $import();
+		$this->assertInstanceOf( \WP_Error::class, $cleaned );
+		$this->assertSame( [ 'status' => 500 ], $cleaned->get_error_data() );
+		$this->assertIsArray( $concurrent );
+		$this->assertSame( [ $concurrent['attachmentId'] ], $attachment_ids() );
+		$this->assertSame( 15, get_post( $concurrent['attachmentId'] )->post_parent );
+		$this->assertSame( 'Pat Lee', get_post_meta( $concurrent['attachmentId'], '_unsplash_photographer', true ) );
+		$photographer = 'Pat';
 
 		// When the photographer URL write fails and the upload cannot be deleted, it is kept with its photo ID, and a
 		// retry completes it instead of uploading a second one, even after the failed delete stripped its meta. A photo

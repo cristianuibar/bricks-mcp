@@ -223,9 +223,10 @@ final class Media implements Module {
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 		$pending     = false;
 		if ( null !== $existing_id ) {
-			// The credit URL is saved last, so an attachment without it lacks its attribution. This import names its
-			// upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is an unfinished
-			// import even if its pending mark failed. Releases before stored attribution kept the Unsplash file name.
+			// The credit URL is saved after the photographer name, so an attachment without it lacks its attribution. This
+			// import names its upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is
+			// an unfinished import even if its pending mark failed. Releases before stored attribution kept the Unsplash
+			// file name.
 			$uncredited = '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
 			$pending    = $uncredited && (
 				'' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true )
@@ -354,39 +355,23 @@ final class Media implements Module {
 			);
 		}
 
-		// The photo ID goes first, so a retry finds this attachment by it; only a failure here leaves it unfindable.
-		if ( ! $this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_META_KEY => $photo_id ] ) ) {
-			// A retry cannot find an attachment without the photo ID, so remove it rather than leave a duplicate.
+		// The photo ID goes last, so no retry finds this attachment before its attribution is complete. Until then
+		// nothing uses it, so a failure removes it: a retry would otherwise duplicate it, or be refused by it.
+		if ( ! $this->write_unsplash_meta( $attachment_id, array_merge( $attribution, [ self::UNSPLASH_META_KEY => $photo_id ] ) ) ) {
 			$error_data = [ 'status' => 500 ];
 			if ( ! wp_delete_attachment( $attachment_id, true ) ) {
 				$error_data['attachmentId'] = $attachment_id;
+				// WordPress deletes the meta before the post, so mark the kept upload for a retry to find and complete it.
+				$this->write_unsplash_meta(
+					$attachment_id,
+					[
+						self::UNSPLASH_META_KEY         => $photo_id,
+						self::UNSPLASH_PENDING_META_KEY => '1',
+					]
+				);
 			}
 
 			return $this->unsplash_meta_error( $error_data );
-		}
-
-		// The pending mark lets any retry complete a failed attribution. If it does not persist, a retry still finds
-		// this attachment by its photo ID, without a credit URL, and completes it when the caller can edit it.
-		$this->write_unsplash_meta( $attachment_id, [ self::UNSPLASH_PENDING_META_KEY => '1' ] );
-
-		$recorded = $this->record_unsplash_attribution( $attachment_id, $attribution );
-		if ( is_wp_error( $recorded ) ) {
-			// Nothing uses this upload yet, so remove it: a retry by a user who cannot edit it would be refused. The photo
-			// ID goes first, so a retry that runs during the delete uploads its own attachment instead of returning this one.
-			if ( delete_post_meta( $attachment_id, self::UNSPLASH_META_KEY ) && wp_delete_attachment( $attachment_id, true ) ) {
-				return $this->unsplash_meta_error( [ 'status' => 500 ] );
-			}
-
-			// The upload stays. WordPress deletes the meta before the post, so mark it again for a retry to complete it.
-			$this->write_unsplash_meta(
-				$attachment_id,
-				[
-					self::UNSPLASH_META_KEY         => $photo_id,
-					self::UNSPLASH_PENDING_META_KEY => '1',
-				]
-			);
-
-			return $recorded;
 		}
 
 		if ( $post_id > 0 ) {
@@ -1099,7 +1084,7 @@ final class Media implements Module {
 	/**
 	 * Save the photographer attribution of an attachment marked with its photo ID, then clear its pending mark.
 	 *
-	 * On failure the attachment is left as it is, and a retry finds it by the photo ID.
+	 * On failure the attachment stays, as it may already be in use, and a retry finds it by the photo ID.
 	 *
 	 * @param int                  $attachment_id Attachment ID.
 	 * @param array<string,string> $attribution   Attribution meta values by key.
