@@ -636,6 +636,36 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Resending a stored keyword with a backslash to a read-only table succeeds: nothing needs writing, and the stored
+	 * row is checked against the keyword as sent, not an unslashed copy.
+	 *
+	 * @param string $plugin      Fake plugin declaration.
+	 * @param string $keyword_key Meta key of the focus keyword.
+	 * @return void
+	 */
+	#[DataProvider( 'keyword_meta_keys' )]
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_seo_resend_of_a_stored_backslash_keyword_to_a_read_only_table_succeeds( string $plugin, string $keyword_key ): void {
+		eval( $plugin ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin in this separate test process only.
+		$GLOBALS['_bricks_mcp_test_post_meta'][ self::POST_ID ][ $keyword_key ] = 'AC\\DC';
+		$this->make_post_meta_read_only();
+
+		$write = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'focusKeyword' => 'AC\\DC' ],
+			]
+		);
+
+		$this->assertIsArray( $write );
+		$this->assertSame( [ 'focusKeyword' ], $write['updated'] );
+		$this->assertSame( 'AC\\DC', $write['after']['focusKeyword'] );
+		$this->assertSame( 'AC\\DC', get_post_meta( self::POST_ID, $keyword_key, true ) );
+	}
+
+	/**
 	 * With SEOPress active, Bricks output that is still on and a noindex left by the Bricks fallback are reported until
 	 * the Bricks SEO and Open Graph output is turned off. A sharing image with a saved URL and a dynamic tag reports the
 	 * tag, the image Bricks prints, and a whitespace-only tag reports the URL.
