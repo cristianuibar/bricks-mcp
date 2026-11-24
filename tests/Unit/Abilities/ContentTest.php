@@ -414,7 +414,7 @@ final class ContentTest extends TestCase {
 	/**
 	 * With SEOPress active, Bricks output that is still on and a noindex left by the Bricks fallback are reported until
 	 * the Bricks SEO and Open Graph output is turned off. A sharing image with a saved URL and a dynamic tag reports the
-	 * tag, the image Bricks prints.
+	 * tag, the image Bricks prints, and a whitespace-only tag reports the URL.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
@@ -464,6 +464,20 @@ final class ContentTest extends TestCase {
 		$this->assertSame( [ 'sharingImage' => '{featured_image}' ], $issues['bricks_opengraph_stale_values']['staleValues'] );
 		$this->assertStringContainsString( 'disableOpenGraph', $issues['bricks_opengraph_output']['fix'] );
 		$this->assertSame( $read['audit']['warnings'], $write['warnings'] );
+
+		update_post_meta(
+			self::POST_ID,
+			'_bricks_page_settings',
+			[
+				'sharingImage' => [
+					'url'            => 'https://example.test/old-og.jpg',
+					'useDynamicData' => ' ',
+				],
+			]
+		);
+		$blank_tag = array_column( $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'], null, 'type' );
+
+		$this->assertSame( [ 'sharingImage' => 'https://example.test/old-og.jpg' ], $blank_tag['bricks_opengraph_stale_values']['staleValues'] );
 
 		update_option( 'bricks_global_settings', [ 'disableSeo' => true ] );
 		$seo_off = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
