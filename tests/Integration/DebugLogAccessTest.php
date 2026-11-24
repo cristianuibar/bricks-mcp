@@ -71,14 +71,21 @@ $normalize = static function ( string $path ): string {
 };
 
 // '' is stderr.
+$root   = rtrim( $normalize( ABSPATH ), '/' ) . '/';
+$target = $log;
 if ( '' !== $log && 'syslog' !== $log ) {
 	$log = $normalize( str_starts_with( $log, '/' ) ? $log : getcwd() . '/' . $log );
+	// The file a symlinked log writes to has a URL of its own, at its path under the real web root.
+	$real      = realpath( $log );
+	$real_root = realpath( ABSPATH ) . '/';
+	$target    = false === $real ? $log : ( str_starts_with( $real, $real_root ) ? $root . substr( $real, strlen( $real_root ) ) : $real );
 }
 
 echo PHP_EOL, wp_json_encode(
 	[
 		'log'     => $log,
-		'root'    => rtrim( $normalize( ABSPATH ), '/' ) . '/',
+		'target'  => $target,
+		'root'    => $root,
 		'file'    => is_file( $log ),
 		'written' => $written,
 	]
@@ -142,6 +149,41 @@ PHP;
 		} finally {
 			unlink( $link );
 		}
+	}
+
+	/**
+	 * A denied log that is a symlink to a served file under the web root fails the configured check at the file's URL.
+	 *
+	 * The link sits in the denied logs folder and points to a fresh folder of the checkout that
+	 * Apache serves, so only the check of the target's URL can catch its 200.
+	 */
+	public function test_denied_debug_log_symlinked_to_a_served_file_fails_the_check(): void {
+		$folder = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
+		$dir    = dirname( __DIR__, 2 ) . '/' . $folder;
+		$name   = $folder . '.log';
+		$link   = dirname( __DIR__, 2 ) . '/logs/' . $name;
+		mkdir( $dir );
+		symlink( "{$dir}/debug.log", $link );
+
+		try {
+			[ $site, $canary ] = $this->probe( self::SERVER, "wp-content/logs/{$name}" );
+			$this->assertSame( "{$site['root']}wp-content/plugins/bricks-mcp/{$folder}/debug.log", $site['target'] );
+
+			try {
+				$this->assert_configured_log_denied( self::SERVER, $site, $canary );
+			} catch ( AssertionFailedError $e ) {
+				$this->assertStringContainsString( "/wp-content/plugins/bricks-mcp/{$folder}/debug.log\nFailed asserting that 200 is identical to 403", $e->getMessage() );
+				return;
+			}
+		} finally {
+			unlink( $link );
+			if ( file_exists( "{$dir}/debug.log" ) ) {
+				unlink( "{$dir}/debug.log" );
+			}
+			rmdir( $dir );
+		}
+
+		$this->fail( "The configured check passed for {$site['log']}, which writes to the served {$site['target']}." );
 	}
 
 	/**
@@ -329,7 +371,7 @@ PHP;
 	/**
 	 * Runs the probe on a site.
 	 *
-	 * @return array{array{log: string, root: string, file: bool, written: bool}, string} What it reports, and its canary.
+	 * @return array{array{log: string, target: string, root: string, file: bool, written: bool}, string} What it reports, and its canary.
 	 */
 	private function probe( string $server, string $log_path = '' ): array {
 		[ $probe, $canary ] = $this->write_probe( '', $log_path );
@@ -366,23 +408,32 @@ PHP;
 	}
 
 	/**
-	 * The configured check: a log under the web root is written, created and denied; any other log skips.
+	 * The configured check: a log, or the file a symlinked log points to, under the web root is
+	 * written, created and denied at each of their URLs; any other log skips.
 	 *
-	 * @param array{log: string, root: string, file: bool, written: bool} $site What the probe reports.
+	 * @param array{log: string, target: string, root: string, file: bool, written: bool} $site What the probe reports.
 	 */
 	private function assert_configured_log_denied( string $server, array $site, string $canary ): void {
-		if ( ! str_starts_with( $site['log'], $site['root'] ) ) {
-			$this->markTestSkipped( "{$server} logs to {$site['log']}, not a file under its web root {$site['root']}." );
+		$paths = [];
+		foreach ( array_unique( [ $site['log'], $site['target'] ] ) as $file ) {
+			if ( str_starts_with( $file, $site['root'] ) ) {
+				$paths[] = '/' . substr( $file, strlen( $site['root'] ) );
+			}
+		}
+		if ( [] === $paths ) {
+			$this->markTestSkipped( "{$server} logs to {$site['log']} ({$site['target']}), not a file under its web root {$site['root']}." );
 		}
 
 		$this->assert_logged( $server, $site );
-		$this->assert_denied( $server, '/' . substr( $site['log'], strlen( $site['root'] ) ), $canary );
+		foreach ( $paths as $path ) {
+			$this->assert_denied( $server, $path, $canary );
+		}
 	}
 
 	/**
 	 * The probe's log exists: error_log() still returns true when it cannot create the file.
 	 *
-	 * @param array{log: string, root: string, file: bool, written: bool} $site What the probe reports.
+	 * @param array{log: string, target: string, root: string, file: bool, written: bool} $site What the probe reports.
 	 */
 	private function assert_logged( string $server, array $site ): void {
 		$this->assertTrue( $site['written'], "WordPress on {$server} could not write {$site['log']}." );
