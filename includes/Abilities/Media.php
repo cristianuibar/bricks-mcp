@@ -268,6 +268,14 @@ final class Media implements Module {
 		];
 
 		if ( null !== $existing_id ) {
+			// The request may hold the attachment or its parent post from before the Unsplash request, such as the target
+			// post loaded by the permission check, so the checks below read both afresh.
+			clean_post_cache( $existing_id );
+			$existing_parent = (int) ( get_post( $existing_id )->post_parent ?? 0 );
+			if ( $existing_parent > 0 ) {
+				clean_post_cache( $existing_parent );
+			}
+
 			// A user who can read but not edit an unfinished import gets it with the credit from Unsplash, which only an
 			// editor saves on it, rather than a second upload of the photo.
 			if ( ! current_user_can( 'edit_post', $existing_id ) ) {

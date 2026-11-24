@@ -486,7 +486,9 @@ if ( ! function_exists( 'current_user_can' ) ) {
 	function current_user_can( string $capability, mixed ...$args ): bool {
 		$object_id = isset( $args[0] ) && is_scalar( $args[0] ) ? (int) $args[0] : 0;
 		if ( isset( $GLOBALS['_bricks_mcp_test_object_caps'][ $capability ] ) && array_key_exists( $object_id, $GLOBALS['_bricks_mcp_test_object_caps'][ $capability ] ) ) {
-			return (bool) $GLOBALS['_bricks_mcp_test_object_caps'][ $capability ][ $object_id ];
+			// A callable decides as map_meta_cap() would, from the posts it loads.
+			$granted = $GLOBALS['_bricks_mcp_test_object_caps'][ $capability ][ $object_id ];
+			return (bool) ( is_callable( $granted ) ? $granted() : $granted );
 		}
 		if ( isset( $GLOBALS['_bricks_mcp_test_caps'] ) && array_key_exists( $capability, $GLOBALS['_bricks_mcp_test_caps'] ) ) {
 			return (bool) $GLOBALS['_bricks_mcp_test_caps'][ $capability ];

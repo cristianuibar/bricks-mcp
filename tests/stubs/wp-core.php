@@ -32,6 +32,8 @@ function bricks_mcp_test_reset(): void {
 	$GLOBALS['_bricks_mcp_test_ability_categories'] = [];
 	$GLOBALS['_bricks_mcp_test_ability_calls']      = [];
 	$GLOBALS['_bricks_mcp_test_actions']            = [];
+	// An array turns on the request's post cache in get_post(), as WordPress keeps it; null leaves it off.
+	$GLOBALS['_bricks_mcp_test_post_cache'] = null;
 }
 
 bricks_mcp_test_reset();
@@ -80,8 +82,22 @@ function bricks_mcp_test_add_post( array $fields, array $meta = [] ): WP_Post {
 
 if ( ! function_exists( 'get_post' ) ) {
 	function get_post( mixed $post = null ): ?WP_Post {
-		$id = $post instanceof WP_Post ? $post->ID : (int) $post;
-		return $GLOBALS['_bricks_mcp_test_posts'][ $id ] ?? null;
+		$id     = $post instanceof WP_Post ? $post->ID : (int) $post;
+		$stored = $GLOBALS['_bricks_mcp_test_posts'][ $id ] ?? null;
+		if ( null === $stored || ! is_array( $GLOBALS['_bricks_mcp_test_post_cache'] ?? null ) ) {
+			return $stored;
+		}
+		// Like WordPress, a cached post keeps the fields it had when first loaded in this request.
+		$GLOBALS['_bricks_mcp_test_post_cache'][ $id ] ??= clone $stored;
+		return $GLOBALS['_bricks_mcp_test_post_cache'][ $id ];
+	}
+}
+
+if ( ! function_exists( 'clean_post_cache' ) ) {
+	function clean_post_cache( int|WP_Post $post ): void {
+		if ( is_array( $GLOBALS['_bricks_mcp_test_post_cache'] ?? null ) ) {
+			unset( $GLOBALS['_bricks_mcp_test_post_cache'][ $post instanceof WP_Post ? $post->ID : $post ] );
+		}
 	}
 }
 

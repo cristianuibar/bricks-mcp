@@ -971,6 +971,28 @@ final class MediaTest extends TestCase {
 				$this->assertSame( [ $kept_id ], $attachment_ids(), $label . $during_lookup );
 			}
 
+			// The same holds when an editor attaches it to the import's target post and makes that post private during
+			// the lookup, although the permission check loaded the target post into the request's cache before.
+			$GLOBALS['_bricks_mcp_test_post_cache']                            = [];
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = static function () use ( $kept_id ): bool {
+				$parent_id = get_post( $kept_id )->post_parent;
+				return 0 === $parent_id || 'private' !== get_post( $parent_id )->post_status;
+			};
+			$target_status = get_post( 15 )->post_status;
+			$on_api_fetch  = static function () use ( $kept_id ): void {
+				$GLOBALS['_bricks_mcp_test_posts'][ $kept_id ]->post_parent = 15;
+				$GLOBALS['_bricks_mcp_test_posts'][15]->post_status         = 'private';
+			};
+			$privatized = $import();
+			$GLOBALS['_bricks_mcp_test_post_cache']                    = null;
+			$GLOBALS['_bricks_mcp_test_posts'][ $kept_id ]->post_parent = 0;
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_status         = $target_status;
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] );
+			$this->assertInstanceOf( \WP_Error::class, $privatized, $label );
+			$this->assertSame( [ 'status' => 403 ], $privatized->get_error_data(), $label );
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+
 			$editor = $import();
 			$this->assertIsArray( $editor, $label );
 			$this->assertSame( $kept_id, $editor['attachmentId'], $label );
