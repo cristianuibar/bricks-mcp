@@ -135,25 +135,29 @@ PHP;
 
 	/**
 	 * A log under the web root that is a symlink to a file outside it is checked at its URL, not skipped.
-	 *
-	 * The target sits in the tests site's own /tmp, so it is created by the probe's write and
-	 * keeps one fixed name there, getting a canary line per run like any other log.
 	 */
 	public function test_visitor_cannot_read_debug_log_symlinked_outside_the_web_root(): void {
-		$name = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.log';
-		$link = dirname( __DIR__, 2 ) . '/logs/' . $name;
+		$this->assert_symlinked_outside_log_denied();
+	}
+
+	/**
+	 * A directory left at the target an earlier run used does not stop the next run's HTTP check.
+	 *
+	 * The case once logged to this one fixed /tmp file, so a directory there failed the probe's
+	 * write before the log was requested.
+	 */
+	public function test_directory_at_an_earlier_target_does_not_stop_the_symlink_check(): void {
+		$earlier = var_export( '/tmp/bricks-mcp-access-test.log', true );
+		$made    = $this->run_on_server( self::SERVER, "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' );" );
+		if ( 'blocked' === $made ) {
+			$this->markTestSkipped( "The tests site holds a file at {$earlier}, left by a run that still logged there." );
+		}
 
 		try {
-			$this->create_symlink( '/tmp/bricks-mcp-access-test.log', $link );
-			[ $site, $canary ] = $this->probe( self::SERVER, "wp-content/logs/{$name}" );
-
-			$this->assertSame( "{$site['root']}wp-content/logs/{$name}", $site['log'] );
-			// The site sees the link: a regular file left in its place would report itself as its target.
-			$this->assertSame( '/tmp/bricks-mcp-access-test.log', $site['target'] );
-			$this->assert_configured_log_denied( self::SERVER, $site, $canary );
+			$this->assert_symlinked_outside_log_denied();
 		} finally {
-			if ( is_link( $link ) || file_exists( $link ) ) {
-				unlink( $link );
+			if ( 'made' === $made ) {
+				$this->run_on_server( self::SERVER, "rmdir( {$earlier} );" );
 			}
 		}
 	}
@@ -482,6 +486,58 @@ PHP;
 		file_put_contents( dirname( __DIR__, 2 ) . '/' . $probe, $code );
 
 		return [ $probe, $canary ];
+	}
+
+	/**
+	 * Runs PHP code on a site's web server and returns what it prints.
+	 *
+	 * The page deletes itself before running the code, like the probe, so it runs once.
+	 */
+	private function run_on_server( string $server, string $code ): string {
+		$page = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.php';
+		$file = dirname( __DIR__, 2 ) . '/' . $page;
+		file_put_contents( $file, "<?php\nif ( ! @unlink( __FILE__ ) ) {\n\thttp_response_code( 500 );\n\texit( 'The page could not delete itself.' );\n}\n{$code}\n" );
+
+		try {
+			[ $status, $body ] = $this->get( $server, '/wp-content/plugins/bricks-mcp/' . $page );
+			$this->assertSame( 200, $status, "The page failed on {$server}:\n{$body}" );
+
+			return $body;
+		} finally {
+			if ( file_exists( $file ) ) {
+				unlink( $file );
+			}
+		}
+	}
+
+	/**
+	 * Links a log in the denied logs folder to a file in the tests site's own /tmp and runs the configured check on it.
+	 *
+	 * The probe's write creates the target. It takes a fresh name per run and is removed after it,
+	 * so nothing an earlier run left in /tmp, a directory included, stops that write.
+	 */
+	private function assert_symlinked_outside_log_denied(): void {
+		$name   = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.log';
+		$link   = dirname( __DIR__, 2 ) . '/logs/' . $name;
+		$target = '/tmp/' . $name;
+
+		try {
+			$this->create_symlink( $target, $link );
+			[ $site, $canary ] = $this->probe( self::SERVER, "wp-content/logs/{$name}" );
+
+			$this->assertSame( "{$site['root']}wp-content/logs/{$name}", $site['log'] );
+			// The site sees the link: a regular file left in its place would report itself as its target.
+			$this->assertSame( $target, $site['target'] );
+			$this->assert_configured_log_denied( self::SERVER, $site, $canary );
+		} finally {
+			if ( is_link( $link ) || file_exists( $link ) ) {
+				unlink( $link );
+			}
+			$file    = var_export( $target, true );
+			$removed = $this->run_on_server( self::SERVER, "echo ! file_exists( {$file} ) || unlink( {$file} ) ? 'removed' : 'left';" );
+		}
+
+		$this->assertSame( 'removed', $removed, "The tests site kept the target {$target}." );
 	}
 
 	/**
