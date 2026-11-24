@@ -420,6 +420,54 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
+	 * A repair whose Unsplash response has no photographer name keeps the name a concurrent repair saved while it waited
+	 * on Unsplash, rather than the one this request read into its meta cache before (#369).
+	 *
+	 * @return void
+	 */
+	public function test_import_unsplash_nameless_repair_keeps_name_saved_meanwhile(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 42,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+			],
+			[
+				'_unsplash_photo_id'            => 'dup_99',
+				'_unsplash_attribution_pending' => '1',
+				'_unsplash_photographer'        => 'Pat',
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_get_posts_return']  = [ 42 ];
+		$GLOBALS['_bricks_mcp_test_post_meta_cache']   = [];
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function (): array {
+			// The concurrent repair writes the database; this request's meta cache still holds the attachment as it read it.
+			$GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_photographer']     = 'Pat Lee';
+			$GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_photographer_url'] = 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral';
+			unset( $GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_attribution_pending'] );
+
+			return [
+				'response' => [ 'code' => 200 ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => (string) wp_json_encode(
+					[
+						'id'   => 'dup_99',
+						'user' => [ 'links' => [ 'html' => 'https://unsplash.com/@pat' ] ],
+					]
+				),
+			];
+		};
+
+		$result = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'dup_99' ] );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 42, $result['attachmentId'] );
+		$this->assertSame( 'Pat Lee', $result['photographer'] );
+		$this->assertSame( 'Pat Lee', $GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_photographer'] );
+	}
+
+	/**
 	 * Unsplash user payloads with the photographer name both imports should report.
 	 *
 	 * @return array<string, array{0: array<string, mixed>, 1: string|null}>
