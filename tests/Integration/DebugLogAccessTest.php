@@ -73,10 +73,13 @@ $normalize = static function ( string $path ): string {
 // '' is stderr.
 $root   = rtrim( $normalize( ABSPATH ), '/' ) . '/';
 $target = $log;
+$opened = $log;
 if ( '' !== $log && 'syslog' !== $log ) {
-	$log = $normalize( str_starts_with( $log, '/' ) ? $log : getcwd() . '/' . $log );
+	// The OS opens the path as given: a missing folder before .. fails the write even when the normalized path exists.
+	$opened = str_starts_with( $log, '/' ) ? $log : getcwd() . '/' . $log;
+	$log    = $normalize( $opened );
 	// The file a symlinked log writes to has a URL of its own, at its path under the real web root.
-	$real      = realpath( $log );
+	$real      = realpath( $opened );
 	$real_root = realpath( ABSPATH ) . '/';
 	$target    = false === $real ? $log : ( str_starts_with( $real, $real_root ) ? $root . substr( $real, strlen( $real_root ) ) : $real );
 }
@@ -86,7 +89,7 @@ echo PHP_EOL, wp_json_encode(
 		'log'     => $log,
 		'target'  => $target,
 		'root'    => $root,
-		'file'    => is_file( $log ),
+		'file'    => is_file( $opened ),
 		'written' => $written,
 	]
 );
@@ -232,6 +235,34 @@ PHP;
 		}
 
 		$this->fail( "The configured check passed for {$site['log']}, which was never created." );
+	}
+
+	/**
+	 * A configured log whose missing folder before .. names an existing denied log fails the configured check.
+	 *
+	 * The OS cannot open the path, so error_log() falls back to stderr while the normalized
+	 * path is the existing log, which the denial check alone would pass.
+	 */
+	public function test_debug_log_behind_a_missing_folder_fails_the_check(): void {
+		$name = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.log';
+		$file = dirname( __DIR__, 2 ) . '/logs/' . $name;
+		file_put_contents( $file, '' );
+
+		try {
+			[ $site, $canary ] = $this->probe( self::SERVER, 'wp-content/logs/bricks-mcp-missing-' . bin2hex( random_bytes( 8 ) ) . "/../{$name}" );
+			$this->assertSame( "{$site['root']}wp-content/logs/{$name}", $site['log'] );
+
+			try {
+				$this->assert_configured_log_denied( self::SERVER, $site, $canary );
+			} catch ( AssertionFailedError $e ) {
+				$this->assertStringContainsString( "could not create {$site['log']}.", $e->getMessage() );
+				return;
+			}
+		} finally {
+			unlink( $file );
+		}
+
+		$this->fail( "The configured check passed for {$site['log']}, which the probe's write never reached." );
 	}
 
 	/**
