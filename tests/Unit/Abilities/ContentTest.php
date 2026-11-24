@@ -598,6 +598,44 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * SEO plugins with the meta key of the focus keyword.
+	 *
+	 * @return array<string, array{0: string, 1: string}>
+	 */
+	public static function keyword_meta_keys(): array {
+		return [
+			'Yoast SEO' => [ self::YOAST_FAKE, '_yoast_wpseo_focuskw' ],
+			'Rank Math' => [ 'final class RankMath {}', 'rank_math_focus_keyword' ],
+			'SEOPress'  => [ 'function seopress_init() {}', '_seopress_analysis_target_kw' ],
+		];
+	}
+
+	/**
+	 * A keyword write keeps its literal backslashes, which update_metadata() would otherwise unslash away.
+	 *
+	 * @param string $plugin      Fake plugin declaration.
+	 * @param string $keyword_key Meta key of the focus keyword.
+	 * @return void
+	 */
+	#[DataProvider( 'keyword_meta_keys' )]
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_seo_keyword_write_keeps_backslashes( string $plugin, string $keyword_key ): void {
+		eval( $plugin ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin in this separate test process only.
+
+		$write = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'focusKeyword' => 'C:\\Windows,Windows paths' ],
+			]
+		);
+
+		$this->assertSame( 'C:\\Windows,Windows paths', $write['after']['focusKeyword'] );
+		$this->assertSame( 'C:\\Windows,Windows paths', get_post_meta( self::POST_ID, $keyword_key, true ) );
+	}
+
+	/**
 	 * With SEOPress active, Bricks output that is still on and a noindex left by the Bricks fallback are reported until
 	 * the Bricks SEO and Open Graph output is turned off. A sharing image with a saved URL and a dynamic tag reports the
 	 * tag, the image Bricks prints, and a whitespace-only tag reports the URL.

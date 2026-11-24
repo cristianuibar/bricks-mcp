@@ -912,15 +912,15 @@ final class Content implements Module {
 	 *
 	 * @param int    $post_id  Post ID; a revision keeps its own row.
 	 * @param string $meta_key Meta key.
-	 * @param mixed  $value    Value as update_metadata() takes it, which unslashes it.
+	 * @param mixed  $value    Value to store; slashed here because update_metadata() unslashes, which would drop literal backslashes.
 	 * @return bool Whether the row now holds the value.
 	 */
 	private function update_seo_meta( int $post_id, string $meta_key, mixed $value ): bool {
-		if ( false !== update_metadata( 'post', $post_id, $meta_key, $value ) ) {
+		if ( false !== update_metadata( 'post', $post_id, $meta_key, wp_slash( $value ) ) ) {
 			return true;
 		}
 
-		return (string) maybe_serialize( get_post_meta( $post_id, $meta_key, true ) ) === (string) maybe_serialize( wp_unslash( $value ) );
+		return (string) maybe_serialize( get_post_meta( $post_id, $meta_key, true ) ) === (string) maybe_serialize( $value );
 	}
 
 	/**
@@ -1036,8 +1036,7 @@ final class Content implements Module {
 		}
 
 		if ( array() !== $slim ) {
-			// Slashed because update_metadata() unslashes, which would drop literal backslashes from every stored field.
-			return $this->update_seo_meta( $post_id, 'slim_seo', wp_slash( $slim ) ) ? true : $this->seo_write_failed( array_keys( $fields ) );
+			return $this->update_seo_meta( $post_id, 'slim_seo', $slim ) ? true : $this->seo_write_failed( array_keys( $fields ) );
 		}
 
 		// A stored empty string reads like a missing row, but the row would block a later unique insert.
