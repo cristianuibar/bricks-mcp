@@ -113,12 +113,19 @@ namespace BricksMCP\Abilities {
 		/**
 		 * Allow Media tests to simulate a failed attachment delete without affecting other tests.
 		 * The fail flag 'after_meta' models WordPress removing the post meta before the post delete fails.
+		 * A callable in `_bricks_mcp_test_media_before_delete_attachment` runs first, as a concurrent request would.
 		 *
 		 * @param int  $post_id      Attachment ID.
 		 * @param bool $force_delete Whether to bypass the trash.
 		 * @return \WP_Post|false|null
 		 */
 		function wp_delete_attachment( int $post_id, bool $force_delete = false ): \WP_Post|false|null {
+			$concurrent = $GLOBALS['_bricks_mcp_test_media_before_delete_attachment'] ?? null;
+			if ( is_callable( $concurrent ) ) {
+				$GLOBALS['_bricks_mcp_test_media_before_delete_attachment'] = null;
+				$concurrent( $post_id );
+			}
+
 			$fail = $GLOBALS['_bricks_mcp_test_media_wp_delete_attachment_fail'] ?? false;
 			if ( 'after_meta' === $fail ) {
 				unset( $GLOBALS['_bricks_mcp_test_post_meta'][ $post_id ] );
