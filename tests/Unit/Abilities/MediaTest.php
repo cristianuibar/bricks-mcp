@@ -955,6 +955,17 @@ final class MediaTest extends TestCase {
 			$this->assertSame( '', get_post_meta( $kept_id, '_unsplash_photographer_url', true ), $label );
 			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
 
+			// An author who cannot read it either, as when an editor attached it to a private post, is refused without
+			// its caption, parent or ID, and gets no second upload.
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = false;
+			$unreadable = $import();
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] );
+			$this->assertInstanceOf( \WP_Error::class, $unreadable, $label );
+			$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $unreadable->get_error_code(), $label );
+			$this->assertSame( [ 'status' => 403 ], $unreadable->get_error_data(), $label );
+			$this->assertSame( [ $kept_id ], $attachment_ids(), $label );
+
 			$editor = $import();
 			$this->assertIsArray( $editor, $label );
 			$this->assertSame( $kept_id, $editor['attachmentId'], $label );
