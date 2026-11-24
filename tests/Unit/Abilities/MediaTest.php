@@ -301,6 +301,21 @@ final class MediaTest extends TestCase {
 		$this->assertSame( '', get_post_meta( 42, '_unsplash_photographer_url', true ) );
 
 		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] );
+
+		// An editor still gets the attachment as it is when its credit does not persist.
+		foreach ( [ [ '_unsplash_photographer' ], [ '_unsplash_photographer_url' ] ] as $failing_keys ) {
+			$label = implode( ',', $failing_keys );
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = $failing_keys;
+			$unsaved = $import();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			$this->assertIsArray( $unsaved, $label );
+			$this->assertSame( 42, $unsaved['attachmentId'], $label );
+			$this->assertTrue( $unsaved['duplicate'], $label );
+			$this->assertSame( 7, $unsaved['postId'], $label );
+			$this->assertNull( $unsaved['photographerUrl'], $label );
+			$this->assertSame( '', get_post_meta( 42, '_unsplash_photographer_url', true ), $label );
+		}
+
 		$completed = $import();
 		$this->assertIsArray( $completed );
 		$this->assertSame( 42, $completed['attachmentId'] );

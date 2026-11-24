@@ -316,10 +316,11 @@ final class Media implements Module {
 				) : $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
 
-			// The attachment may already be in use, so a failure here keeps it for the next retry.
+			// The attachment may already be in use, so a failure here keeps it for the next retry. A legacy attachment is
+			// returned as it is, since its credit is only a backfill.
 			$recorded = $this->record_unsplash_attribution( $existing_id, $attribution );
 			if ( is_wp_error( $recorded ) ) {
-				return $recorded;
+				return $pending ? $recorded : $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
 
 			// After a marked failure the earlier call reported an error, so this call is the one that completed the import.
