@@ -247,15 +247,6 @@ final class Media implements Module {
 		$photo_url = self::UNSPLASH_API_BASE . '/photos/' . rawurlencode( $photo_id );
 		$photo     = $this->unsplash_get_json( $photo_url, $api_key );
 
-		// Saving a credit marks the attachment complete, so a response without the photo's user cannot complete it.
-		if ( null !== $existing_id && ! is_wp_error( $photo ) && ! is_array( $photo['user'] ?? null ) ) {
-			$photo = new \WP_Error(
-				'bricks_mcp_unsplash_parse_error',
-				__( 'Unexpected response format from the Unsplash API.', 'bricks-mcp' ),
-				[ 'status' => 502 ]
-			);
-		}
-
 		if ( is_wp_error( $photo ) ) {
 			// A legacy attachment always deduplicates: when Unsplash cannot credit it, it is returned as it is.
 			return null !== $existing_id && ! $pending ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
@@ -289,6 +280,9 @@ final class Media implements Module {
 				clean_post_cache( $existing_parent );
 			}
 
+			// Saving a credit marks the attachment complete, so a response without the photo's user cannot complete it.
+			$malformed = ! is_array( $photo['user'] ?? null );
+
 			// A user who can read but not edit an unfinished import gets it with the credit from Unsplash, which only an
 			// editor saves on it, rather than a second upload of the photo.
 			if ( ! current_user_can( 'edit_post', $existing_id ) ) {
@@ -304,13 +298,22 @@ final class Media implements Module {
 
 				$reused = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 
-				return is_wp_error( $reused ) ? $reused : array_merge(
+				return is_wp_error( $reused ) || $malformed ? $reused : array_merge(
 					$reused,
 					[
 						'photographer'    => '' !== $photographer ? $photographer : null,
 						'photographerUrl' => $photographer_url,
 					]
 				);
+			}
+
+			if ( $malformed ) {
+				// As for other Unsplash failures, a legacy attachment is returned as it is.
+				return $pending ? new \WP_Error(
+					'bricks_mcp_unsplash_parse_error',
+					__( 'Unexpected response format from the Unsplash API.', 'bricks-mcp' ),
+					[ 'status' => 502 ]
+				) : $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
 
 			// The attachment may already be in use, so a failure here keeps it for the next retry.

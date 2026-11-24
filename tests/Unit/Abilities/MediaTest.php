@@ -312,7 +312,7 @@ final class MediaTest extends TestCase {
 
 	/**
 	 * A malformed Unsplash response during a repair neither erases the saved photographer name nor marks the credit
-	 * complete (#269), and a legacy attachment is still returned as it is.
+	 * complete (#269), and a legacy attachment is still returned as it is to a caller who can still see it.
 	 *
 	 * @return void
 	 */
@@ -351,7 +351,12 @@ final class MediaTest extends TestCase {
 		$import = static fn( string $photo_id = 'dup_99' ): array|\WP_Error => wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => $photo_id ] );
 
 		$body                                           = '{}';
-		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function () use ( &$body ): array {
+		$on_api_fetch                                   = null;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function () use ( &$body, &$on_api_fetch ): array {
+			if ( null !== $on_api_fetch ) {
+				$on_api_fetch();
+			}
+
 			return [
 				'response' => [ 'code' => 200 ],
 				'headers'  => [ 'content-type' => 'application/json' ],
@@ -372,6 +377,17 @@ final class MediaTest extends TestCase {
 		$this->assertTrue( $legacy['duplicate'] );
 		$this->assertNull( $legacy['photographerUrl'] );
 		$this->assertSame( '', get_post_meta( 43, '_unsplash_photographer_url', true ) );
+
+		// A caller who loses access to the legacy attachment while waiting on Unsplash does not get its details.
+		$on_api_fetch = static function (): void {
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][43] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][43] = false;
+		};
+		$revoked      = $import( 'legacy_1' );
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][43], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][43] );
+		$on_api_fetch = null;
+		$this->assertInstanceOf( \WP_Error::class, $revoked );
+		$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $revoked->get_error_code() );
 
 		// A photo whose user has no name keeps the name saved by the earlier attempt.
 		$body      = (string) wp_json_encode(
