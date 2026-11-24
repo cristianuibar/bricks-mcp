@@ -412,6 +412,134 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Like wpdb when MySQL denies UPDATE and INSERT on a read-only post meta table.
+	 *
+	 * @return void
+	 */
+	private function make_post_meta_read_only(): void {
+		$GLOBALS['wpdb'] = new class() extends \wpdb {
+			/**
+			 * @param string               $table  Table name.
+			 * @param array<string, mixed> $data   Column values.
+			 * @param string[]|string|null $format Formats.
+			 * @return false
+			 */
+			public function insert( string $table, array $data, array|string|null $format = null ): int|false {
+				return false;
+			}
+
+			/**
+			 * @param string               $table        Table name.
+			 * @param array<string, mixed> $data         Column values.
+			 * @param array<string, mixed> $where        Column values to match.
+			 * @param string[]|string|null $format       Formats.
+			 * @param string[]|string|null $where_format Where formats.
+			 * @return false
+			 */
+			public function update( string $table, array $data, array $where, array|string|null $format = null, array|string|null $where_format = null ): int|false {
+				return false;
+			}
+		};
+	}
+
+	/**
+	 * A write the database refuses fails with the fields it did not save, instead of listing them as updated.
+	 *
+	 * @param string $plugin      Fake plugin declaration.
+	 * @param string $keyword_key Meta key of the focus keyword.
+	 * @param string $robots_key  Meta key holding noindex.
+	 * @param mixed  $robots      Stored indexed robots value.
+	 * @return void
+	 */
+	#[DataProvider( 'revision_keyword_writes' )]
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_seo_write_refused_by_the_database_fails( string $plugin, string $keyword_key, string $robots_key, mixed $robots ): void {
+		eval( $plugin ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin in this separate test process only.
+		update_post_meta( self::POST_ID, $keyword_key, 'local garden' );
+		update_post_meta( self::POST_ID, $robots_key, $robots );
+		$this->make_post_meta_read_only();
+
+		$result = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'focusKeyword' => 'roof repair',
+					'noindex'      => true,
+				],
+			]
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'bricks_mcp_seo_write_failed', $result->get_error_code() );
+		$this->assertSame(
+			[
+				'status'       => 500,
+				'failedFields' => [ 'focusKeyword', 'noindex' ],
+			],
+			$result->get_error_data()
+		);
+		$this->assertSame( 'local garden', get_post_meta( self::POST_ID, $keyword_key, true ) );
+		$this->assertSame( $robots, get_post_meta( self::POST_ID, $robots_key, true ) );
+	}
+
+	/**
+	 * Resending the stored values succeeds, though update_metadata() returns false when nothing changes.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_seo_write_of_unchanged_values_succeeds(): void {
+		eval( self::YOAST_FAKE ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, '_yoast_wpseo_focuskw', 'local garden' );
+		update_post_meta( self::POST_ID, '_yoast_wpseo_meta-robots-noindex', '1' );
+
+		$write = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'focusKeyword' => 'local garden',
+					'noindex'      => true,
+				],
+			]
+		);
+
+		$this->assertSame( [ 'focusKeyword', 'noindex' ], $write['updated'] );
+		$this->assertSame( 'local garden', $write['after']['focusKeyword'] );
+	}
+
+	/**
+	 * A Slim SEO record the database refuses to save fails instead of listing its fields as updated.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_slim_seo_write_refused_by_the_database_fails(): void {
+		eval( 'namespace SlimSEO\MetaTags; final class Title {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, 'slim_seo', [ 'title' => 'Local garden' ] );
+		$this->make_post_meta_read_only();
+
+		$result = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'title' => 'Roof repair' ],
+			]
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'bricks_mcp_seo_write_failed', $result->get_error_code() );
+		$this->assertSame( [ 'title' ], $result->get_error_data()['failedFields'] );
+		$this->assertSame( [ 'title' => 'Local garden' ], get_post_meta( self::POST_ID, 'slim_seo', true ) );
+	}
+
+	/**
 	 * SEO plugins with the meta keys of the focus keyword and of noindex, a parent's indexed robots value and the noindex
 	 * value a revision gets.
 	 *

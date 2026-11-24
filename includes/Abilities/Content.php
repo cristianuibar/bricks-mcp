@@ -849,7 +849,7 @@ final class Content implements Module {
 	 * @param int                        $post_id Post ID.
 	 * @param string                     $source  SEO source.
 	 * @param array<string, string|bool> $fields  Fields to write.
-	 * @return true|\WP_Error
+	 * @return true|\WP_Error Error when the database did not save a field.
 	 */
 	private function write_seo_fields( int $post_id, string $source, array $fields ): bool|\WP_Error {
 		if ( 'bricks' === $source ) {
@@ -860,9 +860,11 @@ final class Content implements Module {
 			return $this->write_slim_seo( $post_id, $fields );
 		}
 
+		$failed = [];
+
 		foreach ( self::SEO_META_KEYS[ $source ] as $field => $meta_key ) {
-			if ( array_key_exists( $field, $fields ) ) {
-				update_metadata( 'post', $post_id, $meta_key, $fields[ $field ] );
+			if ( array_key_exists( $field, $fields ) && ! $this->update_seo_meta( $post_id, $meta_key, $fields[ $field ] ) ) {
+				$failed[] = $field;
 			}
 		}
 
@@ -875,7 +877,9 @@ final class Content implements Module {
 				$image_id = '' === $fields[ $field ] ? 0 : attachment_url_to_postid( $fields[ $field ] );
 
 				if ( $image_id > 0 ) {
-					update_metadata( 'post', $post_id, $id_key, $image_id );
+					if ( ! $this->update_seo_meta( $post_id, $id_key, $image_id ) ) {
+						$failed[] = $field;
+					}
 				} else {
 					delete_metadata( 'post', $post_id, $id_key );
 				}
@@ -883,15 +887,58 @@ final class Content implements Module {
 
 			foreach ( [ 'twitterTitle', 'twitterDescription', 'twitterImage' ] as $field ) {
 				if ( '' !== ( $fields[ $field ] ?? '' ) ) {
-					update_metadata( 'post', $post_id, 'rank_math_twitter_use_facebook', 'off' );
+					if ( ! $this->update_seo_meta( $post_id, 'rank_math_twitter_use_facebook', 'off' ) ) {
+						$failed[] = $field;
+					}
 					break;
 				}
 			}
 		}
 
-		$this->write_plugin_robots( $post_id, $source, $fields );
+		$failed = array_values( array_unique( array_merge( $failed, $this->write_plugin_robots( $post_id, $source, $fields ) ) ) );
+
+		if ( array() !== $failed ) {
+			return $this->seo_write_failed( $failed );
+		}
 
 		return true;
+	}
+
+	/**
+	 * Update one SEO meta row.
+	 *
+	 * WordPress's update_metadata() returns false both for a value already stored and for a write the database refused,
+	 * so the stored value decides which it was.
+	 *
+	 * @param int    $post_id  Post ID; a revision keeps its own row.
+	 * @param string $meta_key Meta key.
+	 * @param mixed  $value    Value as update_metadata() takes it, which unslashes it.
+	 * @return bool Whether the row now holds the value.
+	 */
+	private function update_seo_meta( int $post_id, string $meta_key, mixed $value ): bool {
+		if ( false !== update_metadata( 'post', $post_id, $meta_key, $value ) ) {
+			return true;
+		}
+
+		return (string) maybe_serialize( get_post_meta( $post_id, $meta_key, true ) ) === (string) maybe_serialize( wp_unslash( $value ) );
+	}
+
+	/**
+	 * Error for SEO fields the database did not save.
+	 *
+	 * @param string[] $fields Fields not saved.
+	 * @return \WP_Error
+	 */
+	private function seo_write_failed( array $fields ): \WP_Error {
+		return new \WP_Error(
+			'bricks_mcp_seo_write_failed',
+			/* translators: %s: comma-separated SEO field names */
+			sprintf( __( 'The database did not save %s, so those fields keep their stored values. Re-read the SEO before retrying.', 'bricks-mcp' ), implode( ', ', $fields ) ),
+			[
+				'status'       => 500,
+				'failedFields' => $fields,
+			]
+		);
 	}
 
 	/**
@@ -900,9 +947,9 @@ final class Content implements Module {
 	 * @param int                        $post_id Post ID.
 	 * @param string                     $source  SEO plugin.
 	 * @param array<string, string|bool> $fields  Fields being written.
-	 * @return void
+	 * @return string[] Fields the database did not save.
 	 */
-	private function write_plugin_robots( int $post_id, string $source, array $fields ): void {
+	private function write_plugin_robots( int $post_id, string $source, array $fields ): array {
 		if ( 'rankmath' === $source ) {
 			$robots = $this->rank_math_robots( $post_id );
 
@@ -913,20 +960,28 @@ final class Content implements Module {
 				}
 			}
 
-			if ( array_intersect( self::SEO_ROBOTS_FIELDS, array_keys( $fields ) ) ) {
-				update_metadata( 'post', $post_id, 'rank_math_robots', $robots );
+			$requested = array_values( array_intersect( self::SEO_ROBOTS_FIELDS, array_keys( $fields ) ) );
+
+			if ( array() !== $requested && ! $this->update_seo_meta( $post_id, 'rank_math_robots', $robots ) ) {
+				return $requested;
 			}
 
-			return;
+			return [];
 		}
+
+		$failed = [];
 
 		foreach ( self::SEO_ROBOTS_META_KEYS[ $source ] as $field => $meta_key ) {
 			if ( array_key_exists( $field, $fields ) ) {
 				$off_value = 'yoast' === $source && 'noindex' === $field ? '2' : '';
 
-				update_metadata( 'post', $post_id, $meta_key, $fields[ $field ] ? self::SEO_ROBOTS_ON_VALUE[ $source ] : $off_value );
+				if ( ! $this->update_seo_meta( $post_id, $meta_key, $fields[ $field ] ? self::SEO_ROBOTS_ON_VALUE[ $source ] : $off_value ) ) {
+					$failed[] = $field;
+				}
 			}
 		}
+
+		return $failed;
 	}
 
 	/**
@@ -962,7 +1017,7 @@ final class Content implements Module {
 	 *
 	 * @param int                        $post_id Post ID.
 	 * @param array<string, string|bool> $fields  Fields to write.
-	 * @return true|\WP_Error Error when the database refuses the delete or a newer save keeps the record.
+	 * @return true|\WP_Error Error when the database refuses the write or delete, or a newer save keeps the record.
 	 */
 	private function write_slim_seo( int $post_id, array $fields ): bool|\WP_Error {
 		$stored = get_post_meta( $post_id, 'slim_seo', true );
@@ -982,9 +1037,7 @@ final class Content implements Module {
 
 		if ( array() !== $slim ) {
 			// Slashed because update_metadata() unslashes, which would drop literal backslashes from every stored field.
-			update_metadata( 'post', $post_id, 'slim_seo', wp_slash( $slim ) );
-
-			return true;
+			return $this->update_seo_meta( $post_id, 'slim_seo', wp_slash( $slim ) ) ? true : $this->seo_write_failed( array_keys( $fields ) );
 		}
 
 		// A stored empty string reads like a missing row, but the row would block a later unique insert.
