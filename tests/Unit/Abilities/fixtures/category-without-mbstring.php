@@ -2,10 +2,10 @@
 /**
  * Loads the unit test bootstrap without mbstring and creates categories next to stored legacy names.
  *
- * Executed by BuilderTest in a PHP process started with -n and every mbstring function disabled,
- * so none is callable even when mbstring is compiled in. Only WordPress's compat mb_strlen() is
- * defined, as on a site without the extension. Prints a JSON result with the internal mb_*
- * functions still available, each ability reply and the stored category names.
+ * Executed by run-without-mbstring.php in a PHP process started with -n and every mbstring
+ * function disabled, so none is callable even when mbstring is compiled in. Only WordPress's
+ * compat mb_strlen() is defined, as on a site without the extension. Prints a JSON result with
+ * the internal mb_* functions still available, each ability reply and the stored category names.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later

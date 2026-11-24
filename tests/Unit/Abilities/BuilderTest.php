@@ -374,12 +374,20 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ ...$stored, $category ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
-	public function test_category_creation_works_without_mbstring(): void {
-		// -n drops a shared mbstring and disable_functions removes a compiled-in one, as on a host without it; the fixture defines only core's compat mb_strlen().
-		$disabled = implode( ',', get_extension_funcs( 'mbstring' ) ?: [] );
+	public static function parent_restrictions(): array {
+		return [
+			'only the runner\'s'    => [ [] ],
+			'mb_send_mail disabled' => [ [ 'mb_send_mail' ] ],
+		];
+	}
+
+	#[DataProvider( 'parent_restrictions' )]
+	public function test_category_creation_works_without_mbstring( array $disabled ): void {
+		// The launcher keeps this process's disabled functions and disables every mbstring one for the fixture, as on a host without it; the fixture defines only core's compat mb_strlen().
+		$disabled = implode( ',', [ ini_get( 'disable_functions' ), ...$disabled ] );
 		$output   = [];
 		$status   = 1;
-		exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $disabled ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/category-without-mbstring.php' ) . ' 2>&1', $output, $status );
+		exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $disabled ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/run-without-mbstring.php' ) . ' 2>&1', $output, $status );
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertSame(
