@@ -247,6 +247,15 @@ final class Media implements Module {
 		$photo_url = self::UNSPLASH_API_BASE . '/photos/' . rawurlencode( $photo_id );
 		$photo     = $this->unsplash_get_json( $photo_url, $api_key );
 
+		// Saving a credit marks the attachment complete, so a response without the photo's user cannot complete it.
+		if ( null !== $existing_id && ! is_wp_error( $photo ) && ! is_array( $photo['user'] ?? null ) ) {
+			$photo = new \WP_Error(
+				'bricks_mcp_unsplash_parse_error',
+				__( 'Unexpected response format from the Unsplash API.', 'bricks-mcp' ),
+				[ 'status' => 502 ]
+			);
+		}
+
 		if ( is_wp_error( $photo ) ) {
 			// A legacy attachment always deduplicates: when Unsplash cannot credit it, it is returned as it is.
 			return null !== $existing_id && ! $pending ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
@@ -255,6 +264,10 @@ final class Media implements Module {
 		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
 			? sanitize_text_field( $photo['user']['name'] )
 			: '';
+		if ( null !== $existing_id && '' === $photographer ) {
+			// A name saved by an earlier attempt is kept rather than erased by a response without one.
+			$photographer = (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, true );
+		}
 		$photographer_url = $this->with_unsplash_utm(
 			isset( $photo['user']['links']['html'] ) && is_string( $photo['user']['links']['html'] ) && '' !== $photo['user']['links']['html']
 				? $photo['user']['links']['html']
