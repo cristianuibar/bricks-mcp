@@ -179,6 +179,11 @@ if ( ! function_exists( 'wp_cache_delete' ) ) {
 		$full_key = $group . ':' . $key;
 		$existed  = array_key_exists( $full_key, $GLOBALS['_bricks_mcp_test_cache'] );
 		unset( $GLOBALS['_bricks_mcp_test_cache'][ $full_key ] );
+		// WordPress keeps a post's meta cache in the post_meta group, which get_post_meta() models on its own.
+		if ( 'post_meta' === $group && isset( $GLOBALS['_bricks_mcp_test_post_meta_cache'][ (int) $key ] ) ) {
+			unset( $GLOBALS['_bricks_mcp_test_post_meta_cache'][ (int) $key ] );
+			$existed = true;
+		}
 		return $existed;
 	}
 }

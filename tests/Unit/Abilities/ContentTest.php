@@ -513,6 +513,38 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * A keyword another request saved after this one read the post's meta succeeds, though the UPDATE changes no row and
+	 * WordPress keeps the request's stale meta cache.
+	 *
+	 * @param string $plugin      Fake plugin declaration.
+	 * @param string $keyword_key Meta key of the focus keyword.
+	 * @return void
+	 */
+	#[DataProvider( 'revision_keyword_writes' )]
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_seo_write_of_a_keyword_another_request_just_saved_succeeds( string $plugin, string $keyword_key ): void {
+		eval( $plugin ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin in this separate test process only.
+		update_post_meta( self::POST_ID, $keyword_key, 'local garden' );
+		$GLOBALS['_bricks_mcp_test_post_meta_cache'] = [];
+		get_post_meta( self::POST_ID, $keyword_key, true );
+		$GLOBALS['_bricks_mcp_test_post_meta'][ self::POST_ID ][ $keyword_key ] = 'roof repair';
+
+		$write = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'focusKeyword' => 'roof repair' ],
+			]
+		);
+
+		$this->assertIsArray( $write );
+		$this->assertSame( [ 'focusKeyword' ], $write['updated'] );
+		$this->assertSame( 'roof repair', $write['after']['focusKeyword'] );
+		$this->assertSame( 'roof repair', get_post_meta( self::POST_ID, $keyword_key, true ) );
+	}
+
+	/**
 	 * A Slim SEO record the database refuses to save fails instead of listing its fields as updated.
 	 *
 	 * @runInSeparateProcess

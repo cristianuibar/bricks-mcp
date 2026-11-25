@@ -908,7 +908,8 @@ final class Content implements Module {
 	 * Update one SEO meta row.
 	 *
 	 * WordPress's update_metadata() returns false both for a value already stored and for a write the database refused,
-	 * so the stored value decides which it was.
+	 * so the stored value decides which it was. That false also keeps the request's meta cache, which is stale when another
+	 * request saved the same value after this one read it, so the stored value is read afresh.
 	 *
 	 * @param int    $post_id  Post ID; a revision keeps its own row.
 	 * @param string $meta_key Meta key.
@@ -919,6 +920,8 @@ final class Content implements Module {
 		if ( false !== update_metadata( 'post', $post_id, $meta_key, wp_slash( $value ) ) ) {
 			return true;
 		}
+
+		wp_cache_delete( $post_id, 'post_meta' );
 
 		return (string) maybe_serialize( get_post_meta( $post_id, $meta_key, true ) ) === (string) maybe_serialize( $value );
 	}
