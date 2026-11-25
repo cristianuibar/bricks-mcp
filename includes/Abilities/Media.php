@@ -262,8 +262,13 @@ final class Media implements Module {
 				// Its uploader deleted or trashed it during the request, so it is not returned and this call imports anew.
 				$existing_id = null;
 				$pending     = false;
-			} elseif ( (int) ( $existing_post->post_parent ?? 0 ) > 0 ) {
-				clean_post_cache( (int) $existing_post->post_parent );
+			} else {
+				if ( (int) ( $existing_post->post_parent ?? 0 ) > 0 ) {
+					clean_post_cache( (int) $existing_post->post_parent );
+				}
+				// A repair that finished during the request saved the credit, so an Unsplash failure here no longer leaves
+				// the import unfinished and the attachment is returned with that credit.
+				$pending = $pending && '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
 			}
 		}
 

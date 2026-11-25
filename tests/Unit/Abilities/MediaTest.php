@@ -532,6 +532,70 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
+	 * Unsplash failures a waiting repair can receive after another editor saved the credit.
+	 *
+	 * @return array<string, array{0: int, 1: string, 2: bool}>
+	 */
+	public static function failures_after_concurrent_repair(): array {
+		return [
+			'malformed response, editor'       => [ 200, '{}', true ],
+			'malformed response, read-only'    => [ 200, '{}', false ],
+			'Unsplash server error, editor'    => [ 503, 'unavailable', true ],
+			'Unsplash server error, read-only' => [ 503, 'unavailable', false ],
+		];
+	}
+
+	/**
+	 * A repair whose Unsplash request fails after another editor saved the credit while it waited returns the completed
+	 * attachment with that credit, not a stale error for an import that is no longer unfinished (#372).
+	 *
+	 * @param int    $code     Unsplash HTTP status.
+	 * @param string $body     Unsplash response body.
+	 * @param bool   $can_edit Whether the waiting caller can edit the attachment.
+	 * @return void
+	 */
+	#[DataProvider( 'failures_after_concurrent_repair' )]
+	public function test_import_unsplash_failed_repair_returns_credit_saved_meanwhile( int $code, string $body, bool $can_edit ): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 42,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+			],
+			[
+				'_unsplash_photo_id'            => 'dup_99',
+				'_unsplash_attribution_pending' => '1',
+				'_unsplash_photographer'        => 'Pat',
+			]
+		);
+		if ( ! $can_edit ) {
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] = false;
+		}
+		$GLOBALS['_bricks_mcp_test_get_posts_return']   = [ 42 ];
+		$GLOBALS['_bricks_mcp_test_post_meta_cache']    = [];
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function () use ( $code, $body ): array {
+			// The other editor's repair writes the database; this request's meta cache still holds the unfinished import.
+			$GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_photographer_url'] = 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral';
+			unset( $GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_attribution_pending'] );
+
+			return [
+				'response' => [ 'code' => $code ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => $body,
+			];
+		};
+
+		$result = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'dup_99' ] );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 42, $result['attachmentId'] );
+		$this->assertTrue( $result['duplicate'] );
+		$this->assertSame( 'Pat', $result['photographer'] );
+		$this->assertSame( 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral', $result['photographerUrl'] );
+	}
+
+	/**
 	 * Unsplash user payloads with the photographer name both imports should report.
 	 *
 	 * @return array<string, array{0: array<string, mixed>, 1: string|null}>
