@@ -473,14 +473,15 @@ PHP;
 
 	/**
 	 * A 403 response that stalls before its trailing canary fails the check instead of passing on the part it sent.
+	 *
+	 * The page is gone from the checkout while it stalls, so a run stopped during the wait leaves nothing behind.
 	 */
 	public function test_stalled_response_fails_the_check(): void {
 		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
-		$page   = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.php';
-		$file   = dirname( __DIR__, 2 ) . '/' . $page;
 		// A length, like a static file's, so the body is not chunked and a read that times out returns nothing.
-		$code = "<?php\nhttp_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;\n";
-		file_put_contents( $file, sprintf( $code, 65536 + strlen( $canary ), self::TIMEOUT + 5, var_export( $canary, true ) ) );
+		$code  = "http_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;";
+		$page  = $this->write_page( sprintf( $code, 65536 + strlen( $canary ), self::TIMEOUT + 5, var_export( $canary, true ) ) );
+		$file  = dirname( __DIR__, 2 ) . '/' . $page;
 		$start = hrtime( true );
 
 		try {
@@ -488,9 +489,12 @@ PHP;
 		} catch ( AssertionFailedError $e ) {
 			$this->assertStringContainsString( 'timed out before the end of its body', $e->getMessage() );
 			$this->assertLessThan( self::TIMEOUT, ( hrtime( true ) - $start ) / 1e9, 'The stalled check waited for the full request timeout.' );
+			$this->assertFileDoesNotExist( $file, 'The stalled page was still in the checkout during its wait.' );
 			return;
 		} finally {
-			unlink( $file );
+			if ( file_exists( $file ) ) {
+				unlink( $file );
+			}
 		}
 
 		$this->fail( 'The check passed for a response that stalled before its canary.' );
@@ -536,14 +540,26 @@ PHP;
 	}
 
 	/**
-	 * Runs PHP code on a site's web server and returns what it prints.
+	 * Writes a page of PHP code to the plugin checkout's root.
 	 *
-	 * The page deletes itself before running the code, like the probe, so it runs once.
+	 * The page deletes itself before running the code, like the probe, so it runs once and a
+	 * run stopped while the server runs it leaves nothing in the checkout.
+	 *
+	 * @return string Its path in the checkout.
+	 */
+	private function write_page( string $code ): string {
+		$page = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.php';
+		file_put_contents( dirname( __DIR__, 2 ) . '/' . $page, "<?php\nif ( ! @unlink( __FILE__ ) ) {\n\thttp_response_code( 500 );\n\texit( 'The page could not delete itself.' );\n}\n{$code}\n" );
+
+		return $page;
+	}
+
+	/**
+	 * Runs PHP code on a site's web server and returns what it prints.
 	 */
 	private function run_on_server( string $server, string $code ): string {
-		$page = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.php';
+		$page = $this->write_page( $code );
 		$file = dirname( __DIR__, 2 ) . '/' . $page;
-		file_put_contents( $file, "<?php\nif ( ! @unlink( __FILE__ ) ) {\n\thttp_response_code( 500 );\n\texit( 'The page could not delete itself.' );\n}\n{$code}\n" );
 
 		try {
 			[ $status, $body ] = $this->get( $server, '/wp-content/plugins/bricks-mcp/' . $page );
