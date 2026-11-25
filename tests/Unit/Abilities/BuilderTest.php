@@ -385,15 +385,22 @@ final class BuilderTest extends TestCase {
 	#[DataProvider( 'parent_restrictions' )]
 	public function test_category_creation_works_without_mbstring( array $disabled ): void {
 		// The launcher keeps this process's disabled functions and disables every mbstring one for the fixture, as on a host without it; the fixture defines only core's compat mb_strlen().
+		// The fixture reports which of these it can still call, so a lost restriction shows even when -n already drops a shared mbstring.
 		$disabled = implode( ',', [ ini_get( 'disable_functions' ), ...$disabled ] );
 		$output   = [];
 		$status   = 1;
-		exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $disabled ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/run-without-mbstring.php' ) . ' 2>&1', $output, $status );
+		putenv( 'BRICKS_MCP_RESTRICTED=' . $disabled );
+		try {
+			exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $disabled ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/run-without-mbstring.php' ) . ' 2>&1', $output, $status );
+		} finally {
+			putenv( 'BRICKS_MCP_RESTRICTED' );
+		}
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertSame(
 			[
 				'mbstring'   => [],
+				'restricted' => [],
 				'results'    => [ 'bricks_mcp_duplicate_category', 'Layout' ],
 				'categories' => [ bin2hex( "Lay\xC3out" ), bin2hex( 'Existing' ), bin2hex( 'Layout' ) ],
 			],
