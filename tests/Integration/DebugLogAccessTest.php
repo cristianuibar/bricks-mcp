@@ -187,11 +187,14 @@ PHP;
 	 * The second run kept the first run's directory aside and made its own, which the first
 	 * run's cleanup removes before it puts the log back. The second run's cleanup then finds
 	 * that log where its directory was: it leaves it there instead of moving its planted file
-	 * over it and deleting it, and reports its own file as lost.
+	 * over it and deleting it, and reports its own file as lost. That holds too when the second
+	 * cleanup saw the path free just before the first one put the log back.
 	 *
 	 * Needs no web server: it runs each step's PHP here, on a path of its own.
+	 *
+	 * @dataProvider second_cleanup_views
 	 */
-	public function test_overlapping_cleanups_keep_the_log_at_the_earlier_target(): void {
+	public function test_overlapping_cleanups_keep_the_log_at_the_earlier_target( bool $seen_free ): void {
 		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
 		$path   = "{$folder}/bricks-mcp-access-test.log";
 		$log    = "The site's own log\n";
@@ -207,7 +210,7 @@ PHP;
 			$second_swapping = self::run_here( $second['swap'] );
 			$this->assertSame( [ 'planted held', 'made moved', 'planted held', 'made moved' ], [ $first_planting, $first_swapping, $second_planting, $second_swapping ] );
 			$first_restored  = self::run_here( $first['restore']( $first_planting, $first_swapping ) );
-			$second_restored = self::run_here( $second['restore']( $second_planting, $second_swapping ) );
+			$second_restored = self::run_here( $second['restore']( $second_planting, $second_swapping ), $seen_free );
 
 			clearstatcache();
 			$this->assertTrue( is_file( $path ) && file_get_contents( $path ) === $log, "The second cleanup replaced the log at {$path}." );
@@ -219,6 +222,16 @@ PHP;
 			}
 			rmdir( $folder );
 		}
+	}
+
+	/**
+	 * @return array<string, array{bool}>
+	 */
+	public static function second_cleanup_views(): array {
+		return [
+			'second cleanup sees the log' => [ false ],
+			'second cleanup sees a free path' => [ true ],
+		];
 	}
 
 	/**
@@ -661,8 +674,15 @@ PHP;
 
 	/**
 	 * Runs PHP code in a PHP process of its own here and returns what it prints, the way run_on_server() does on a site.
+	 *
+	 * @param bool $seen_free Whether every file_exists() and is_link() in the code reports nothing there, as a check
+	 *                        made just before another run's cleanup puts a file back would.
 	 */
-	private static function run_here( string $code ): string {
+	private static function run_here( string $code, bool $seen_free = false ): string {
+		if ( $seen_free ) {
+			$code = "namespace BricksMCP\\Tests\\SeenFree;\nfunction file_exists( string \$path ): bool { return false; }\nfunction is_link( string \$path ): bool { return false; }\n{$code}";
+		}
+
 		return (string) shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $code ) );
 	}
 
@@ -681,23 +701,25 @@ PHP;
 		$aside   = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
 		$held    = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
 		$old_log = var_export( 'An earlier run logged here ' . bin2hex( random_bytes( 8 ) ) . "\n", true );
-		$free    = "! file_exists( {$earlier} ) && ! is_link( {$earlier} )";
+		// fopen( 'x' ) and link() fail on whatever is at the path, so nothing another run puts there between a check and a write is replaced.
+		$put_back = static fn ( string $from ): string => "@link( {$from}, {$earlier} ) && unlink( {$from} )";
 
 		return [
 			'plant'   => "\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
-				. "echo {$free} && false !== @file_put_contents( {$earlier}, {$old_log} ) ? 'planted' : 'blocked', \$held ? ' held' : ' none';",
+				. "\$log = @fopen( {$earlier}, 'x' );\necho \$log && false !== fwrite( \$log, {$old_log} ) && fclose( \$log ) ? 'planted' : 'blocked', \$held ? ' held' : ' none';",
 			'swap'    => "\$moved = ! is_dir( {$earlier} ) && ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$aside} );\n"
 				. "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' ), \$moved ? ' moved' : ' kept';",
-			'restore' => static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $free ): string {
+			'restore' => static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $put_back ): string {
 				[ $planted, $kept ] = explode( ' ', $planting ) + [ '', '' ];
 				[ $dir, $file ]     = explode( ' ', $swapping ) + [ '', '' ];
 				// Another run's cleanup may already have put a file back where the directory was.
-				$undo = ( 'made' === $dir ? "@rmdir( {$earlier} );\n" : '' ) . ( 'moved' === $file ? "{$free} && rename( {$aside}, {$earlier} );\n" : '' );
+				$undo = ( 'made' === $dir ? "@rmdir( {$earlier} );\n" : '' ) . ( 'moved' === $file ? $put_back( $aside ) . ";\n" : '' );
 				if ( 'planted' === $planted ) {
 					$undo .= "\$back = is_file( {$earlier} ) && {$old_log} === file_get_contents( {$earlier} );\n\$back && unlink( {$earlier} );\necho \$back ? 'back' : 'lost';\n";
 				}
 
-				return $undo . ( 'held' === $kept ? "{$free} && rename( {$held}, {$earlier} );" : '' );
+				// A directory cannot be linked; renamed, it replaces at most an empty directory, never a file.
+				return $undo . ( 'held' === $kept ? "is_dir( {$held} ) && ! is_link( {$held} ) ? @rename( {$held}, {$earlier} ) : " . $put_back( $held ) . ';' : '' );
 			},
 		];
 	}
