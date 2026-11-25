@@ -26,6 +26,8 @@ function bricks_mcp_test_reset(): void {
 	$GLOBALS['_bricks_mcp_test_object_caps']        = [];
 	$GLOBALS['_bricks_mcp_test_current_user_can']   = true;
 	$GLOBALS['_bricks_mcp_test_current_user_id']    = 1;
+	$GLOBALS['_bricks_mcp_test_current_user']       = null;
+	$GLOBALS['_bricks_mcp_test_user_caps_store']    = [];
 	$GLOBALS['_bricks_mcp_test_posts']              = [];
 	$GLOBALS['_bricks_mcp_test_post_meta']          = [];
 	$GLOBALS['_bricks_mcp_test_abilities']          = [];
@@ -66,6 +68,88 @@ if ( ! class_exists( 'WP_Post' ) ) {
 				$this->$key = $value;
 			}
 		}
+	}
+}
+
+if ( ! class_exists( 'WP_User' ) ) {
+	#[AllowDynamicProperties]
+	class WP_User {
+		/** @var int */
+		public int $ID = 0;
+		/** @var array<string, bool> */
+		public array $caps = [];
+		/** @var array<string, bool> */
+		public array $allcaps = [];
+		/** @var int */
+		public int $site_id = 1;
+		/** @var string */
+		public string $cap_key = 'wp_capabilities';
+
+		/**
+		 * @param int|object           $data    User ID or object with an ID.
+		 * @param string               $name    Unused, kept for the core signature.
+		 * @param int|string           $site_id Site ID.
+		 */
+		public function __construct( mixed $data = 0, string $name = '', int|string $site_id = '' ) {
+			unset( $name );
+			$this->ID = is_object( $data ) ? (int) ( $data->ID ?? 0 ) : (int) $data;
+			if ( $this->ID > 0 ) {
+				$this->for_site( $site_id );
+			}
+		}
+
+		/**
+		 * @param int|string $site_id Site ID; empty means the current site.
+		 * @return void
+		 */
+		public function for_site( int|string $site_id = 0 ): void {
+			if ( ! empty( $site_id ) ) {
+				$this->site_id = absint( $site_id );
+			}
+			$this->caps = $this->get_caps_data();
+			$this->get_role_caps();
+		}
+
+		/**
+		 * @return void
+		 */
+		public function get_role_caps(): void {
+			$this->allcaps = [];
+			foreach ( $this->caps as $cap => $granted ) {
+				if ( $granted ) {
+					$this->allcaps[ (string) $cap ] = true;
+				}
+			}
+		}
+
+		/**
+		 * @return array<string, bool>
+		 */
+		private function get_caps_data(): array {
+			$cache_key = 'user_meta:' . $this->ID;
+			if ( isset( $GLOBALS['_bricks_mcp_test_cache'] ) && array_key_exists( $cache_key, $GLOBALS['_bricks_mcp_test_cache'] ) ) {
+				$caps = $GLOBALS['_bricks_mcp_test_cache'][ $cache_key ];
+				return is_array( $caps ) ? $caps : [];
+			}
+			$caps = $GLOBALS['_bricks_mcp_test_user_caps_store'][ $this->ID ] ?? [];
+			$caps = is_array( $caps ) ? $caps : [];
+			if ( isset( $GLOBALS['_bricks_mcp_test_cache'] ) && is_array( $GLOBALS['_bricks_mcp_test_cache'] ) ) {
+				$GLOBALS['_bricks_mcp_test_cache'][ $cache_key ] = $caps;
+			}
+			return $caps;
+		}
+	}
+}
+
+if ( ! function_exists( 'wp_get_current_user' ) ) {
+	function wp_get_current_user(): WP_User {
+		$user = $GLOBALS['_bricks_mcp_test_current_user'] ?? null;
+		if ( $user instanceof WP_User ) {
+			return $user;
+		}
+		$user                                       = new WP_User( get_current_user_id() );
+		$GLOBALS['_bricks_mcp_test_current_user'] = $user;
+		return $user;
 	}
 }
 

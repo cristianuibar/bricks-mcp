@@ -241,6 +241,91 @@ final class MediaTest extends TestCase {
 	 *
 	 * @return void
 	 */
+	public function test_import_unsplash_retry_after_caller_demotion_does_not_return_private_replacement(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 900,
+				'post_type'   => 'page',
+				'post_status' => 'private',
+			]
+		);
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 42,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'post_parent' => 0,
+			],
+			[
+				'_unsplash_photo_id'            => 'photo_77',
+				'_unsplash_attribution_pending' => '1',
+				'_wp_attached_file'             => '2026/11/unsplash-photo_77.webp',
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_user_caps_store'][1] = [
+			'upload_files'       => true,
+			'edit_posts'         => true,
+			'edit_private_posts' => true,
+			'read_private_posts' => true,
+			'read'               => true,
+		];
+		$GLOBALS['_bricks_mcp_test_current_user']       = new \WP_User( 1 );
+		$GLOBALS['_bricks_mcp_test_get_posts_return']   = static function ( array $args ): array {
+			$matched = [];
+			foreach ( $GLOBALS['_bricks_mcp_test_posts'] as $id => $post ) {
+				if ( 'attachment' === $post->post_type && 'inherit' === $post->post_status && ( $GLOBALS['_bricks_mcp_test_post_meta'][ $id ]['_unsplash_photo_id'] ?? null ) === $args['meta_value'] ) {
+					$matched[] = $id;
+				}
+			}
+			rsort( $matched );
+			return array_slice( $matched, 0, 1 );
+		};
+		$upload_called                                  = false;
+		wp_register_ability(
+			'bricks/upload-media',
+			[
+				'execute_callback' => static function () use ( &$upload_called ): array {
+					$upload_called = true;
+					return [ 'id' => 999 ];
+				},
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function (): array {
+			wp_delete_attachment( 42, true );
+			bricks_mcp_test_add_post(
+				[
+					'ID'          => 950,
+					'post_type'   => 'attachment',
+					'post_status' => 'inherit',
+					'post_parent' => 900,
+				],
+				[
+					'_unsplash_photo_id'         => 'photo_77',
+					'_unsplash_photographer'     => 'Jane Doe',
+					'_unsplash_photographer_url' => 'https://unsplash.com/@jane?utm_source=bricks_mcp&utm_medium=referral',
+				]
+			);
+			$GLOBALS['_bricks_mcp_test_user_caps_store'][1] = [ 'read' => true ];
+
+			return [
+				'response' => [ 'code' => 429 ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => '{}',
+			];
+		};
+
+		$result = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'photo_77' ] );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'bricks_mcp_unsplash_api_error', $result->get_error_code() );
+		$this->assertSame( 429, $result->get_error_data()['status'] );
+		$this->assertFalse( $upload_called );
+		$this->assertSame( [ 950 ], array_keys( array_filter( $GLOBALS['_bricks_mcp_test_posts'], static fn( $post ): bool => 'attachment' === $post->post_type ) ) );
+		$this->assertSame( 'https://unsplash.com/@jane?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( 950, '_unsplash_photographer_url', true ) );
+		$this->assertSame( 900, get_post( 950 )->post_parent );
+	}
+
 	public function test_import_unsplash_dedup_completes_missing_attribution(): void {
 		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
 		bricks_mcp_test_add_post(
@@ -2158,6 +2243,133 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 0, get_post( 88 )->post_parent );
 		$this->assertSame( 'photo_88', get_post_meta( 88, '_unsplash_photo_id', true ) );
 		$this->assertSame( 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( 88, '_unsplash_photographer_url', true ) );
+	}
+
+	/**
+	 * @return void
+	 */
+	public function test_import_unsplash_role_loss_during_download_or_upload_blocks_upload_or_attach(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		$full_caps                         = [
+			'upload_files'       => true,
+			'edit_posts'         => true,
+			'edit_private_posts' => true,
+			'read_private_posts' => true,
+			'read'               => true,
+		];
+		$image_url                         = 'https://images.unsplash.com/photo-89?w=1080';
+		$demote_at                         = '';
+		$upload_called                     = false;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$demote_at ): array {
+			if ( $image_url === $url ) {
+				if ( 'download' === $demote_at ) {
+					$GLOBALS['_bricks_mcp_test_user_caps_store'][1] = [ 'read' => true ];
+				}
+				return [
+					'response' => [ 'code' => 200 ],
+					'headers'  => [ 'content-type' => 'image/jpeg' ],
+					'body'     => "\xFF\xD8\xFF\xE0role-loss",
+				];
+			}
+			if ( 'https://api.unsplash.com/photos/photo_89' === $url ) {
+				return [
+					'response' => [ 'code' => 200 ],
+					'headers'  => [ 'content-type' => 'application/json' ],
+					'body'     => (string) wp_json_encode(
+						[
+							'id'    => 'photo_89',
+							'urls'  => [ 'regular' => $image_url ],
+							'links' => [ 'download_location' => 'https://api.unsplash.com/photos/photo_89/download' ],
+							'user'  => [
+								'name'  => 'Pat',
+								'links' => [ 'html' => 'https://unsplash.com/@pat' ],
+							],
+						]
+					),
+				];
+			}
+			return [
+				'response' => [ 'code' => 200 ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => '{}',
+			];
+		};
+		wp_register_ability(
+			'bricks/upload-media',
+			[
+				'execute_callback' => static function () use ( &$demote_at, &$upload_called ): array {
+					$upload_called = true;
+					bricks_mcp_test_add_post(
+						[
+							'ID'          => 88,
+							'post_type'   => 'attachment',
+							'post_status' => 'inherit',
+							'post_parent' => 0,
+						]
+					);
+					if ( 'upload' === $demote_at ) {
+						$GLOBALS['_bricks_mcp_test_user_caps_store'][1] = [ 'read' => true ];
+					}
+					return [
+						'id'  => 88,
+						'url' => 'https://example.test/uploads/88.jpg',
+					];
+				},
+			]
+		);
+		$reset_fixture = static function () use ( $full_caps, &$upload_called ): void {
+			$GLOBALS['_bricks_mcp_test_posts']              = [];
+			$GLOBALS['_bricks_mcp_test_post_meta']          = [];
+			$GLOBALS['_bricks_mcp_test_cache']              = [];
+			$GLOBALS['_bricks_mcp_test_get_posts_return']   = [];
+			$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] = [];
+			$upload_called                                  = false;
+			bricks_mcp_test_add_post(
+				[
+					'ID'        => 15,
+					'post_type' => 'page',
+				]
+			);
+			$GLOBALS['_bricks_mcp_test_user_caps_store'][1] = $full_caps;
+			$GLOBALS['_bricks_mcp_test_current_user']       = new \WP_User( 1 );
+		};
+		$scenarios = [
+			'download, with postId'    => [ 'download', 15 ],
+			'download, without postId' => [ 'download', 0 ],
+			'upload, with postId'      => [ 'upload', 15 ],
+		];
+		foreach ( $scenarios as $label => [ $scenario_demote_at, $scenario_post_id ] ) {
+			$reset_fixture();
+			$demote_at = $scenario_demote_at;
+			$input     = [ 'photoId' => 'photo_89' ];
+			if ( $scenario_post_id > 0 ) {
+				$input['postId'] = $scenario_post_id;
+			}
+			$result = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( $input );
+			$this->assertInstanceOf( \WP_Error::class, $result, $label );
+			$this->assertSame( 'bricks_mcp_forbidden', $result->get_error_code(), $label );
+			$this->assertSame( 403, $result->get_error_data()['status'], $label );
+			if ( 'upload' !== $scenario_demote_at ) {
+				$this->assertFalse( $upload_called, $label );
+				$this->assertArrayNotHasKey( 88, $GLOBALS['_bricks_mcp_test_posts'], $label );
+				$this->assertCount( 2, $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'], $label );
+				continue;
+			}
+			$this->assertTrue( $upload_called, $label );
+			$this->assertSame( 0, get_post( 88 )->post_parent, $label );
+			$this->assertSame( 'photo_89', get_post_meta( 88, '_unsplash_photo_id', true ), $label );
+			$this->assertSame( 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( 88, '_unsplash_photographer_url', true ), $label );
+			$GLOBALS['_bricks_mcp_test_user_caps_store'][1] = $full_caps;
+			wp_cache_delete( 1, 'user_meta' );
+			wp_get_current_user()->for_site();
+			$GLOBALS['_bricks_mcp_test_get_posts_return'] = [ 88 ];
+			$retried = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( $input );
+			$this->assertIsArray( $retried, $label );
+			$this->assertTrue( $retried['duplicate'], $label );
+			$this->assertSame( 88, $retried['attachmentId'], $label );
+			$this->assertSame( 15, $retried['postId'], $label );
+			$this->assertSame( 15, get_post( 88 )->post_parent, $label );
+		}
 	}
 
 	/**

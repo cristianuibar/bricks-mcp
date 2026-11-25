@@ -507,6 +507,29 @@ if ( ! function_exists( 'current_user_can' ) ) {
 		if ( isset( $GLOBALS['_bricks_mcp_test_caps'] ) && array_key_exists( $capability, $GLOBALS['_bricks_mcp_test_caps'] ) ) {
 			return (bool) $GLOBALS['_bricks_mcp_test_caps'][ $capability ];
 		}
+		$user = $GLOBALS['_bricks_mcp_test_current_user'] ?? null;
+		if ( $user instanceof \WP_User && array_key_exists( $user->ID, $GLOBALS['_bricks_mcp_test_user_caps_store'] ?? [] ) ) {
+			if ( 0 === $object_id || ! in_array( $capability, [ 'edit_post', 'read_post' ], true ) ) {
+				return ! empty( $user->allcaps[ $capability ] );
+			}
+			$post = get_post( $object_id );
+			if ( ! $post ) {
+				return false;
+			}
+			$status_post = $post;
+			while ( 'attachment' === $status_post->post_type && 'inherit' === $status_post->post_status && 0 !== (int) ( $status_post->post_parent ?? 0 ) ) {
+				$parent = get_post( (int) $status_post->post_parent );
+				if ( ! $parent ) {
+					break;
+				}
+				$status_post = $parent;
+			}
+			$private = 'private' === $status_post->post_status;
+			if ( 'edit_post' === $capability ) {
+				return ! empty( $user->allcaps[ $private ? 'edit_private_posts' : 'edit_posts' ] );
+			}
+			return $private ? ! empty( $user->allcaps['read_private_posts'] ) : ! empty( $user->allcaps['read'] );
+		}
 		return $GLOBALS['_bricks_mcp_test_current_user_can'] ?? true;
 	}
 }

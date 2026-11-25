@@ -251,6 +251,11 @@ final class Media implements Module {
 		$photo     = $this->unsplash_get_json( $photo_url, $api_key );
 
 		if ( null !== $existing_id ) {
+			$current_user = wp_get_current_user();
+			if ( $current_user instanceof \WP_User && $current_user->ID > 0 ) {
+				wp_cache_delete( $current_user->ID, 'user_meta' );
+				$current_user->for_site();
+			}
 			// The request may hold the attachment, its meta or its parent post from before the Unsplash request, such as
 			// the target post loaded by the permission check, so the checks below read them afresh.
 			clean_post_cache( $existing_id );
@@ -390,6 +395,16 @@ final class Media implements Module {
 		$downloaded = $this->download_unsplash_image( $image_url, $photo_id );
 		if ( is_wp_error( $downloaded ) ) {
 			return $downloaded;
+		}
+
+		$current_user = wp_get_current_user();
+		if ( $current_user instanceof \WP_User && $current_user->ID > 0 ) {
+			wp_cache_delete( $current_user->ID, 'user_meta' );
+			$current_user->for_site();
+		}
+		$upload = $this->check_upload_permission();
+		if ( is_wp_error( $upload ) ) {
+			return $upload;
 		}
 
 		if ( $post_id > 0 ) {
@@ -1499,6 +1514,11 @@ final class Media implements Module {
 	 * @return true|\WP_Error
 	 */
 	private function attach_to_post( int $attachment_id, int $post_id ): bool|\WP_Error {
+		$current_user = wp_get_current_user();
+		if ( $current_user instanceof \WP_User && $current_user->ID > 0 ) {
+			wp_cache_delete( $current_user->ID, 'user_meta' );
+			$current_user->for_site();
+		}
 		$this->clean_post_cache_with_parents( $post_id );
 		$target = Access::edit_post( $post_id );
 		if ( is_wp_error( $target ) ) {
