@@ -253,6 +253,20 @@ final class Media implements Module {
 		$photo_url = self::UNSPLASH_API_BASE . '/photos/' . rawurlencode( $photo_id );
 		$photo     = $this->unsplash_get_json( $photo_url, $api_key );
 
+		if ( null !== $existing_id ) {
+			// The request may hold the attachment, its meta or its parent post from before the Unsplash request, such as
+			// the target post loaded by the permission check, so the checks below read them afresh.
+			clean_post_cache( $existing_id );
+			$existing_post = get_post( $existing_id );
+			if ( ! $existing_post || 'attachment' !== $existing_post->post_type || 'inherit' !== $existing_post->post_status ) {
+				// Its uploader deleted or trashed it during the request, so it is not returned and this call imports anew.
+				$existing_id = null;
+				$pending     = false;
+			} elseif ( (int) ( $existing_post->post_parent ?? 0 ) > 0 ) {
+				clean_post_cache( (int) $existing_post->post_parent );
+			}
+		}
+
 		if ( is_wp_error( $photo ) ) {
 			// A legacy attachment always deduplicates: when Unsplash cannot credit it, it is returned as it is.
 			return null !== $existing_id && ! $pending ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
@@ -262,14 +276,6 @@ final class Media implements Module {
 			? sanitize_text_field( $photo['user']['name'] )
 			: '';
 		if ( null !== $existing_id ) {
-			// The request may hold the attachment, its meta or its parent post from before the Unsplash request, such as
-			// the target post loaded by the permission check, so the checks below read them afresh.
-			clean_post_cache( $existing_id );
-			$existing_parent = (int) ( get_post( $existing_id )->post_parent ?? 0 );
-			if ( $existing_parent > 0 ) {
-				clean_post_cache( $existing_parent );
-			}
-
 			if ( '' === $photographer ) {
 				// A name saved by an earlier attempt, or by a repair that finished meanwhile, is kept rather than
 				// erased or replaced by a response without one.

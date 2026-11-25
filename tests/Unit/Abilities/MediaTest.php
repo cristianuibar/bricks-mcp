@@ -1463,6 +1463,53 @@ final class MediaTest extends TestCase {
 		$this->assertSame( $after_trash['attachmentId'], $after_purge['attachmentId'] );
 		$this->assertTrue( $after_purge['duplicate'] );
 
+		// A kept upload that its uploader deletes while a retry waits on Unsplash is not returned, to an editor or to an
+		// author who could read it: the retry uploads an attachment of its own, credited and attached to its post.
+		foreach ( [ 'editor', 'reader' ] as $retrier ) {
+			$clear_attachments();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+			$kept_error = $import();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			$this->assertInstanceOf( \WP_Error::class, $kept_error, $retrier );
+			$deleted_id = $kept_error->get_error_data()['attachmentId'];
+			if ( 'reader' === $retrier ) {
+				$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ] = false;
+			}
+			$on_api_fetch = static function () use ( $deleted_id ): void {
+				wp_delete_attachment( $deleted_id, true );
+			};
+			$after_delete = $import();
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ] );
+			$this->assertIsArray( $after_delete, $retrier );
+			$this->assertNotSame( $deleted_id, $after_delete['attachmentId'], $retrier );
+			$this->assertFalse( $after_delete['duplicate'], $retrier );
+			$this->assertSame( 15, $after_delete['postId'], $retrier );
+			$this->assertSame( [ $after_delete['attachmentId'] ], $attachment_ids(), $retrier );
+			$this->assertSame( 'photo_77', get_post_meta( $after_delete['attachmentId'], '_unsplash_photo_id', true ), $retrier );
+			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( $after_delete['attachmentId'], '_unsplash_photographer_url', true ), $retrier );
+		}
+
+		// A legacy attachment deleted while its credit backfill waits on a failing Unsplash request is not returned either.
+		$clear_attachments();
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 600,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'post_parent' => 0,
+			],
+			[ '_unsplash_photo_id' => 'photo_77' ]
+		);
+		$api_code     = 429;
+		$on_api_fetch = static function (): void {
+			wp_delete_attachment( 600, true );
+		};
+		$legacy_deleted = $import();
+		$api_code       = 200;
+		$this->assertInstanceOf( \WP_Error::class, $legacy_deleted );
+		$this->assertSame( 429, $legacy_deleted->get_error_data()['status'] );
+		$this->assertSame( [], $attachment_ids() );
+
 		// An ordinary upload that shares the import's file name is left alone, and the import uploads its own.
 		$clear_attachments();
 		bricks_mcp_test_add_post(
