@@ -7,6 +7,8 @@
  * compat mb_strlen() is defined, as on a site without the extension. Prints a JSON result with
  * the internal mb_* functions still available, the functions BuilderTest disabled (listed in
  * BRICKS_MCP_RESTRICTED) that are still callable, each ability reply and the stored category names.
+ * The list is read as PHP 8.2 reads disable_functions: names split on commas and spaces, matched
+ * case-sensitively, so an uppercase name PHP never disabled is not reported.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
@@ -44,7 +46,7 @@ foreach ( [ 'EXISTING', 'Layout' ] as $bricks_mcp_category ) {
 echo wp_json_encode(
 	[
 		'mbstring'   => array_values( array_filter( get_defined_functions()['internal'], static fn( string $bricks_mcp_function ): bool => str_starts_with( $bricks_mcp_function, 'mb_' ) ) ),
-		'restricted' => array_values( array_intersect( array_map( 'strtolower', array_map( 'trim', explode( ',', (string) getenv( 'BRICKS_MCP_RESTRICTED' ) ) ) ), get_defined_functions()['internal'] ) ),
+		'restricted' => array_values( array_intersect( preg_split( '/[ ,]+/', (string) getenv( 'BRICKS_MCP_RESTRICTED' ), -1, PREG_SPLIT_NO_EMPTY ), get_defined_functions()['internal'] ) ),
 		'results'    => $bricks_mcp_results,
 		'categories' => array_map( 'bin2hex', array_column( get_option( 'bricks_global_classes_categories', [] ), 'name' ) ),
 	]
