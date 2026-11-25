@@ -965,7 +965,7 @@ final class Content implements Module {
 
 			$requested = array_values( array_intersect( self::SEO_ROBOTS_FIELDS, array_keys( $fields ) ) );
 
-			if ( array() !== $requested && ! $this->update_seo_meta( $post_id, 'rank_math_robots', $robots ) ) {
+			if ( array() !== $requested && ! $this->update_seo_meta( $post_id, 'rank_math_robots', $robots ) && ! $this->rank_math_holds_robots( $post_id, $robots ) ) {
 				return $requested;
 			}
 
@@ -997,6 +997,25 @@ final class Content implements Module {
 		$robots = get_post_meta( $post_id, 'rank_math_robots', true );
 
 		return is_array( $robots ) ? array_values( $robots ) : [];
+	}
+
+	/**
+	 * Whether a post's Rank Math robots hold the same directives as a list, in any order.
+	 *
+	 * Called after update_seo_meta() refreshed the meta cache, so the stored row is read afresh.
+	 *
+	 * @param int      $post_id Post ID.
+	 * @param string[] $robots  Directives.
+	 * @return bool
+	 */
+	private function rank_math_holds_robots( int $post_id, array $robots ): bool {
+		$stored = array_unique( $this->rank_math_robots( $post_id ) );
+		$robots = array_unique( $robots );
+
+		sort( $stored );
+		sort( $robots );
+
+		return $stored === $robots;
 	}
 
 	/**
