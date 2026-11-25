@@ -153,18 +153,22 @@ if ( ! function_exists( 'update_metadata' ) ) {
 		if ( array_key_exists( $meta_key, $cached ) && $cached[ $meta_key ] === $meta_value ) {
 			return false;
 		}
-		// Otherwise, like WordPress, it writes and then clears the post's meta cache.
-		unset( $GLOBALS['_bricks_mcp_test_post_meta_cache'][ $object_id ] );
 		$data = [
 			'post_id'    => $object_id,
 			'meta_key'   => $meta_key,
 			'meta_value' => $meta_value,
 		];
-		// Then it updates the existing row, or adds one through add_metadata(), and returns false when the query fails.
+		// Otherwise, like WordPress, it updates the existing row, or adds one through add_metadata(), and returns false when
+		// the query fails or changes no row, keeping the post's meta cache; only a write that changed a row clears it.
 		if ( array_key_exists( $meta_key, $meta ) ) {
-			return (bool) $GLOBALS['wpdb']->update( $GLOBALS['wpdb']->postmeta, [ 'meta_value' => $meta_value ], array_diff_key( $data, [ 'meta_value' => true ] ) );
+			$result = (bool) $GLOBALS['wpdb']->update( $GLOBALS['wpdb']->postmeta, [ 'meta_value' => $meta_value ], array_diff_key( $data, [ 'meta_value' => true ] ) );
+		} else {
+			$result = $GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->postmeta, $data ) ? $GLOBALS['wpdb']->insert_id : false;
 		}
-		return $GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->postmeta, $data ) ? $GLOBALS['wpdb']->insert_id : false;
+		if ( $result ) {
+			unset( $GLOBALS['_bricks_mcp_test_post_meta_cache'][ $object_id ] );
+		}
+		return $result;
 	}
 }
 
