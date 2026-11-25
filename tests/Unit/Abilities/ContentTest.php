@@ -283,17 +283,40 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
-	 * A use-Facebook toggle the database refuses to switch off fails every Twitter override sent, not only the first,
-	 * though their own rows were saved: Rank Math ignores them all while the toggle stays on.
+	 * Stored Twitter titles and the error a refused use-Facebook toggle then gives.
 	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
+	 * @return array<string, array{0: array<string, string>, 1: string}>
+	 */
+	public static function refused_use_facebook_toggle_writes(): array {
+		return [
+			'both Twitter rows saved'       => [
+				[],
+				"The database did not switch off Rank Math's use-Facebook toggle, so Rank Math ignores the saved twitterTitle, twitterDescription. Re-read the SEO before retrying.",
+			],
+			'Twitter title update refused' => [
+				[ 'rank_math_twitter_title' => 'Old tweet' ],
+				"The database did not save twitterTitle, so those fields keep their stored values. The database did not switch off Rank Math's use-Facebook toggle, so Rank Math ignores the saved twitterDescription. Re-read the SEO before retrying.",
+			],
+		];
+	}
+
+	/**
+	 * A use-Facebook toggle the database refuses to switch off fails every Twitter override sent, not only the first:
+	 * Rank Math ignores them all while the toggle stays on. The error tells the overrides it saved from those it did not.
 	 *
+	 * @param array<string, string> $stored  Meta stored before the write; the fake database refuses to update these rows.
+	 * @param string                $message Expected error message.
 	 * @return void
 	 */
-	public function test_rank_math_refused_use_facebook_toggle_fails_every_twitter_override(): void {
+	#[DataProvider( 'refused_use_facebook_toggle_writes' )]
+	#[RunInSeparateProcess]
+	#[PreserveGlobalState( false )]
+	public function test_rank_math_refused_use_facebook_toggle_fails_every_twitter_override( array $stored, string $message ): void {
 		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
 		update_post_meta( self::POST_ID, 'rank_math_twitter_use_facebook', 'on' );
+		foreach ( $stored as $meta_key => $value ) {
+			update_post_meta( self::POST_ID, $meta_key, $value );
+		}
 		// Like wpdb when MySQL accepts the new Twitter rows but refuses the UPDATE of the existing toggle row.
 		$GLOBALS['wpdb'] = new class() extends \wpdb {
 			/**
@@ -324,6 +347,7 @@ final class ContentTest extends TestCase {
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'bricks_mcp_seo_write_failed', $result->get_error_code() );
 		$this->assertSame( [ 'twitterTitle', 'twitterDescription' ], $result->get_error_data()['failedFields'] );
+		$this->assertSame( $message, $result->get_error_message() );
 		$this->assertSame( 'Tweet description', get_post_meta( self::POST_ID, 'rank_math_twitter_description', true ) );
 		$this->assertSame( 'on', get_post_meta( self::POST_ID, 'rank_math_twitter_use_facebook', true ) );
 	}
