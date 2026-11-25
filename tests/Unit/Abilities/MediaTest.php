@@ -1708,31 +1708,35 @@ final class MediaTest extends TestCase {
 			$this->assertSame( [ $replacement['attachmentId'] ], $attachment_ids(), $retrier );
 		}
 
-		// A replacement that an editor attaches to a private post this caller can neither edit nor read is not returned:
-		// the retry uploads an attachment of its own, and the replacement keeps its parent.
+		// A replacement on a post that an editor makes private while the retry waits is not returned to an author who can
+		// neither edit nor read it, although the permission check loaded that post into the request's cache before: the
+		// retry uploads an attachment of its own, and the replacement keeps its parent.
 		$clear_attachments();
-		bricks_mcp_test_add_post(
-			[
-				'ID'          => 16,
-				'post_type'   => 'page',
-				'post_status' => 'private',
-			]
-		);
 		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
 		$kept_error = $import();
 		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
 		$this->assertInstanceOf( \WP_Error::class, $kept_error );
 		$deleted_id = $kept_error->get_error_data()['attachmentId'];
 		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ] = false;
-		$replacement  = null;
-		$on_api_fetch = static function () use ( $deleted_id, $import, &$replacement ): void {
+		$GLOBALS['_bricks_mcp_test_post_cache']                               = [];
+		$target_status = get_post( 15 )->post_status;
+		$replacement   = null;
+		$on_api_fetch  = static function () use ( $deleted_id, $import, &$replacement ): void {
 			wp_delete_attachment( $deleted_id, true );
-			$replacement = $import();
-			$GLOBALS['_bricks_mcp_test_posts'][ $replacement['attachmentId'] ]->post_parent = 16;
-			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement['attachmentId'] ] = false;
-			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement['attachmentId'] ] = false;
+			$replacement    = $import();
+			$replacement_id = $replacement['attachmentId'];
+			// The stored replacement is on the target post, as the database holds it after the other import's attach.
+			$GLOBALS['_bricks_mcp_test_posts'][ $replacement_id ]->post_parent      = 15;
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_status                    = 'private';
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] = static function () use ( $replacement_id ): bool {
+				$parent_id = get_post( $replacement_id )->post_parent;
+				return 0 === $parent_id || 'private' !== get_post( $parent_id )->post_status;
+			};
 		};
 		$private_replace = $import();
+		$GLOBALS['_bricks_mcp_test_post_cache']             = null;
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = $target_status;
 		unset(
 			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ],
 			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement['attachmentId'] ],
@@ -1742,9 +1746,59 @@ final class MediaTest extends TestCase {
 		$this->assertIsArray( $private_replace );
 		$this->assertNotContains( $private_replace['attachmentId'], [ $deleted_id, $replacement['attachmentId'] ] );
 		$this->assertFalse( $private_replace['duplicate'] );
-		$this->assertSame( 15, $private_replace['postId'] );
-		$this->assertSame( 16, get_post( $replacement['attachmentId'] )->post_parent );
+		$this->assertSame( 15, get_post( $replacement['attachmentId'] )->post_parent );
 		$this->assertEqualsCanonicalizing( [ $replacement['attachmentId'], $private_replace['attachmentId'] ], $attachment_ids() );
+
+		// The retry returns the replacement it checked access to, not a newer private import of the photo that appears
+		// after that check.
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$deleted_id = $kept_error->get_error_data()['attachmentId'];
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ] = false;
+		$replacement  = null;
+		$on_api_fetch = static function () use ( $deleted_id, $import, &$replacement ): void {
+			wp_delete_attachment( $deleted_id, true );
+			$replacement    = $import();
+			$replacement_id = $replacement['attachmentId'];
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] = static function (): bool {
+				if ( ! isset( $GLOBALS['_bricks_mcp_test_posts'][950] ) ) {
+					bricks_mcp_test_add_post(
+						[
+							'ID'           => 950,
+							'post_type'    => 'attachment',
+							'post_status'  => 'inherit',
+							'post_parent'  => 16,
+							'post_excerpt' => 'Private caption',
+						],
+						[
+							'_unsplash_photo_id'         => 'photo_77',
+							'_unsplash_photographer_url' => 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral',
+						]
+					);
+					$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][950] = false;
+					$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][950] = false;
+				}
+
+				return true;
+			};
+		};
+		$checked_replace = $import();
+		unset(
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ],
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement['attachmentId'] ],
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement['attachmentId'] ],
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][950],
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][950]
+		);
+		$this->assertIsArray( $replacement );
+		$this->assertIsArray( $checked_replace );
+		$this->assertSame( $replacement['attachmentId'], $checked_replace['attachmentId'] );
+		$this->assertTrue( $checked_replace['duplicate'] );
+		$this->assertEqualsCanonicalizing( [ $replacement['attachmentId'], 950 ], $attachment_ids() );
 
 		// A legacy attachment deleted while its credit backfill waits on a failing Unsplash request is not returned either.
 		$clear_attachments();

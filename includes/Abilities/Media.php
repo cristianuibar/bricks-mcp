@@ -227,10 +227,7 @@ final class Media implements Module {
 			// upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is an unfinished
 			// import even if its pending mark failed. Releases before stored attribution kept the Unsplash file name.
 			$uncredited = '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
-			$pending    = $uncredited && (
-				'' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true )
-				|| str_starts_with( wp_basename( (string) get_post_meta( $existing_id, '_wp_attached_file', true ) ), 'unsplash-' )
-			);
+			$pending    = $this->is_unfinished_unsplash_import( $existing_id );
 			// A legacy attachment is completed when this caller can, else returned as it is.
 			$uncredited = $uncredited && ! $pending;
 			$completing = $pending || ( $uncredited && current_user_can( 'edit_post', $existing_id ) && '' !== $this->get_unsplash_api_key() );
@@ -260,16 +257,31 @@ final class Media implements Module {
 			$existing_post = get_post( $existing_id );
 			if ( ! $existing_post || 'attachment' !== $existing_post->post_type || 'inherit' !== $existing_post->post_status ) {
 				// Its uploader deleted or trashed it during the request, so it is not returned. Another import may have
-				// replaced it meanwhile: this call then starts over to deduplicate against that one, else it imports anew.
-				// A replacement this caller can neither edit nor read, such as one on an editor's private post, is not
-				// shown to it, so the caller imports its own.
+				// replaced it meanwhile: this call then deduplicates against that one, with this Unsplash response, rather
+				// than upload a second copy; else it imports anew. A replacement this caller can neither edit nor read, such
+				// as one on an editor's private post, is not shown to it, so the caller imports its own.
 				$replacement_id = $this->find_existing_unsplash_attachment( $photo_id );
-				if ( null !== $replacement_id && $replacement_id !== $existing_id
-					&& ( current_user_can( 'edit_post', $replacement_id ) || current_user_can( 'read_post', $replacement_id ) ) ) {
-					return $this->import_unsplash_photo( $input );
+				$deleted_id     = $existing_id;
+				$existing_id    = null;
+				$pending        = false;
+				if ( null !== $replacement_id && $replacement_id !== $deleted_id ) {
+					// The request may hold the replacement's parent from before it was attached, such as the target post.
+					clean_post_cache( $replacement_id );
+					$replacement = get_post( $replacement_id );
+					if ( $replacement && (int) ( $replacement->post_parent ?? 0 ) > 0 ) {
+						clean_post_cache( (int) $replacement->post_parent );
+					}
+					if ( current_user_can( 'edit_post', $replacement_id ) || current_user_can( 'read_post', $replacement_id ) ) {
+						// As at the start of an import, only an unfinished import, or a legacy one this caller can edit, is
+						// completed below; any other replacement is returned as it is.
+						$pending    = $this->is_unfinished_unsplash_import( $replacement_id );
+						$uncredited = '' === (string) get_post_meta( $replacement_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
+						if ( ! $pending && ( ! $uncredited || ! current_user_can( 'edit_post', $replacement_id ) ) ) {
+							return $this->reuse_existing_attachment( $replacement_id, $photo_id, $post_id );
+						}
+						$existing_id = $replacement_id;
+					}
 				}
-				$existing_id = null;
-				$pending     = false;
 			} else {
 				if ( (int) ( $existing_post->post_parent ?? 0 ) > 0 ) {
 					clean_post_cache( (int) $existing_post->post_parent );
@@ -1222,6 +1234,19 @@ final class Media implements Module {
 		}
 
 		return $this->format_existing_attachment( $attachment_id, $photo_id );
+	}
+
+	/**
+	 * Whether an attachment found by its Unsplash photo ID is an import that has not saved its credit yet.
+	 *
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool
+	 */
+	private function is_unfinished_unsplash_import( int $attachment_id ): bool {
+		return '' === (string) get_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true ) && (
+			'' !== (string) get_post_meta( $attachment_id, self::UNSPLASH_PENDING_META_KEY, true )
+			|| str_starts_with( wp_basename( (string) get_post_meta( $attachment_id, '_wp_attached_file', true ) ), 'unsplash-' )
+		);
 	}
 
 	/**
