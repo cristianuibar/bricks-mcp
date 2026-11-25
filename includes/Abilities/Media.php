@@ -302,33 +302,34 @@ final class Media implements Module {
 			// Saving a credit marks the attachment complete, so a response without the photo's user cannot complete it.
 			$malformed = ! is_array( $photo['user'] ?? null );
 
+			// Uploading again would duplicate the attachment, and its details are not shown to a user who cannot read it.
+			// Checked again after the Unsplash request, since an editor may attach it to a private post meanwhile.
+			if ( ! current_user_can( 'edit_post', $existing_id ) && ! current_user_can( 'read_post', $existing_id ) ) {
+				return $this->unsplash_import_incomplete_error();
+			}
+
+			if ( $malformed ) {
+				// As for other Unsplash failures, a legacy attachment is returned as it is, while an unfinished import fails
+				// for every caller rather than come back without its credit.
+				return $pending ? new \WP_Error(
+					'bricks_mcp_unsplash_parse_error',
+					__( 'Unexpected response format from the Unsplash API.', 'bricks-mcp' ),
+					[ 'status' => 502 ]
+				) : $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
+			}
+
 			// A user who can read but not edit an unfinished import gets it with the credit from Unsplash, which only an
 			// editor saves on it, rather than a second upload of the photo.
 			if ( ! current_user_can( 'edit_post', $existing_id ) ) {
-				// Uploading again would duplicate the attachment, and its details are not shown to a user who cannot read
-				// it. Checked again after the Unsplash request, since an editor may attach it to a private post meanwhile.
-				if ( ! current_user_can( 'read_post', $existing_id ) ) {
-					return $this->unsplash_import_incomplete_error();
-				}
-
 				$reused = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 
-				return is_wp_error( $reused ) || $malformed ? $reused : array_merge(
+				return is_wp_error( $reused ) ? $reused : array_merge(
 					$reused,
 					[
 						'photographer'    => '' !== $photographer ? $photographer : null,
 						'photographerUrl' => $photographer_url,
 					]
 				);
-			}
-
-			if ( $malformed ) {
-				// As for other Unsplash failures, a legacy attachment is returned as it is.
-				return $pending ? new \WP_Error(
-					'bricks_mcp_unsplash_parse_error',
-					__( 'Unexpected response format from the Unsplash API.', 'bricks-mcp' ),
-					[ 'status' => 502 ]
-				) : $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
 
 			// The attachment may already be in use, so a failure here keeps it for the next retry. A legacy attachment is

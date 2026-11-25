@@ -386,6 +386,15 @@ final class MediaTest extends TestCase {
 		$this->assertSame( '', get_post_meta( 42, '_unsplash_photographer_url', true ) );
 		$this->assertSame( '1', get_post_meta( 42, '_unsplash_attribution_pending', true ) );
 
+		// A caller who can read but not edit the unfinished import gets the same error, not it without its credit (#371).
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] = false;
+		$read_only = $import();
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] );
+		$this->assertInstanceOf( \WP_Error::class, $read_only );
+		$this->assertSame( 'bricks_mcp_unsplash_parse_error', $read_only->get_error_code() );
+		$this->assertSame( [ 'status' => 502 ], $read_only->get_error_data() );
+		$this->assertSame( '1', get_post_meta( 42, '_unsplash_attribution_pending', true ) );
+
 		$legacy = $import( 'legacy_1' );
 		$this->assertIsArray( $legacy );
 		$this->assertSame( 43, $legacy['attachmentId'] );
