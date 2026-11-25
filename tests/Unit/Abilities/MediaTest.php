@@ -1138,17 +1138,26 @@ final class MediaTest extends TestCase {
 
 			// An author who cannot read it either, as when an editor attached it to a private post, is refused without
 			// its caption, parent or ID, and gets no second upload, also when the editor attaches it during the lookup.
+			// Refused from the start, it gets the refusal without a request to Unsplash, even while Unsplash is rate-limited.
 			foreach ( [ false, true ] as $during_lookup ) {
 				$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ] = false;
 				$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = $during_lookup;
-				$on_api_fetch = $during_lookup ? static function () use ( $kept_id ): void {
-					$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = false;
-				} : null;
-				$unreadable = $import();
+				$api_code         = $during_lookup ? 200 : 429;
+				$reached_unsplash = false;
+				$on_api_fetch     = static function () use ( $during_lookup, $kept_id, &$reached_unsplash ): void {
+					$reached_unsplash = true;
+					if ( $during_lookup ) {
+						$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] = false;
+					}
+				};
+				$unreadable       = $import();
+				$api_code         = 200;
+				$on_api_fetch     = null;
 				unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $kept_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $kept_id ] );
 				$this->assertInstanceOf( \WP_Error::class, $unreadable, $label . $during_lookup );
 				$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $unreadable->get_error_code(), $label . $during_lookup );
 				$this->assertSame( [ 'status' => 403 ], $unreadable->get_error_data(), $label . $during_lookup );
+				$this->assertSame( $during_lookup, $reached_unsplash, $label . $during_lookup );
 				$this->assertSame( [ $kept_id ], $attachment_ids(), $label . $during_lookup );
 			}
 

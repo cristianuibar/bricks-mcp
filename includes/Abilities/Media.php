@@ -237,6 +237,12 @@ final class Media implements Module {
 			if ( ! $completing ) {
 				return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
+
+			// A user who can neither edit nor read an unfinished import is refused before the Unsplash request, so an
+			// Unsplash failure cannot hide the refusal. The check is repeated after that request.
+			if ( ! current_user_can( 'edit_post', $existing_id ) && ! current_user_can( 'read_post', $existing_id ) ) {
+				return $this->unsplash_import_incomplete_error();
+			}
 		}
 
 		$api_key = $this->get_unsplash_api_key();
@@ -290,13 +296,9 @@ final class Media implements Module {
 			// editor saves on it, rather than a second upload of the photo.
 			if ( ! current_user_can( 'edit_post', $existing_id ) ) {
 				// Uploading again would duplicate the attachment, and its details are not shown to a user who cannot read
-				// it. Checked after the Unsplash request, since an editor may attach it to a private post meanwhile.
+				// it. Checked again after the Unsplash request, since an editor may attach it to a private post meanwhile.
 				if ( ! current_user_can( 'read_post', $existing_id ) ) {
-					return new \WP_Error(
-						'bricks_mcp_unsplash_import_incomplete',
-						__( 'An earlier import of this Unsplash photo left an attachment without its attribution. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
-						[ 'status' => 403 ]
-					);
+					return $this->unsplash_import_incomplete_error();
 				}
 
 				$reused = $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
@@ -934,6 +936,19 @@ final class Media implements Module {
 		}
 
 		return '';
+	}
+
+	/**
+	 * Build the refusal for an unfinished import that the caller cannot edit or read.
+	 *
+	 * @return \WP_Error
+	 */
+	private function unsplash_import_incomplete_error(): \WP_Error {
+		return new \WP_Error(
+			'bricks_mcp_unsplash_import_incomplete',
+			__( 'An earlier import of this Unsplash photo left an attachment without its attribution. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
+			[ 'status' => 403 ]
+		);
 	}
 
 	/**
