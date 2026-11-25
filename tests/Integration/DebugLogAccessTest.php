@@ -102,7 +102,7 @@ echo PHP_EOL, wp_json_encode(
 PHP;
 
 	protected function setUp(): void {
-		if ( 'test_fixtures_left_in_the_checkout_are_ignored_by_git' !== $this->name() && gethostbyname( self::SERVER ) === self::SERVER ) {
+		if ( ! in_array( $this->name(), [ 'test_fixtures_left_in_the_checkout_are_ignored_by_git', 'test_run_during_another_leaves_the_earlier_target_alone', 'test_cleanup_that_cannot_put_the_log_back_reports_it' ], true ) && gethostbyname( self::SERVER ) === self::SERVER ) {
 			$this->markTestSkipped( 'Needs the wp-env tests site: run npm run test:integration.' );
 		}
 	}
@@ -157,22 +157,17 @@ PHP;
 	 * regular file takes its place, so a fresh site does not pass by making the directory alone.
 	 */
 	public function test_directory_at_an_earlier_target_does_not_stop_the_symlink_check(): void {
-		$path    = '/tmp/bricks-mcp-access-test.log';
-		$earlier = var_export( $path, true );
-		$aside   = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
-		$held    = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
-		$old_log = var_export( 'An earlier run logged here ' . bin2hex( random_bytes( 8 ) ) . "\n", true );
-		$fixture = "\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
-			. "echo ! file_exists( {$earlier} ) && ! is_link( {$earlier} ) && false !== @file_put_contents( {$earlier}, {$old_log} ) ? 'planted' : 'blocked', \$held ? ' held' : ' none';";
-		$setup   = "\$moved = ! is_dir( {$earlier} ) && ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$aside} );\n"
-			. "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' ), \$moved ? ' moved' : ' kept';";
-		[ $planted, $kept ] = explode( ' ', $this->run_on_server( self::SERVER, $fixture ) ) + [ '', '' ];
-		$dir                = '';
-		$file               = '';
+		$path              = '/tmp/bricks-mcp-access-test.log';
+		$steps             = self::earlier_target_steps( $path );
+		$planting          = $this->run_on_server( self::SERVER, $steps['plant'] );
+		$swapping          = '';
+		[ $planted ]       = explode( ' ', $planting );
 
 		try {
+			$this->assertNotSame( 'busy', $planted, "Another run holds {$path}.lock on the tests site, or one stopped before its cleanup: with no run going, put back what it kept under {$path}-<hex>, then remove the lock." );
 			$this->assertSame( 'planted', $planted, "Could not put a regular file at {$path} on the tests site." );
-			[ $dir, $file ] = explode( ' ', $this->run_on_server( self::SERVER, $setup ) ) + [ '', '' ];
+			$swapping       = $this->run_on_server( self::SERVER, $steps['swap'] );
+			[ $dir, $file ] = explode( ' ', $swapping ) + [ '', '' ];
 			$this->assertNotSame( 'blocked', $dir, "Could not make a directory at {$path} on the tests site." );
 			$this->assertSame( 'moved', $file, "The regular file at {$path} was not moved aside." );
 			$this->assert_symlinked_outside_log_denied();
@@ -180,15 +175,92 @@ PHP;
 			// A skip ends the run as OK without the HTTP check, the way the case once skipped on this file.
 			$this->fail( "The check skipped on the regular file at {$path} instead of running: {$e->getMessage()}" );
 		} finally {
-			$undo = ( 'made' === $dir ? "rmdir( {$earlier} );\n" : '' ) . ( 'moved' === $file ? "rename( {$aside}, {$earlier} );\n" : '' );
-			if ( 'planted' === $planted ) {
-				$undo .= "\$back = is_file( {$earlier} ) && {$old_log} === file_get_contents( {$earlier} );\nunlink( {$earlier} );\necho \$back ? 'back' : 'lost';\n";
-			}
-			$undo    .= 'held' === $kept ? "rename( {$held}, {$earlier} );" : '';
+			$undo     = $steps['restore']( $planting, $swapping );
 			$restored = '' === $undo ? '' : $this->run_on_server( self::SERVER, $undo );
 		}
 
-		$this->assertSame( 'back', $restored, "The regular file at {$path} did not come back as it was." );
+		$this->assertSame( 'back', $restored, "The regular file at {$path} did not come back as it was, or what the tests site held there is still under {$path}-<hex> with {$path}.lock." );
+	}
+
+	/**
+	 * A run that starts while another uses the earlier target is refused before it touches the path.
+	 *
+	 * Each run keeps aside what it finds there and puts it back after, so two runs at once kept
+	 * each other's files: in some orders both cleanups reported success with the site's log left
+	 * under a -<hex> name. The second run now changes nothing and has nothing to undo, and the
+	 * first one's cleanup puts the log back and leaves nothing else behind.
+	 *
+	 * Needs no web server: it runs each step's PHP here, on a path of its own.
+	 */
+	public function test_run_during_another_leaves_the_earlier_target_alone(): void {
+		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
+		$path   = "{$folder}/bricks-mcp-access-test.log";
+		$log    = "The site's own log\n";
+		mkdir( $folder );
+		file_put_contents( $path, $log );
+		$first  = self::earlier_target_steps( $path );
+		$second = self::earlier_target_steps( $path );
+
+		try {
+			$first_planting  = self::run_here( $first['plant'] );
+			$first_swapping  = self::run_here( $first['swap'] );
+			$second_planting = self::run_here( $second['plant'] );
+			$this->assertSame( [ 'planted held', 'made moved', 'busy' ], [ $first_planting, $first_swapping, $second_planting ] );
+			$this->assertSame( '', $second['restore']( $second_planting, '' ), 'The refused run has something to undo.' );
+			$first_restored = self::run_here( $first['restore']( $first_planting, $first_swapping ) );
+
+			clearstatcache();
+			$this->assertSame( 'back', $first_restored );
+			$this->assertSame( [ $path ], glob( "{$folder}/*" ), "The runs left more than the log in {$folder}." );
+			$this->assertSame( $log, file_get_contents( $path ) );
+		} finally {
+			foreach ( glob( "{$folder}/*" ) as $left ) {
+				is_dir( $left ) ? rmdir( $left ) : unlink( $left );
+			}
+			rmdir( $folder );
+		}
+	}
+
+	/**
+	 * A cleanup that cannot put the site's log back reports it, and keeps the lock so the next run stops too.
+	 *
+	 * A probe logging to the path can recreate it right after the cleanup removes its planted
+	 * file, so the log kept aside cannot go back there. The cleanup leaves the probe's file and
+	 * the kept log alone, prints lost instead of back, and leaves the lock for whoever puts the
+	 * log back by hand.
+	 *
+	 * Needs no web server: it runs each step's PHP here, on a path of its own.
+	 */
+	public function test_cleanup_that_cannot_put_the_log_back_reports_it(): void {
+		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
+		$path   = "{$folder}/bricks-mcp-access-test.log";
+		$log    = "The site's own log\n";
+		$probe  = "A probe's line\n";
+		mkdir( $folder );
+		file_put_contents( $path, $log );
+		$steps = self::earlier_target_steps( $path );
+		// The probe writes to the path as soon as the planted file is gone from it.
+		$recreate = 'namespace BricksMCP\Tests\Recreate;' . "\nfunction unlink( string \$file ): bool {\n\t\$gone = \\unlink( \$file );\n\t"
+			. var_export( $path, true ) . ' === $file && file_put_contents( $file, ' . var_export( $probe, true ) . " );\n\treturn \$gone;\n}\n";
+
+		try {
+			$planting = self::run_here( $steps['plant'] );
+			$swapping = self::run_here( $steps['swap'] );
+			$this->assertSame( [ 'planted held', 'made moved' ], [ $planting, $swapping ] );
+			$restored = self::run_here( $recreate . $steps['restore']( $planting, $swapping ) );
+
+			clearstatcache();
+			$this->assertSame( 'lost', $restored, 'The cleanup reported the log back while it was still kept aside.' );
+			$this->assertSame( $probe, file_get_contents( $path ) );
+			$kept = array_values( array_filter( glob( "{$path}-*" ), static fn ( string $file ): bool => file_get_contents( $file ) === $log ) );
+			$this->assertCount( 1, $kept, "The site's log is not kept aside next to {$path}." );
+			$this->assertDirectoryExists( "{$path}.lock", 'The cleanup removed the lock with the log still kept aside.' );
+		} finally {
+			foreach ( glob( "{$folder}/*" ) as $left ) {
+				is_dir( $left ) ? rmdir( $left ) : unlink( $left );
+			}
+			rmdir( $folder );
+		}
 	}
 
 	/**
@@ -627,6 +699,63 @@ PHP;
 				unlink( $file );
 			}
 		}
+	}
+
+	/**
+	 * Runs PHP code in a PHP process of its own here and returns what it prints, the way run_on_server() does on a site.
+	 */
+	private static function run_here( string $code ): string {
+		return (string) shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $code ) );
+	}
+
+	/**
+	 * The PHP each step of the earlier-target check runs, for the regular file an earlier run logged to at $path.
+	 *
+	 * plant first makes the lock <path>.lock, so one run at a time uses the path: a run that finds
+	 * the lock prints busy and changes nothing. It then keeps whatever is at the path aside under a
+	 * fresh -<hex> name and puts that file there; swap moves it aside under another and makes a
+	 * directory in its place. restore, given what both printed, undoes what they did and removes
+	 * the lock last. It moves nothing over what is at the path and deletes only its own planted file.
+	 * It prints back only when that file was there as planted and what the site held is back at the
+	 * path; when that cannot go back, it prints lost and keeps the lock.
+	 *
+	 * @return array{plant: string, swap: string, restore: \Closure(string, string): string} restore's code is '' when there is nothing to undo.
+	 */
+	private static function earlier_target_steps( string $path ): array {
+		$earlier = var_export( $path, true );
+		$aside   = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
+		$held    = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
+		$old_log = var_export( 'An earlier run logged here ' . bin2hex( random_bytes( 8 ) ) . "\n", true );
+		$lock    = var_export( $path . '.lock', true );
+		// fopen( 'x' ) and link() fail on whatever is at the path, so nothing put there between a check and a write is replaced.
+		$put_back = static fn ( string $from ): string => "@link( {$from}, {$earlier} ) && unlink( {$from} )";
+
+		return [
+			'plant'   => "if ( ! @mkdir( {$lock} ) ) {\n\texit( 'busy' );\n}\n\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
+				. "\$log = @fopen( {$earlier}, 'x' );\necho \$log && false !== fwrite( \$log, {$old_log} ) && fclose( \$log ) ? 'planted' : 'blocked', \$held ? ' held' : ' none';",
+			'swap'    => "\$moved = ! is_dir( {$earlier} ) && ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$aside} );\n"
+				. "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' ), \$moved ? ' moved' : ' kept';",
+			'restore' => static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $lock, $put_back ): string {
+				[ $planted, $kept ] = explode( ' ', $planting ) + [ '', '' ];
+				[ $dir, $file ]     = explode( ' ', $swapping ) + [ '', '' ];
+				if ( '' === $planted || 'busy' === $planted ) {
+					return '';
+				}
+				// Whatever is back where the directory was stays there.
+				$undo = ( 'made' === $dir ? "@rmdir( {$earlier} );\n" : '' ) . ( 'moved' === $file ? $put_back( $aside ) . ";\n" : '' );
+				if ( 'planted' === $planted ) {
+					$undo .= "\$back = is_file( {$earlier} ) && {$old_log} === file_get_contents( {$earlier} );\n\$back && unlink( {$earlier} );\n";
+				}
+				// A directory cannot be linked; renamed, it replaces at most an empty directory, never a file.
+				$undo .= '$returned = ' . ( 'held' === $kept ? "is_dir( {$held} ) && ! is_link( {$held} ) ? @rename( {$held}, {$earlier} ) : " . $put_back( $held ) : 'true' ) . ";\n";
+				if ( 'planted' === $planted ) {
+					$undo .= "echo \$back && \$returned ? 'back' : 'lost';\n";
+				}
+
+				// What the site held stays locked under its -<hex> name until someone puts it back.
+				return $undo . "\$returned && rmdir( {$lock} );";
+			},
+		];
 	}
 
 	/**
