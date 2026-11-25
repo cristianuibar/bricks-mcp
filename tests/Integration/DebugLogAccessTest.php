@@ -205,6 +205,46 @@ PHP;
 	}
 
 	/**
+	 * A log path through a symlinked folder and .. fails the configured check at the URL of the file PHP writes.
+	 *
+	 * The OS follows the link before .., so the write lands in a served folder of the checkout
+	 * while the normalized path names a file in the denied logs folder.
+	 */
+	public function test_debug_log_through_a_symlinked_folder_and_dot_dot_fails_the_check(): void {
+		$folder = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
+		$dir    = dirname( __DIR__, 2 ) . '/' . $folder;
+		$name   = $folder . '.log';
+		$link   = dirname( __DIR__, 2 ) . '/logs/' . $folder;
+		mkdir( $dir );
+		mkdir( "{$dir}/linked" );
+
+		try {
+			$this->create_symlink( "{$dir}/linked", $link );
+			[ $site, $canary ] = $this->probe( self::SERVER, "wp-content/logs/{$folder}/../{$name}" );
+			$this->assertSame( "{$site['root']}wp-content/logs/{$name}", $site['log'] );
+			$this->assertSame( "{$site['root']}wp-content/plugins/bricks-mcp/{$folder}/{$name}", $site['target'] );
+
+			try {
+				$this->assert_configured_log_denied( self::SERVER, $site, $canary );
+			} catch ( AssertionFailedError $e ) {
+				$this->assertStringContainsString( "/wp-content/plugins/bricks-mcp/{$folder}/{$name}\nFailed asserting that 200 is identical to 403", $e->getMessage() );
+				return;
+			}
+		} finally {
+			if ( is_link( $link ) || file_exists( $link ) ) {
+				unlink( $link );
+			}
+			if ( file_exists( "{$dir}/{$name}" ) ) {
+				unlink( "{$dir}/{$name}" );
+			}
+			rmdir( "{$dir}/linked" );
+			rmdir( $dir );
+		}
+
+		$this->fail( "The configured check passed for {$site['log']}, which writes to the served {$site['target']}." );
+	}
+
+	/**
 	 * A symlink the mount rejects fails before the probe runs, instead of letting it log to a regular file at the link's path.
 	 *
 	 * The regular file already at the link's path makes symlink() fail here, as such a mount would.
