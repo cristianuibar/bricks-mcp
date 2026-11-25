@@ -1324,8 +1324,9 @@ final class MediaTest extends TestCase {
 		}
 
 		// A pending mark that WordPress fails to delete after the attribution saves, on a fresh import or on the retry that
-		// completes a kept upload, does not leave the photo unfinished: another author, who can neither edit nor read it,
-		// gets it with its credit rather than a refusal, and an editor gets it as a duplicate.
+		// completes a kept upload, does not leave the photo unfinished: another author, who can read but not edit it, gets
+		// it with its saved credit even while Unsplash is rate-limited, rather than waiting on Unsplash to complete it, and
+		// an editor gets it as a duplicate.
 		foreach ( [ 'fresh', 'retry' ] as $completion ) {
 			$clear_attachments();
 			if ( 'retry' === $completion ) {
@@ -1342,9 +1343,10 @@ final class MediaTest extends TestCase {
 			$this->assertSame( '1', get_post_meta( $completed_id, '_unsplash_attribution_pending', true ), $completion );
 
 			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $completed_id ] = false;
-			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $completed_id ] = false;
+			$api_code     = 429;
 			$other_author = $import();
-			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $completed_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $completed_id ] );
+			$api_code     = 200;
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $completed_id ] );
 			$this->assertIsArray( $other_author, $completion );
 			$this->assertSame( $completed_id, $other_author['attachmentId'], $completion );
 			$this->assertTrue( $other_author['duplicate'], $completion );
