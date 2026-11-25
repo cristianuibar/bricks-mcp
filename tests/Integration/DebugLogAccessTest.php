@@ -154,20 +154,24 @@ PHP;
 	 * A directory left at the target an earlier run used does not stop the next run's HTTP check.
 	 *
 	 * The case once logged to this one fixed /tmp file, so a directory there failed the probe's
-	 * write before the log was requested.
+	 * write before the log was requested. The file such a run logged to is moved aside for the
+	 * run and put back after it, so a reused tests site runs the check instead of skipping it.
 	 */
 	public function test_directory_at_an_earlier_target_does_not_stop_the_symlink_check(): void {
-		$earlier = var_export( '/tmp/bricks-mcp-access-test.log', true );
-		$made    = $this->run_on_server( self::SERVER, "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' );" );
-		if ( 'blocked' === $made ) {
-			$this->markTestSkipped( "The tests site holds a file at {$earlier}, left by a run that still logged there." );
-		}
+		$path    = '/tmp/bricks-mcp-access-test.log';
+		$earlier = var_export( $path, true );
+		$aside   = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
+		$setup   = "\$moved = ! is_dir( {$earlier} ) && ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$aside} );\n"
+			. "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' ), \$moved ? ' moved' : ' kept';";
+		[ $dir, $file ] = explode( ' ', $this->run_on_server( self::SERVER, $setup ) ) + [ '', '' ];
 
 		try {
+			$this->assertNotSame( 'blocked', $dir, "Could not make a directory at {$path} on the tests site." );
 			$this->assert_symlinked_outside_log_denied();
 		} finally {
-			if ( 'made' === $made ) {
-				$this->run_on_server( self::SERVER, "rmdir( {$earlier} );" );
+			$undo = ( 'made' === $dir ? "rmdir( {$earlier} );\n" : '' ) . ( 'moved' === $file ? "rename( {$aside}, {$earlier} );" : '' );
+			if ( '' !== $undo ) {
+				$this->run_on_server( self::SERVER, $undo );
 			}
 		}
 	}
