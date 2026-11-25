@@ -378,6 +378,7 @@ final class BuilderTest extends TestCase {
 		return [
 			'only the runner\'s'    => [ [] ],
 			'mb_send_mail disabled' => [ [ 'mb_send_mail' ] ],
+			'passthru disabled'     => [ [ 'passthru' ] ],
 		];
 	}
 
