@@ -261,8 +261,11 @@ final class Media implements Module {
 			if ( ! $existing_post || 'attachment' !== $existing_post->post_type || 'inherit' !== $existing_post->post_status ) {
 				// Its uploader deleted or trashed it during the request, so it is not returned. Another import may have
 				// replaced it meanwhile: this call then starts over to deduplicate against that one, else it imports anew.
+				// A replacement this caller can neither edit nor read, such as one on an editor's private post, is not
+				// shown to it, so the caller imports its own.
 				$replacement_id = $this->find_existing_unsplash_attachment( $photo_id );
-				if ( null !== $replacement_id && $replacement_id !== $existing_id ) {
+				if ( null !== $replacement_id && $replacement_id !== $existing_id
+					&& ( current_user_can( 'edit_post', $replacement_id ) || current_user_can( 'read_post', $replacement_id ) ) ) {
 					return $this->import_unsplash_photo( $input );
 				}
 				$existing_id = null;
