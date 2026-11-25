@@ -1855,6 +1855,129 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 0, get_post( $replacement['attachmentId'] )->post_parent );
 		$this->assertSame( [ $replacement['attachmentId'] ], $attachment_ids() );
 
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$deleted_id = $kept_error->get_error_data()['attachmentId'];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 970,
+				'post_type'   => 'revision',
+				'post_status' => 'inherit',
+				'post_parent' => 15,
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_author       = get_current_user_id();
+		$GLOBALS['_bricks_mcp_test_post_cache']                   = [];
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][970] = static function (): bool {
+			$parent = get_post( (int) ( get_post( 970 )->post_parent ?? 0 ) );
+			return $parent && get_current_user_id() === (int) ( $parent->post_author ?? 0 );
+		};
+		$replacement  = null;
+		$api_code     = 429;
+		$on_api_fetch = static function () use ( $deleted_id, &$replacement, &$api_code ): void {
+			wp_delete_attachment( $deleted_id, true );
+			$api_code    = 200;
+			$replacement = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'photo_77' ] );
+			$api_code    = 429;
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_author = 99;
+		};
+		$revoked_revision = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute(
+			[
+				'photoId' => 'photo_77',
+				'postId'  => 970,
+			]
+		);
+		$api_code       = 200;
+		$on_api_fetch   = null;
+		$GLOBALS['_bricks_mcp_test_post_cache']                   = null;
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_author       = get_current_user_id();
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][970], $GLOBALS['_bricks_mcp_test_posts'][970] );
+		$this->assertIsArray( $replacement );
+		$this->assertInstanceOf( \WP_Error::class, $revoked_revision );
+		$this->assertSame( 'bricks_mcp_forbidden', $revoked_revision->get_error_code() );
+		$this->assertSame( 403, $revoked_revision->get_error_data()['status'] );
+		$this->assertSame( 0, get_post( $replacement['attachmentId'] )->post_parent );
+		$this->assertSame( [ $replacement['attachmentId'] ], $attachment_ids() );
+
+		$clear_attachments();
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 981,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'post_parent' => 15,
+			]
+		);
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 980,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'post_parent' => 981,
+			],
+			[
+				'_unsplash_photo_id'            => 'photo_77',
+				'_unsplash_attribution_pending' => '1',
+				'_wp_attached_file'             => '2026/11/unsplash-photo_77.webp',
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_post_cache']                   = [];
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][980] = false;
+		$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][980] = static function (): bool {
+			$post = get_post( 980 );
+			while ( $post && 'attachment' === $post->post_type && 'inherit' === $post->post_status && 0 !== (int) ( $post->post_parent ?? 0 ) ) {
+				$post = get_post( (int) $post->post_parent );
+			}
+			return $post && 'private' !== $post->post_status;
+		};
+		$target_status = get_post( 15 )->post_status;
+		$on_api_fetch  = static function (): void {
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = 'private';
+		};
+		$survived = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'photo_77' ] );
+		$on_api_fetch                                      = null;
+		$GLOBALS['_bricks_mcp_test_post_cache']             = null;
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = $target_status;
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][980], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][980] );
+		$this->assertInstanceOf( \WP_Error::class, $survived );
+		$this->assertSame( 'bricks_mcp_unsplash_import_incomplete', $survived->get_error_code() );
+		$this->assertSame( 403, $survived->get_error_data()['status'] );
+		$this->assertSame( '', get_post_meta( 980, '_unsplash_photographer_url', true ) );
+		$this->assertSame( '1', get_post_meta( 980, '_unsplash_attribution_pending', true ) );
+		$clear_attachments();
+
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$deleted_id   = $kept_error->get_error_data()['attachmentId'];
+		$GLOBALS['_bricks_mcp_test_query_cache'] = [];
+		$replacement  = null;
+		$api_code     = 429;
+		$on_api_fetch = static function () use ( $deleted_id, $import, &$replacement, &$api_code ): void {
+			wp_delete_attachment( $deleted_id, true );
+			$saved_cache                             = $GLOBALS['_bricks_mcp_test_query_cache'];
+			$GLOBALS['_bricks_mcp_test_query_cache'] = [];
+			$api_code                                = 200;
+			$replacement                             = $import();
+			$api_code                                = 429;
+			$GLOBALS['_bricks_mcp_test_query_cache'] = $saved_cache;
+		};
+		$cached_replace = $import();
+		$api_code       = 200;
+		$on_api_fetch   = null;
+		$GLOBALS['_bricks_mcp_test_query_cache'] = null;
+		$this->assertIsArray( $replacement );
+		$this->assertIsArray( $cached_replace );
+		$this->assertSame( $replacement['attachmentId'], $cached_replace['attachmentId'] );
+		$this->assertTrue( $cached_replace['duplicate'] );
+		$this->assertSame( [ $replacement['attachmentId'] ], $attachment_ids() );
+		$clear_attachments();
+
 		// A legacy attachment deleted while its credit backfill waits on a failing Unsplash request is not returned either.
 		$clear_attachments();
 		bricks_mcp_test_add_post(
@@ -1935,6 +2058,106 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 'bricks_mcp_unsplash_attach_failed', $attach_error->get_error_code() );
 		$this->assertSame( 500, $attach_error->get_error_data()['status'] );
 		$this->assertSame( 'photo_77', get_post_meta( $attach_error->get_error_data()['attachmentId'], '_unsplash_photo_id', true ) );
+	}
+
+	/**
+	 * @return void
+	 */
+	public function test_import_unsplash_fresh_target_check_around_download_and_upload(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 15,
+				'post_type'   => 'page',
+				'post_author' => get_current_user_id(),
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_post_cache']                    = [];
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][15] = static fn(): bool => get_current_user_id() === (int) ( get_post( 15 )->post_author ?? 0 );
+		$image_url       = 'https://images.unsplash.com/photo-88?w=1080';
+		$revoke_on_image = false;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function ( string $url ) use ( $image_url, &$revoke_on_image ): array {
+			if ( $image_url === $url ) {
+				if ( $revoke_on_image ) {
+					$GLOBALS['_bricks_mcp_test_posts'][15]->post_author = 99;
+				}
+				return [
+					'response' => [ 'code' => 200 ],
+					'headers'  => [ 'content-type' => 'image/jpeg' ],
+					'body'     => "\xFF\xD8\xFF\xE0blocked-download",
+				];
+			}
+			return [
+				'response' => [ 'code' => 200 ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => (string) wp_json_encode(
+					[
+						'id'    => 'photo_88',
+						'urls'  => [ 'regular' => $image_url ],
+						'links' => [ 'download_location' => 'https://api.unsplash.com/photos/photo_88/download' ],
+						'user'  => [
+							'name'  => 'Pat',
+							'links' => [ 'html' => 'https://unsplash.com/@pat' ],
+						],
+					]
+				),
+			];
+		};
+		$upload_called   = false;
+		$revoke_on_upload = false;
+		wp_register_ability(
+			'bricks/upload-media',
+			[
+				'execute_callback' => static function () use ( &$upload_called, &$revoke_on_upload ): array {
+					$upload_called = true;
+					bricks_mcp_test_add_post(
+						[
+							'ID'          => 88,
+							'post_type'   => 'attachment',
+							'post_status' => 'inherit',
+							'post_parent' => 0,
+						]
+					);
+					if ( $revoke_on_upload ) {
+						$GLOBALS['_bricks_mcp_test_posts'][15]->post_author = 99;
+					}
+					return [
+						'id'  => 88,
+						'url' => 'https://example.test/uploads/88.jpg',
+					];
+				},
+			]
+		);
+		$import = static fn(): array|\WP_Error => wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute(
+			[
+				'photoId' => 'photo_88',
+				'postId'  => 15,
+			]
+		);
+
+		$revoke_on_image = true;
+		$blocked         = $import();
+		$revoke_on_image = false;
+		$this->assertInstanceOf( \WP_Error::class, $blocked );
+		$this->assertSame( 'bricks_mcp_forbidden', $blocked->get_error_code() );
+		$this->assertSame( 403, $blocked->get_error_data()['status'] );
+		$this->assertFalse( $upload_called );
+		$this->assertCount( 2, $GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls'] );
+		$this->assertArrayNotHasKey( 88, $GLOBALS['_bricks_mcp_test_posts'] );
+
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_author        = get_current_user_id();
+		$GLOBALS['_bricks_mcp_test_post_cache']                    = [];
+		$GLOBALS['_bricks_mcp_test_wp_safe_remote_get_calls']      = [];
+		$revoke_on_upload                                          = true;
+		$late = $import();
+		$revoke_on_upload = false;
+		$this->assertInstanceOf( \WP_Error::class, $late );
+		$this->assertSame( 'bricks_mcp_forbidden', $late->get_error_code() );
+		$this->assertSame( 403, $late->get_error_data()['status'] );
+		$this->assertTrue( $upload_called );
+		$this->assertSame( 0, get_post( 88 )->post_parent );
+		$this->assertSame( 'photo_88', get_post_meta( 88, '_unsplash_photo_id', true ) );
+		$this->assertSame( 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( 88, '_unsplash_photographer_url', true ) );
 	}
 
 	/**

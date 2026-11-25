@@ -268,7 +268,7 @@ final class Media implements Module {
 					// The replacement may be attached to the target post below, so this caller's right to edit that post,
 					// checked before the Unsplash request, is checked again on the post as it is now.
 					if ( $post_id > 0 ) {
-						clean_post_cache( $post_id );
+						$this->clean_post_cache_with_parents( $post_id );
 						$target = Access::edit_post( $post_id );
 						if ( is_wp_error( $target ) ) {
 							return $target;
@@ -289,9 +289,7 @@ final class Media implements Module {
 					}
 				}
 			} else {
-				if ( (int) ( $existing_post->post_parent ?? 0 ) > 0 ) {
-					clean_post_cache( (int) $existing_post->post_parent );
-				}
+				$this->clean_post_cache_with_parents( (int) ( $existing_post->post_parent ?? 0 ) );
 				// A repair that finished during the request saved the credit, so an Unsplash failure here no longer leaves
 				// the import unfinished and the attachment is returned with that credit.
 				$pending = $pending && '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
@@ -392,6 +390,14 @@ final class Media implements Module {
 		$downloaded = $this->download_unsplash_image( $image_url, $photo_id );
 		if ( is_wp_error( $downloaded ) ) {
 			return $downloaded;
+		}
+
+		if ( $post_id > 0 ) {
+			$this->clean_post_cache_with_parents( $post_id );
+			$target = Access::edit_post( $post_id );
+			if ( is_wp_error( $target ) ) {
+				return $target;
+			}
 		}
 
 		$download_location = isset( $photo['links']['download_location'] ) && is_string( $photo['links']['download_location'] )
@@ -1288,6 +1294,7 @@ final class Media implements Module {
 				'meta_type'      => 'BINARY',
 				'posts_per_page' => 1,
 				'fields'         => 'ids',
+				'cache_results'  => false,
 			]
 		);
 
@@ -1492,6 +1499,12 @@ final class Media implements Module {
 	 * @return true|\WP_Error
 	 */
 	private function attach_to_post( int $attachment_id, int $post_id ): bool|\WP_Error {
+		$this->clean_post_cache_with_parents( $post_id );
+		$target = Access::edit_post( $post_id );
+		if ( is_wp_error( $target ) ) {
+			return $target;
+		}
+
 		$updated = wp_update_post(
 			[
 				'ID'          => $attachment_id,

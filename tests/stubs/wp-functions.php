@@ -385,9 +385,18 @@ if ( ! function_exists( 'wp_parse_args' ) ) {
 if ( ! function_exists( 'get_posts' ) ) {
 	function get_posts( array $args = [] ): array {
 		$GLOBALS['_bricks_mcp_test_last_get_posts_args'] = $args;
+		$use_cache = is_array( $GLOBALS['_bricks_mcp_test_query_cache'] ?? null ) && false !== ( $args['cache_results'] ?? true );
+		$cache_key = $use_cache ? md5( serialize( $args ) ) : '';
+		if ( $use_cache && array_key_exists( $cache_key, $GLOBALS['_bricks_mcp_test_query_cache'] ) ) {
+			return $GLOBALS['_bricks_mcp_test_query_cache'][ $cache_key ];
+		}
 		$return = $GLOBALS['_bricks_mcp_test_get_posts_return'] ?? [];
 		// A closure answers from the query args, for tests that need a lookup to see posts they created.
-		return $return instanceof Closure ? $return( $args ) : $return;
+		$result = $return instanceof Closure ? $return( $args ) : $return;
+		if ( $use_cache ) {
+			$GLOBALS['_bricks_mcp_test_query_cache'][ $cache_key ] = $result;
+		}
+		return $result;
 	}
 }
 

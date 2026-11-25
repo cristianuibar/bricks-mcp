@@ -36,6 +36,7 @@ function bricks_mcp_test_reset(): void {
 	$GLOBALS['_bricks_mcp_test_post_cache'] = null;
 	// An array turns on the request's post meta cache in get_post_meta(), as WordPress keeps it; null leaves it off.
 	$GLOBALS['_bricks_mcp_test_post_meta_cache'] = null;
+	$GLOBALS['_bricks_mcp_test_query_cache']     = null;
 }
 
 bricks_mcp_test_reset();
