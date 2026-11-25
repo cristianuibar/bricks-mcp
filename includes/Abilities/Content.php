@@ -878,13 +878,11 @@ final class Content implements Module {
 				}
 			}
 
-			foreach ( [ 'twitterTitle', 'twitterDescription', 'twitterImage' ] as $field ) {
-				if ( '' !== ( $fields[ $field ] ?? '' ) ) {
-					if ( ! $this->update_seo_meta( $post_id, 'rank_math_twitter_use_facebook', 'off' ) ) {
-						$failed[] = $field;
-					}
-					break;
-				}
+			// Rank Math ignores every Twitter override while the use-Facebook toggle is on, so a refused toggle fails them all.
+			$overrides = array_keys( array_filter( array_intersect_key( $fields, array_flip( [ 'twitterTitle', 'twitterDescription', 'twitterImage' ] ) ), static fn( mixed $value ): bool => '' !== $value ) );
+
+			if ( array() !== $overrides && ! $this->update_seo_meta( $post_id, 'rank_math_twitter_use_facebook', 'off' ) ) {
+				$failed = array_merge( $failed, $overrides );
 			}
 		}
 

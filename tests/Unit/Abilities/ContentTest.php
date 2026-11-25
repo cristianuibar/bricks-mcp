@@ -283,6 +283,52 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * A use-Facebook toggle the database refuses to switch off fails every Twitter override sent, not only the first,
+	 * though their own rows were saved: Rank Math ignores them all while the toggle stays on.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_rank_math_refused_use_facebook_toggle_fails_every_twitter_override(): void {
+		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, 'rank_math_twitter_use_facebook', 'on' );
+		// Like wpdb when MySQL accepts the new Twitter rows but refuses the UPDATE of the existing toggle row.
+		$GLOBALS['wpdb'] = new class() extends \wpdb {
+			/**
+			 * @param string               $table        Table name.
+			 * @param array<string, mixed> $data         Column values.
+			 * @param array<string, mixed> $where        Column values to match.
+			 * @param string[]|string|null $format       Formats.
+			 * @param string[]|string|null $where_format Where formats.
+			 * @return false
+			 */
+			public function update( string $table, array $data, array $where, array|string|null $format = null, array|string|null $where_format = null ): int|false {
+				return false;
+			}
+		};
+
+		$result = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [
+					'ogTitle'            => 'Share title',
+					'twitterTitle'       => 'Tweet title',
+					'twitterDescription' => 'Tweet description',
+				],
+			]
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'bricks_mcp_seo_write_failed', $result->get_error_code() );
+		$this->assertSame( [ 'twitterTitle', 'twitterDescription' ], $result->get_error_data()['failedFields'] );
+		$this->assertSame( 'Tweet description', get_post_meta( self::POST_ID, 'rank_math_twitter_description', true ) );
+		$this->assertSame( 'on', get_post_meta( self::POST_ID, 'rank_math_twitter_use_facebook', true ) );
+	}
+
+	/**
 	 * Rank Math prefers the stored image ID, so writing or clearing a social image must keep the ID in step with the URL.
 	 *
 	 * @runInSeparateProcess
