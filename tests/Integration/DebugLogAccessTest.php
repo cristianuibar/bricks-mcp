@@ -36,6 +36,11 @@ final class DebugLogAccessTest extends TestCase {
 	private const STALL_TIMEOUT = 1;
 
 	/**
+	 * When the headers of the last response open() requested arrived, from hrtime().
+	 */
+	private int $answered_at = 0;
+
+	/**
 	 * Logs a canary through the requesting site's WordPress and reports where it went.
 	 *
 	 * Both sites serve the plugin checkout, so each one runs it with its own wp-config.php.
@@ -479,17 +484,17 @@ PHP;
 	public function test_stalled_response_fails_the_check(): void {
 		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
 		// A length, like a static file's, so the body is not chunked and a read that times out returns nothing.
-		// Headers slower than the body's timeout, so only the body is held to it.
+		// Headers slower than the body's timeout, so only the body is held to it and its wait is timed from them.
 		$code  = "sleep( %d );\nhttp_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;";
 		$page  = $this->write_page( sprintf( $code, self::STALL_TIMEOUT + 1, 65536 + strlen( $canary ), self::TIMEOUT + 5, var_export( $canary, true ) ) );
-		$file  = dirname( __DIR__, 2 ) . '/' . $page;
-		$start = hrtime( true );
+		$file = dirname( __DIR__, 2 ) . '/' . $page;
 
 		try {
 			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/' . $page, $canary, self::STALL_TIMEOUT );
 		} catch ( AssertionFailedError $e ) {
 			$this->assertStringContainsString( 'timed out before the end of its body', $e->getMessage() );
-			$this->assertLessThan( self::TIMEOUT, ( hrtime( true ) - $start ) / 1e9, 'The stalled check waited for the full request timeout.' );
+			// From the headers, so their wait, which TIMEOUT bounds, does not count against the body's.
+			$this->assertLessThan( self::STALL_TIMEOUT + 1, ( hrtime( true ) - $this->answered_at ) / 1e9, 'The stalled body was not held to its timeout.' );
 			$this->assertFileDoesNotExist( $file, 'The stalled page was still in the checkout during its wait.' );
 			return;
 		} finally {
@@ -692,6 +697,7 @@ PHP;
 		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => self::TIMEOUT ] ] );
 		$stream  = fopen( $url, 'rb', false, $context );
 		$this->assertNotFalse( $stream, "{$server} did not answer." );
+		$this->answered_at = hrtime( true );
 		stream_set_timeout( $stream, $timeout );
 
 		preg_match( '#^HTTP/\S+ (\d{3})#', stream_get_meta_data( $stream )['wrapper_data'][0], $matches );
