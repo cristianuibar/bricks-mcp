@@ -1673,6 +1673,41 @@ final class MediaTest extends TestCase {
 			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( $after_delete['attachmentId'], '_unsplash_photographer_url', true ), $retrier );
 		}
 
+		// When another import replaces the deleted upload before the waiting retry resumes, the retry returns that
+		// replacement, to an editor or to an author who could read the deleted upload, rather than upload a second copy.
+		// Its Unsplash request failing does not hide the replacement either.
+		foreach ( [ 'editor' => 200, 'reader' => 200, 'rate-limited' => 429 ] as $retrier => $retry_code ) {
+			$clear_attachments();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+			$kept_error = $import();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			$this->assertInstanceOf( \WP_Error::class, $kept_error, $retrier );
+			$deleted_id = $kept_error->get_error_data()['attachmentId'];
+			if ( 'reader' === $retrier ) {
+				$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ] = false;
+			}
+			$replacement  = null;
+			$api_code     = $retry_code;
+			$on_api_fetch = static function () use ( $deleted_id, $import, &$replacement, &$api_code ): void {
+				wp_delete_attachment( $deleted_id, true );
+				$retry_code  = $api_code;
+				$api_code    = 200;
+				$replacement = $import();
+				$api_code    = $retry_code;
+			};
+			$after_replace = $import();
+			$api_code      = 200;
+			unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ] );
+			$this->assertIsArray( $replacement, $retrier );
+			$this->assertFalse( $replacement['duplicate'], $retrier );
+			$this->assertIsArray( $after_replace, $retrier );
+			$this->assertSame( $replacement['attachmentId'], $after_replace['attachmentId'], $retrier );
+			$this->assertTrue( $after_replace['duplicate'], $retrier );
+			$this->assertSame( 15, $after_replace['postId'], $retrier );
+			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', $after_replace['photographerUrl'], $retrier );
+			$this->assertSame( [ $replacement['attachmentId'] ], $attachment_ids(), $retrier );
+		}
+
 		// A legacy attachment deleted while its credit backfill waits on a failing Unsplash request is not returned either.
 		$clear_attachments();
 		bricks_mcp_test_add_post(
