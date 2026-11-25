@@ -853,7 +853,8 @@ final class Content implements Module {
 			return $this->write_slim_seo( $post_id, $fields );
 		}
 
-		$failed = [];
+		$failed  = [];
+		$ignored = [];
 
 		foreach ( self::SEO_META_KEYS[ $source ] as $field => $meta_key ) {
 			if ( array_key_exists( $field, $fields ) && ! $this->update_seo_meta( $post_id, $meta_key, $fields[ $field ] ) ) {
@@ -882,14 +883,15 @@ final class Content implements Module {
 			$overrides = array_keys( array_filter( array_intersect_key( $fields, array_flip( [ 'twitterTitle', 'twitterDescription', 'twitterImage' ] ) ), static fn( mixed $value ): bool => '' !== $value ) );
 
 			if ( array() !== $overrides && ! $this->update_seo_meta( $post_id, 'rank_math_twitter_use_facebook', 'off' ) ) {
-				$failed = array_merge( $failed, $overrides );
+				$ignored = array_values( array_diff( $overrides, $failed ) );
+				$failed  = array_merge( $failed, $overrides );
 			}
 		}
 
 		$failed = array_values( array_unique( array_merge( $failed, $this->write_plugin_robots( $post_id, $source, $fields ) ) ) );
 
 		if ( array() !== $failed ) {
-			return $this->seo_write_failed( $failed );
+			return $this->seo_write_failed( $failed, $ignored );
 		}
 
 		return true;
@@ -920,14 +922,29 @@ final class Content implements Module {
 	/**
 	 * Error for SEO fields the database did not save.
 	 *
-	 * @param string[] $fields Fields not saved.
+	 * @param string[] $fields  Fields not saved, or saved but ignored.
+	 * @param string[] $ignored Of those, the Twitter overrides saved but ignored because Rank Math's use-Facebook toggle stayed on.
 	 * @return \WP_Error
 	 */
-	private function seo_write_failed( array $fields ): \WP_Error {
+	private function seo_write_failed( array $fields, array $ignored = [] ): \WP_Error {
+		$unsaved  = array_values( array_diff( $fields, $ignored ) );
+		$messages = [];
+
+		if ( array() !== $unsaved ) {
+			/* translators: %s: comma-separated SEO field names */
+			$messages[] = sprintf( __( 'The database did not save %s, so those fields keep their stored values.', 'bricks-mcp' ), implode( ', ', $unsaved ) );
+		}
+
+		if ( array() !== $ignored ) {
+			/* translators: %s: comma-separated SEO field names */
+			$messages[] = sprintf( __( 'The database did not switch off Rank Math\'s use-Facebook toggle, so Rank Math ignores the saved %s.', 'bricks-mcp' ), implode( ', ', $ignored ) );
+		}
+
+		$messages[] = __( 'Re-read the SEO before retrying.', 'bricks-mcp' );
+
 		return new \WP_Error(
 			'bricks_mcp_seo_write_failed',
-			/* translators: %s: comma-separated SEO field names */
-			sprintf( __( 'The database did not save %s, so those fields keep their stored values. Re-read the SEO before retrying.', 'bricks-mcp' ), implode( ', ', $fields ) ),
+			implode( ' ', $messages ),
 			[
 				'status'       => 500,
 				'failedFields' => $fields,
