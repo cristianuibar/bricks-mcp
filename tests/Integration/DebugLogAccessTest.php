@@ -106,7 +106,7 @@ echo PHP_EOL, wp_json_encode(
 PHP;
 
 	protected function setUp(): void {
-		if ( gethostbyname( self::SERVER ) === self::SERVER ) {
+		if ( 'test_fixtures_left_in_the_checkout_are_ignored_by_git' !== $this->name() && gethostbyname( self::SERVER ) === self::SERVER ) {
 			$this->markTestSkipped( 'Needs the wp-env tests site: run npm run test:integration.' );
 		}
 	}
@@ -508,6 +508,36 @@ PHP;
 		}
 
 		$this->fail( 'The check passed for a response that stalled before its canary.' );
+	}
+
+	/**
+	 * A probe or page a run stopped before its request leaves at the checkout's root is ignored, so git add -A does not stage it.
+	 *
+	 * Needs no web server: it only writes each fixture and asks git what it would do with it.
+	 */
+	public function test_fixtures_left_in_the_checkout_are_ignored_by_git(): void {
+		$checkout = dirname( __DIR__, 2 );
+		exec( 'git --version 2>&1', $output, $code );
+		if ( 0 !== $code || ! file_exists( "{$checkout}/.git" ) ) {
+			$this->markTestSkipped( 'Needs git and the checkout\'s .git folder.' );
+		}
+
+		$fixtures = [
+			'probe' => $this->write_probe( '', '' )[0],
+			'page'  => $this->write_page( 'echo 1;' ),
+		];
+
+		try {
+			foreach ( $fixtures as $kind => $fixture ) {
+				// The checkout may belong to another user than the one running the tests, as in wp-env.
+				$status = (string) shell_exec( 'git -c safe.directory=' . escapeshellarg( $checkout ) . ' -C ' . escapeshellarg( $checkout ) . ' status --porcelain --untracked-files=all --ignored -- ' . escapeshellarg( $fixture ) . ' 2>&1' );
+				$this->assertSame( "!! {$fixture}\n", $status, "git add -A would stage the {$kind} {$fixture}." );
+			}
+		} finally {
+			foreach ( $fixtures as $fixture ) {
+				unlink( "{$checkout}/{$fixture}" );
+			}
+		}
 	}
 
 	/**
