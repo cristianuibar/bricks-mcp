@@ -1821,6 +1821,40 @@ final class MediaTest extends TestCase {
 		$this->assertTrue( $checked_replace['duplicate'] );
 		$this->assertEqualsCanonicalizing( [ $replacement['attachmentId'], 950 ], $attachment_ids() );
 
+		// An editor who reassigns the target post while a rate-limited retry waits, so this caller can no longer edit it,
+		// keeps the replacement off that post, although the permission check loaded the post into the request's cache.
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$deleted_id = $kept_error->get_error_data()['attachmentId'];
+		$target_author                                     = get_post( 15 )->post_author ?? null;
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_author = get_current_user_id();
+		$GLOBALS['_bricks_mcp_test_post_cache']            = [];
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][15] = static fn(): bool => get_current_user_id() === get_post( 15 )->post_author;
+		$replacement  = null;
+		$api_code     = 429;
+		$on_api_fetch = static function () use ( $deleted_id, $import, &$replacement, &$api_code ): void {
+			wp_delete_attachment( $deleted_id, true );
+			$api_code    = 200;
+			$replacement = $import();
+			$api_code    = 429;
+			// The stored replacement is unattached and the target post has another author, as the database holds them.
+			$GLOBALS['_bricks_mcp_test_posts'][ $replacement['attachmentId'] ]->post_parent = 0;
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_author                            = 99;
+		};
+		$reassigned = $import();
+		$api_code   = 200;
+		$GLOBALS['_bricks_mcp_test_post_cache']             = null;
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_author = $target_author;
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][15] );
+		$this->assertIsArray( $replacement );
+		$this->assertInstanceOf( \WP_Error::class, $reassigned );
+		$this->assertSame( 'bricks_mcp_forbidden', $reassigned->get_error_code() );
+		$this->assertSame( 0, get_post( $replacement['attachmentId'] )->post_parent );
+		$this->assertSame( [ $replacement['attachmentId'] ], $attachment_ids() );
+
 		// A legacy attachment deleted while its credit backfill waits on a failing Unsplash request is not returned either.
 		$clear_attachments();
 		bricks_mcp_test_add_post(

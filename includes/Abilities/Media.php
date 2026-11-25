@@ -265,6 +265,15 @@ final class Media implements Module {
 				$existing_id    = null;
 				$pending        = false;
 				if ( null !== $replacement_id && $replacement_id !== $deleted_id ) {
+					// The replacement may be attached to the target post below, so this caller's right to edit that post,
+					// checked before the Unsplash request, is checked again on the post as it is now.
+					if ( $post_id > 0 ) {
+						clean_post_cache( $post_id );
+						$target = Access::edit_post( $post_id );
+						if ( is_wp_error( $target ) ) {
+							return $target;
+						}
+					}
 					// The request may hold the replacement's parents from before it was attached, such as the target post,
 					// and an attachment inherits its status from them, parent by parent.
 					$this->clean_post_cache_with_parents( $replacement_id );
