@@ -410,12 +410,31 @@ final class BuilderTest extends TestCase {
 
 	public function test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv(): void {
 		// PHPUnit itself needs getenv(), so only putenv() is taken from the runner here; the dataset covers both in the launched processes.
+		// The runner's php.ini goes along, so an extension it loads only through php -c still loads in the launched PHPUnit.
+		$ini    = php_ini_loaded_file();
 		$output = [];
 		$status = 1;
-		exec( escapeshellarg( PHP_BINARY ) . ' -d ' . escapeshellarg( 'disable_functions=' . ini_get( 'disable_functions' ) . ',putenv' ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_works_without_mbstring' ) . ' 2>&1', $output, $status );
+		exec( escapeshellarg( PHP_BINARY ) . ( false === $ini ? '' : ' -c ' . escapeshellarg( $ini ) ) . ' -d ' . escapeshellarg( 'disable_functions=' . ini_get( 'disable_functions' ) . ',putenv' ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_works_without_mbstring' ) . ' 2>&1', $output, $status );
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertStringContainsString( 'OK (' . count( self::parent_restrictions() ) . ' tests', implode( "\n", $output ) );
+	}
+
+	public function test_category_creation_without_mbstring_runs_where_the_runner_loads_its_extensions_with_c(): void {
+		// This process's php.ini and scanned files go into one file that a runner loads with -c and scanning off, so its extensions, PHPUnit's among them, come only from -c.
+		$ini   = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
+		$files = array_filter( [ php_ini_loaded_file(), ...array_map( 'trim', explode( ',', (string) php_ini_scanned_files() ) ) ] );
+		file_put_contents( $ini, implode( "\n", array_map( 'file_get_contents', $files ) ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		$output = [];
+		$status = 1;
+		try {
+			exec( 'PHP_INI_SCAN_DIR= ' . escapeshellarg( PHP_BINARY ) . ' -c ' . escapeshellarg( $ini ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv' ) . ' 2>&1', $output, $status );
+		} finally {
+			unlink( $ini ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+		}
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertStringContainsString( 'OK (1 test', implode( "\n", $output ) );
 	}
 
 	public function test_category_deletion_uncategorizes_its_classes(): void {
