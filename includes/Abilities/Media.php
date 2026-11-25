@@ -279,13 +279,6 @@ final class Media implements Module {
 		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
 			? sanitize_text_field( $photo['user']['name'] )
 			: '';
-		if ( null !== $existing_id ) {
-			if ( '' === $photographer ) {
-				// A name saved by an earlier attempt, or by a repair that finished meanwhile, is kept rather than
-				// erased or replaced by a response without one.
-				$photographer = (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, true );
-			}
-		}
 		$photographer_url = $this->with_unsplash_utm(
 			isset( $photo['user']['links']['html'] ) && is_string( $photo['user']['links']['html'] ) && '' !== $photo['user']['links']['html']
 				? $photo['user']['links']['html']
@@ -297,6 +290,13 @@ final class Media implements Module {
 			self::UNSPLASH_PHOTOGRAPHER_META_KEY     => $photographer,
 			self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY => $photographer_url,
 		];
+		if ( null !== $existing_id && '' === $photographer ) {
+			// A name saved by an earlier attempt, or by a repair that finished meanwhile, is kept rather than erased or
+			// replaced by a response without one. It is not written back, so a name another retry corrects after this
+			// read stays; the read only reports it to a user who cannot edit the attachment.
+			unset( $attribution[ self::UNSPLASH_PHOTOGRAPHER_META_KEY ] );
+			$photographer = (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_META_KEY, true );
+		}
 
 		if ( null !== $existing_id ) {
 			// Saving a credit marks the attachment complete, so a response without the photo's user cannot complete it.
