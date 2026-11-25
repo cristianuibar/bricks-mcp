@@ -156,24 +156,40 @@ PHP;
 	 * The case once logged to this one fixed /tmp file, so a directory there failed the probe's
 	 * write before the log was requested. The file such a run logged to is moved aside for the
 	 * run and put back after it, so a reused tests site runs the check instead of skipping it.
+	 *
+	 * Every run starts from that file: whatever the site holds at the path is kept aside and a
+	 * regular file takes its place, so a fresh site does not pass by making the directory alone.
 	 */
 	public function test_directory_at_an_earlier_target_does_not_stop_the_symlink_check(): void {
 		$path    = '/tmp/bricks-mcp-access-test.log';
 		$earlier = var_export( $path, true );
 		$aside   = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
+		$held    = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
+		$old_log = var_export( 'An earlier run logged here ' . bin2hex( random_bytes( 8 ) ) . "\n", true );
+		$fixture = "\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
+			. "echo ! file_exists( {$earlier} ) && ! is_link( {$earlier} ) && false !== @file_put_contents( {$earlier}, {$old_log} ) ? 'planted' : 'blocked', \$held ? ' held' : ' none';";
 		$setup   = "\$moved = ! is_dir( {$earlier} ) && ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$aside} );\n"
 			. "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' ), \$moved ? ' moved' : ' kept';";
-		[ $dir, $file ] = explode( ' ', $this->run_on_server( self::SERVER, $setup ) ) + [ '', '' ];
+		[ $planted, $kept ] = explode( ' ', $this->run_on_server( self::SERVER, $fixture ) ) + [ '', '' ];
+		$dir                = '';
+		$file               = '';
 
 		try {
+			$this->assertSame( 'planted', $planted, "Could not put a regular file at {$path} on the tests site." );
+			[ $dir, $file ] = explode( ' ', $this->run_on_server( self::SERVER, $setup ) ) + [ '', '' ];
 			$this->assertNotSame( 'blocked', $dir, "Could not make a directory at {$path} on the tests site." );
+			$this->assertSame( 'moved', $file, "The regular file at {$path} was not moved aside." );
 			$this->assert_symlinked_outside_log_denied();
 		} finally {
-			$undo = ( 'made' === $dir ? "rmdir( {$earlier} );\n" : '' ) . ( 'moved' === $file ? "rename( {$aside}, {$earlier} );" : '' );
-			if ( '' !== $undo ) {
-				$this->run_on_server( self::SERVER, $undo );
+			$undo = ( 'made' === $dir ? "rmdir( {$earlier} );\n" : '' ) . ( 'moved' === $file ? "rename( {$aside}, {$earlier} );\n" : '' );
+			if ( 'planted' === $planted ) {
+				$undo .= "\$back = is_file( {$earlier} ) && {$old_log} === file_get_contents( {$earlier} );\nunlink( {$earlier} );\necho \$back ? 'back' : 'lost';\n";
 			}
+			$undo    .= 'held' === $kept ? "rename( {$held}, {$earlier} );" : '';
+			$restored = '' === $undo ? '' : $this->run_on_server( self::SERVER, $undo );
 		}
+
+		$this->assertSame( 'back', $restored, "The regular file at {$path} did not come back as it was." );
 	}
 
 	/**
