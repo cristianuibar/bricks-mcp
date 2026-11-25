@@ -792,14 +792,7 @@ final class Content implements Module {
 		}
 
 		if ( 'slimseo' === $source ) {
-			$slim   = $this->slim_seo_meta( $post_id );
-			$fields = [];
-
-			foreach ( self::SLIM_SEO_FIELDS as $field => $key ) {
-				$fields[ $field ] = in_array( $field, self::SEO_ROBOTS_FIELDS, true ) ? (bool) ( $slim[ $key ] ?? false ) : (string) ( $slim[ $key ] ?? '' );
-			}
-
-			return $fields;
+			return $this->slim_seo_fields( $this->slim_seo_meta( $post_id ) );
 		}
 
 		$fields = [];
@@ -1031,6 +1024,22 @@ final class Content implements Module {
 	}
 
 	/**
+	 * Fields of a Slim SEO settings array.
+	 *
+	 * @param array<string, mixed> $slim Slim SEO settings.
+	 * @return array<string, string|bool>
+	 */
+	private function slim_seo_fields( array $slim ): array {
+		$fields = [];
+
+		foreach ( self::SLIM_SEO_FIELDS as $field => $key ) {
+			$fields[ $field ] = in_array( $field, self::SEO_ROBOTS_FIELDS, true ) ? (bool) ( $slim[ $key ] ?? false ) : (string) ( $slim[ $key ] ?? '' );
+		}
+
+		return $fields;
+	}
+
+	/**
 	 * Merge fields into Slim SEO's per-post settings array.
 	 *
 	 * Like Slim SEO's own editor, a cleared field drops its key, noindex is stored as 1, and an empty array deletes the meta.
@@ -1058,7 +1067,15 @@ final class Content implements Module {
 		}
 
 		if ( array() !== $slim ) {
-			return $this->update_seo_meta( $post_id, 'slim_seo', $slim ) ? true : $this->seo_write_failed( array_keys( $fields ) );
+			if ( $this->update_seo_meta( $post_id, 'slim_seo', $slim ) ) {
+				return true;
+			}
+
+			// One row holds every field, so a refused write fails only the fields the record does not already hold.
+			$held   = $this->slim_seo_fields( $this->slim_seo_meta( $post_id ) );
+			$failed = array_keys( array_diff_key( $fields, array_intersect_assoc( $fields, $held ) ) );
+
+			return array() === $failed ? true : $this->seo_write_failed( $failed );
 		}
 
 		// A stored empty string reads like a missing row, but the row would block a later unique insert.
