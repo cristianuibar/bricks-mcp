@@ -468,6 +468,61 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
+	 * A repair whose Unsplash response has no photographer name does not write back the name it read when another retry
+	 * corrects that name before this repair saves its credit (#370).
+	 *
+	 * @return void
+	 */
+	public function test_import_unsplash_nameless_repair_keeps_name_corrected_after_its_read(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 42,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+			],
+			[
+				'_unsplash_photo_id'            => 'dup_99',
+				'_unsplash_attribution_pending' => '1',
+				'_unsplash_photographer'        => 'Pat',
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_get_posts_return']   = [ 42 ];
+		$requested                                      = false;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function () use ( &$requested ): array {
+			$requested = true;
+
+			return [
+				'response' => [ 'code' => 200 ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => (string) wp_json_encode(
+					[
+						'id'   => 'dup_99',
+						'user' => [ 'links' => [ 'html' => 'https://unsplash.com/@pat' ] ],
+					]
+				),
+			];
+		};
+		// The other retry saves its credit after this repair has read the stored name, while it checks edit access.
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] = static function () use ( &$requested ): bool {
+			if ( $requested ) {
+				$GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_photographer']     = 'Pat Lee';
+				$GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_photographer_url'] = 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral';
+			}
+
+			return true;
+		};
+
+		$result = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'dup_99' ] );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 42, $result['attachmentId'] );
+		$this->assertSame( 'Pat Lee', $result['photographer'] );
+		$this->assertSame( 'Pat Lee', $GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_photographer'] );
+		$this->assertArrayNotHasKey( '_unsplash_attribution_pending', $GLOBALS['_bricks_mcp_test_post_meta'][42] );
+	}
+
+	/**
 	 * Unsplash user payloads with the photographer name both imports should report.
 	 *
 	 * @return array<string, array{0: array<string, mixed>, 1: string|null}>
