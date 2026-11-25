@@ -268,8 +268,12 @@ final class Media implements Module {
 		}
 
 		if ( is_wp_error( $photo ) ) {
-			// A legacy attachment always deduplicates: when Unsplash cannot credit it, it is returned as it is.
-			return null !== $existing_id && ! $pending ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
+			// A legacy attachment deduplicates: when Unsplash cannot credit it, it is returned as it is, unless an editor
+			// made it unreadable to this caller during the request, as the checks below refuse it after a successful one.
+			$reusable = null !== $existing_id && ! $pending
+				&& ( current_user_can( 'edit_post', $existing_id ) || current_user_can( 'read_post', $existing_id ) );
+
+			return $reusable ? $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id ) : $photo;
 		}
 
 		$photographer     = isset( $photo['user']['name'] ) && is_string( $photo['user']['name'] )
