@@ -532,6 +532,62 @@ final class MediaTest extends TestCase {
 	}
 
 	/**
+	 * A nameless repair completes when another repair saves the identical profile URL after this one read the attachment
+	 * into its meta cache, rather than report a false failure from that stale cache (#389).
+	 *
+	 * @return void
+	 */
+	public function test_import_unsplash_nameless_repair_completes_when_identical_url_saved_meanwhile(): void {
+		\Bricks\Database::$global_settings = [ 'apiKeyUnsplash' => 'secret-unsplash-key' ];
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 42,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+			],
+			[
+				'_unsplash_photo_id'            => 'dup_99',
+				'_unsplash_attribution_pending' => '1',
+				'_unsplash_photographer'        => 'Pat',
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_get_posts_return']   = [ 42 ];
+		$GLOBALS['_bricks_mcp_test_post_meta_cache']    = [];
+		$requested                                      = false;
+		$GLOBALS['_bricks_mcp_test_media_http_handler'] = static function () use ( &$requested ): array {
+			$requested = true;
+
+			return [
+				'response' => [ 'code' => 200 ],
+				'headers'  => [ 'content-type' => 'application/json' ],
+				'body'     => (string) wp_json_encode(
+					[
+						'id'   => 'dup_99',
+						'user' => [ 'links' => [ 'html' => 'https://unsplash.com/@pat' ] ],
+					]
+				),
+			];
+		};
+		// The other repair writes the database after this one has read the stored name, while it checks edit access.
+		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][42] = static function () use ( &$requested ): bool {
+			if ( $requested ) {
+				$GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_photographer_url'] = 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral';
+				unset( $GLOBALS['_bricks_mcp_test_post_meta'][42]['_unsplash_attribution_pending'] );
+			}
+
+			return true;
+		};
+
+		$result = wp_get_ability( 'bricks-mcp/import-unsplash-photo' )->execute( [ 'photoId' => 'dup_99' ] );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 42, $result['attachmentId'] );
+		$this->assertSame( 'Pat', $result['photographer'] );
+		$this->assertSame( 'https://unsplash.com/@pat?utm_source=bricks_mcp&utm_medium=referral', $result['photographerUrl'] );
+		$this->assertArrayNotHasKey( '_unsplash_attribution_pending', $GLOBALS['_bricks_mcp_test_post_meta'][42] );
+	}
+
+	/**
 	 * Unsplash failures a waiting repair can receive after another editor saved the credit.
 	 *
 	 * @return array<string, array{0: int, 1: string, 2: bool}>

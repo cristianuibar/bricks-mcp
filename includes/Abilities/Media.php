@@ -1143,7 +1143,10 @@ final class Media implements Module {
 	private function write_unsplash_meta( int $attachment_id, array $meta ): bool {
 		foreach ( $meta as $meta_key => $meta_value ) {
 			// Slashed because update_post_meta() unslashes, which would drop literal backslashes.
-			update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) );
+			if ( false === update_post_meta( $attachment_id, $meta_key, wp_slash( $meta_value ) ) ) {
+				// A write that changed no row keeps the meta cache, which misses a value another request saved meanwhile.
+				wp_cache_delete( $attachment_id, 'post_meta' );
+			}
 			if ( (string) get_post_meta( $attachment_id, $meta_key, true ) !== $meta_value ) {
 				return false;
 			}
