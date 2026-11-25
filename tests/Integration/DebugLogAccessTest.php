@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace BricksMCP\Tests\Integration;
 
 use PHPUnit\Framework\AssertionFailedError;
+use PHPUnit\Framework\SkippedTest;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -180,6 +181,9 @@ PHP;
 			$this->assertNotSame( 'blocked', $dir, "Could not make a directory at {$path} on the tests site." );
 			$this->assertSame( 'moved', $file, "The regular file at {$path} was not moved aside." );
 			$this->assert_symlinked_outside_log_denied();
+		} catch ( SkippedTest $e ) {
+			// A skip ends the run as OK without the HTTP check, the way the case once skipped on this file.
+			$this->fail( "The check skipped on the regular file at {$path} instead of running: {$e->getMessage()}" );
 		} finally {
 			$undo = ( 'made' === $dir ? "rmdir( {$earlier} );\n" : '' ) . ( 'moved' === $file ? "rename( {$aside}, {$earlier} );\n" : '' );
 			if ( 'planted' === $planted ) {
