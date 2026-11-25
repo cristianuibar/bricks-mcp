@@ -700,7 +700,8 @@ final class ContentTest extends TestCase {
 	/**
 	 * With SEOPress active, Bricks output that is still on and a noindex left by the Bricks fallback are reported until
 	 * the Bricks SEO and Open Graph output is turned off. A sharing image with a saved URL and a dynamic tag reports the
-	 * tag, the image Bricks prints, and a whitespace-only tag reports the URL.
+	 * tag, the image Bricks prints, and a whitespace-only tag reports the URL. Turning Bricks SEO off hides the stale
+	 * noindex error the page still holds.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
@@ -755,7 +756,9 @@ final class ContentTest extends TestCase {
 			self::POST_ID,
 			'_bricks_page_settings',
 			[
-				'sharingImage' => [
+				'metaRobots'      => [ 'noindex', 'nofollow' ],
+				'metaDescription' => 'Old Bricks description',
+				'sharingImage'    => [
 					'url'            => 'https://example.test/old-og.jpg',
 					'useDynamicData' => ' ',
 				],
@@ -764,6 +767,7 @@ final class ContentTest extends TestCase {
 		$blank_tag = array_column( $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] )['audit']['warnings'], null, 'type' );
 
 		$this->assertSame( [ 'sharingImage' => 'https://example.test/old-og.jpg' ], $blank_tag['bricks_opengraph_stale_values']['staleValues'] );
+		$this->assertSame( 'error', $blank_tag['bricks_seo_stale_values']['severity'] );
 
 		update_option( 'bricks_global_settings', [ 'disableSeo' => true ] );
 		$seo_off = $this->call( 'bricks-mcp/get-seo', [ 'postId' => self::POST_ID ] );
