@@ -5,7 +5,8 @@
  * Executed by run-without-mbstring.php in a PHP process started with -n and every mbstring
  * function disabled, so none is callable even when mbstring is compiled in. Only WordPress's
  * compat mb_strlen() is defined, as on a site without the extension. Prints a JSON result with
- * the internal mb_* functions still available, each ability reply and the stored category names.
+ * the internal mb_* functions still available, the functions BuilderTest disabled (listed in
+ * BRICKS_MCP_RESTRICTED) that are still callable, each ability reply and the stored category names.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
@@ -43,6 +44,7 @@ foreach ( [ 'EXISTING', 'Layout' ] as $bricks_mcp_category ) {
 echo wp_json_encode(
 	[
 		'mbstring'   => array_values( array_filter( get_defined_functions()['internal'], static fn( string $bricks_mcp_function ): bool => str_starts_with( $bricks_mcp_function, 'mb_' ) ) ),
+		'restricted' => array_values( array_intersect( array_map( 'strtolower', array_map( 'trim', explode( ',', (string) getenv( 'BRICKS_MCP_RESTRICTED' ) ) ) ), get_defined_functions()['internal'] ) ),
 		'results'    => $bricks_mcp_results,
 		'categories' => array_map( 'bin2hex', array_column( get_option( 'bricks_global_classes_categories', [] ), 'name' ) ),
 	]
