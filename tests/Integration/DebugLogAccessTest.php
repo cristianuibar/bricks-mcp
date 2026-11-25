@@ -479,8 +479,9 @@ PHP;
 	public function test_stalled_response_fails_the_check(): void {
 		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
 		// A length, like a static file's, so the body is not chunked and a read that times out returns nothing.
-		$code  = "http_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;";
-		$page  = $this->write_page( sprintf( $code, 65536 + strlen( $canary ), self::TIMEOUT + 5, var_export( $canary, true ) ) );
+		// Headers slower than the body's timeout, so only the body is held to it.
+		$code  = "sleep( %d );\nhttp_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;";
+		$page  = $this->write_page( sprintf( $code, self::STALL_TIMEOUT + 1, 65536 + strlen( $canary ), self::TIMEOUT + 5, var_export( $canary, true ) ) );
 		$file  = dirname( __DIR__, 2 ) . '/' . $page;
 		$start = hrtime( true );
 
@@ -639,7 +640,7 @@ PHP;
 	/**
 	 * The request is refused and its whole body, read in chunks so a large log fits in memory, holds no canary.
 	 *
-	 * @param int $timeout Seconds to wait for the response and for each part of its body.
+	 * @param int $timeout Seconds to wait for each part of its body.
 	 */
 	private function assert_denied( string $server, string $path, string $canary, int $timeout = self::TIMEOUT ): void {
 		[ $status, $stream ] = $this->open( $server, $path, $timeout );
@@ -681,14 +682,17 @@ PHP;
 	/**
 	 * Requests a file by its path under the web root, each segment URL-encoded, without reading its body.
 	 *
-	 * @param int $timeout Seconds to wait for the response and for each part of its body.
+	 * The response always gets TIMEOUT seconds to arrive.
+	 *
+	 * @param int $timeout Seconds to wait for each part of its body.
 	 * @return array{int, resource}
 	 */
 	private function open( string $server, string $path, int $timeout = self::TIMEOUT ): array {
 		$url     = 'http://' . $server . implode( '/', array_map( 'rawurlencode', explode( '/', $path ) ) );
-		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => $timeout ] ] );
+		$context = stream_context_create( [ 'http' => [ 'ignore_errors' => true, 'timeout' => self::TIMEOUT ] ] );
 		$stream  = fopen( $url, 'rb', false, $context );
 		$this->assertNotFalse( $stream, "{$server} did not answer." );
+		stream_set_timeout( $stream, $timeout );
 
 		preg_match( '#^HTTP/\S+ (\d{3})#', stream_get_meta_data( $stream )['wrapper_data'][0], $matches );
 
