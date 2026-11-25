@@ -7,6 +7,7 @@
  * function disabled here is missing from get_extension_funcs(), so the child gets this process's
  * list back plus every mbstring function still callable here. Passes the child's output and exit
  * status through with exec(), the one process function BuilderTest already needs to start this script.
+ * The restriction list BuilderTest passes as the first argument goes on to the child the same way.
  *
  * @package BricksMCP
  * @license GPL-2.0-or-later
@@ -17,6 +18,6 @@ declare(strict_types=1);
 $bricks_mcp_disabled = implode( ',', [ ini_get( 'disable_functions' ), ...( get_extension_funcs( 'mbstring' ) ?: [] ) ] );
 $bricks_mcp_output = [];
 $bricks_mcp_status = 1;
-exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $bricks_mcp_disabled ) . ' ' . escapeshellarg( __DIR__ . '/category-without-mbstring.php' ) . ' 2>&1', $bricks_mcp_output, $bricks_mcp_status );
+exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $bricks_mcp_disabled ) . ' ' . escapeshellarg( __DIR__ . '/category-without-mbstring.php' ) . ' ' . escapeshellarg( (string) ( $argv[1] ?? '' ) ) . ' 2>&1', $bricks_mcp_output, $bricks_mcp_status );
 echo implode( "\n", $bricks_mcp_output ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Relays the child's JSON to the test.
 exit( $bricks_mcp_status );

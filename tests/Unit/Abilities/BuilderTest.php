@@ -380,6 +380,7 @@ final class BuilderTest extends TestCase {
 			'mb_send_mail disabled'      => [ [ 'mb_send_mail' ] ],
 			'passthru disabled'          => [ [ 'passthru' ] ],
 			'uppercase name PHP keeps'   => [ [ 'PASSTHRU' ] ],
+			'environment calls disabled' => [ [ 'getenv', 'putenv' ] ],
 			'space-separated names lost' => [ [], 'str_repeat ucfirst', [ 'str_repeat', 'ucfirst' ] ],
 		];
 	}
@@ -389,15 +390,11 @@ final class BuilderTest extends TestCase {
 		// The launcher keeps this process's disabled functions and disables every mbstring one for the fixture, as on a host without it; the fixture defines only core's compat mb_strlen().
 		// The fixture reports which of these it can still call, so a lost restriction shows even when -n already drops a shared mbstring.
 		// $lost names restrictions the fixture is told about but the child never gets, as if the launcher dropped them.
+		// The list goes to the fixture as an argument, so a runner with putenv() or getenv() disabled still launches it.
 		$disabled = implode( ',', [ ini_get( 'disable_functions' ), ...$disabled ] );
 		$output   = [];
 		$status   = 1;
-		putenv( 'BRICKS_MCP_RESTRICTED=' . $disabled . ',' . $lost );
-		try {
-			exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $disabled ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/run-without-mbstring.php' ) . ' 2>&1', $output, $status );
-		} finally {
-			putenv( 'BRICKS_MCP_RESTRICTED' );
-		}
+		exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $disabled ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/run-without-mbstring.php' ) . ' ' . escapeshellarg( $disabled . ',' . $lost ) . ' 2>&1', $output, $status );
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertSame(
@@ -409,6 +406,16 @@ final class BuilderTest extends TestCase {
 			],
 			json_decode( implode( "\n", $output ), true )
 		);
+	}
+
+	public function test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv(): void {
+		// PHPUnit itself needs getenv(), so only putenv() is taken from the runner here; the dataset covers both in the launched processes.
+		$output = [];
+		$status = 1;
+		exec( escapeshellarg( PHP_BINARY ) . ' -d ' . escapeshellarg( 'disable_functions=' . ini_get( 'disable_functions' ) . ',putenv' ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_works_without_mbstring' ) . ' 2>&1', $output, $status );
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertStringContainsString( 'OK (' . count( self::parent_restrictions() ) . ' tests', implode( "\n", $output ) );
 	}
 
 	public function test_category_deletion_uncategorizes_its_classes(): void {
