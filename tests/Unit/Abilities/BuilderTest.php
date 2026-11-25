@@ -376,20 +376,23 @@ final class BuilderTest extends TestCase {
 
 	public static function parent_restrictions(): array {
 		return [
-			'only the runner\'s'    => [ [] ],
-			'mb_send_mail disabled' => [ [ 'mb_send_mail' ] ],
-			'passthru disabled'     => [ [ 'passthru' ] ],
+			'only the runner\'s'         => [ [] ],
+			'mb_send_mail disabled'      => [ [ 'mb_send_mail' ] ],
+			'passthru disabled'          => [ [ 'passthru' ] ],
+			'uppercase name PHP keeps'   => [ [ 'PASSTHRU' ] ],
+			'space-separated names lost' => [ [], 'str_repeat ucfirst', [ 'str_repeat', 'ucfirst' ] ],
 		];
 	}
 
 	#[DataProvider( 'parent_restrictions' )]
-	public function test_category_creation_works_without_mbstring( array $disabled ): void {
+	public function test_category_creation_works_without_mbstring( array $disabled, string $lost = '', array $callable = [] ): void {
 		// The launcher keeps this process's disabled functions and disables every mbstring one for the fixture, as on a host without it; the fixture defines only core's compat mb_strlen().
 		// The fixture reports which of these it can still call, so a lost restriction shows even when -n already drops a shared mbstring.
+		// $lost names restrictions the fixture is told about but the child never gets, as if the launcher dropped them.
 		$disabled = implode( ',', [ ini_get( 'disable_functions' ), ...$disabled ] );
 		$output   = [];
 		$status   = 1;
-		putenv( 'BRICKS_MCP_RESTRICTED=' . $disabled );
+		putenv( 'BRICKS_MCP_RESTRICTED=' . $disabled . ',' . $lost );
 		try {
 			exec( escapeshellarg( PHP_BINARY ) . ' -n -d ' . escapeshellarg( 'disable_functions=' . $disabled ) . ' ' . escapeshellarg( __DIR__ . '/fixtures/run-without-mbstring.php' ) . ' 2>&1', $output, $status );
 		} finally {
@@ -400,7 +403,7 @@ final class BuilderTest extends TestCase {
 		$this->assertSame(
 			[
 				'mbstring'   => [],
-				'restricted' => [],
+				'restricted' => $callable,
 				'results'    => [ 'bricks_mcp_duplicate_category', 'Layout' ],
 				'categories' => [ bin2hex( "Lay\xC3out" ), bin2hex( 'Existing' ), bin2hex( 'Layout' ) ],
 			],
