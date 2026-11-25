@@ -1318,6 +1318,34 @@ final class ContentTest extends TestCase {
 	}
 
 	/**
+	 * Resending a stored Rank Math noindex to a read-only table succeeds: the row already holds those directives, though
+	 * in another order than the rebuilt list.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @return void
+	 */
+	public function test_rank_math_resend_of_stored_robots_in_another_order_to_a_read_only_table_succeeds(): void {
+		eval( 'final class RankMath {}' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- Declares a fake plugin class in this separate test process only.
+		update_post_meta( self::POST_ID, 'rank_math_robots', [ 'noindex', 'nofollow' ] );
+		$this->make_post_meta_read_only();
+
+		$write = $this->call(
+			'bricks-mcp/update-seo',
+			[
+				'postId' => self::POST_ID,
+				'seo'    => [ 'noindex' => true ],
+			]
+		);
+
+		$this->assertIsArray( $write );
+		$this->assertSame( [ 'noindex' ], $write['updated'] );
+		$this->assertTrue( $write['after']['noindex'] );
+		$this->assertSame( [ 'noindex', 'nofollow' ], get_post_meta( self::POST_ID, 'rank_math_robots', true ) );
+	}
+
+	/**
 	 * Slim SEO noindex, Facebook image and Twitter image are read, set and cleared in its settings array.
 	 *
 	 * @runInSeparateProcess
