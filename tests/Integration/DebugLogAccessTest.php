@@ -37,11 +37,6 @@ final class DebugLogAccessTest extends TestCase {
 	private const STALL_TIMEOUT = 1;
 
 	/**
-	 * Nanoseconds the last read assert_denied() made waited for its part of the body.
-	 */
-	private int $last_read_took = 0;
-
-	/**
 	 * Logs a canary through the requesting site's WordPress and reports where it went.
 	 *
 	 * Both sites serve the plugin checkout, so each one runs it with its own wp-config.php.
@@ -509,16 +504,17 @@ PHP;
 		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
 		// A length, like a static file's, so the body is not chunked and a read that times out returns nothing.
 		// Headers slower than the body's timeout, so only the body is held to it.
+		// The canary halfway between the body's timeout and TIMEOUT, so a read held to TIMEOUT instead finds it,
+		// and the check needs no clock that a pause after the read would also count.
 		$code  = "sleep( %d );\nhttp_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;";
-		$page  = $this->write_page( sprintf( $code, self::STALL_TIMEOUT + 1, 65536 + strlen( $canary ), self::TIMEOUT + 5, var_export( $canary, true ) ) );
+		$page  = $this->write_page( sprintf( $code, self::STALL_TIMEOUT + 1, 65536 + strlen( $canary ), intdiv( self::STALL_TIMEOUT + self::TIMEOUT, 2 ), var_export( $canary, true ) ) );
 		$file = dirname( __DIR__, 2 ) . '/' . $page;
 
 		try {
 			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/' . $page, $canary, self::STALL_TIMEOUT );
 		} catch ( AssertionFailedError $e ) {
+			// Not 'served the canary': the read gave up before the canary came, so the body was held to its own timeout.
 			$this->assertStringContainsString( 'timed out before the end of its body', $e->getMessage() );
-			// The read that timed out alone, so neither the headers' wait, which TIMEOUT bounds, nor a pause after it counts.
-			$this->assertLessThan( self::STALL_TIMEOUT + 1, $this->last_read_took / 1e9, 'The stalled body was not held to its timeout.' );
 			$this->assertFileDoesNotExist( $file, 'The stalled page was still in the checkout during its wait.' );
 			return;
 		} finally {
@@ -710,12 +706,10 @@ PHP;
 			// Keep the end of each chunk, so a canary split across two chunks is still found.
 			$tail = '';
 			do {
-				$start                = hrtime( true );
-				$read                 = (string) fread( $stream, 65536 );
-				$this->last_read_took = hrtime( true ) - $start;
-				$chunk                = $tail . $read;
-				$found                = str_contains( $chunk, $canary );
-				$tail                 = substr( $chunk, -( strlen( $canary ) - 1 ) );
+				$read  = (string) fread( $stream, 65536 );
+				$chunk = $tail . $read;
+				$found = str_contains( $chunk, $canary );
+				$tail  = substr( $chunk, -( strlen( $canary ) - 1 ) );
 			} while ( ! $found && '' !== $read );
 			$this->assertFalse( $found, "{$server}{$path} served the canary." );
 			// A read that times out also returns '', leaving the rest of the body unchecked.
