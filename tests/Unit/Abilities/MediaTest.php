@@ -1709,45 +1709,66 @@ final class MediaTest extends TestCase {
 		}
 
 		// A replacement on a post that an editor makes private while the retry waits is not returned to an author who can
-		// neither edit nor read it, although the permission check loaded that post into the request's cache before: the
-		// retry uploads an attachment of its own, and the replacement keeps its parent.
-		$clear_attachments();
-		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
-		$kept_error = $import();
-		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
-		$this->assertInstanceOf( \WP_Error::class, $kept_error );
-		$deleted_id = $kept_error->get_error_data()['attachmentId'];
-		$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ] = false;
-		$GLOBALS['_bricks_mcp_test_post_cache']                               = [];
-		$target_status = get_post( 15 )->post_status;
-		$replacement   = null;
-		$on_api_fetch  = static function () use ( $deleted_id, $import, &$replacement ): void {
-			wp_delete_attachment( $deleted_id, true );
-			$replacement    = $import();
-			$replacement_id = $replacement['attachmentId'];
-			// The stored replacement is on the target post, as the database holds it after the other import's attach.
-			$GLOBALS['_bricks_mcp_test_posts'][ $replacement_id ]->post_parent      = 15;
-			$GLOBALS['_bricks_mcp_test_posts'][15]->post_status                    = 'private';
-			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ] = false;
-			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] = static function () use ( $replacement_id ): bool {
-				$parent_id = get_post( $replacement_id )->post_parent;
-				return 0 === $parent_id || 'private' !== get_post( $parent_id )->post_status;
+		// neither edit nor read it, although the permission check loaded that post into the request's cache before. That
+		// holds when the replacement is attached to another attachment on that post, whose status it inherits: the retry
+		// uploads an attachment of its own, and the replacement keeps its parent.
+		foreach ( [ 'on the post' => 15, 'through an attachment' => 960 ] as $shape => $parent ) {
+			$clear_attachments();
+			if ( 960 === $parent ) {
+				bricks_mcp_test_add_post(
+					[
+						'ID'          => 960,
+						'post_type'   => 'attachment',
+						'post_status' => 'inherit',
+						'post_parent' => 15,
+					]
+				);
+			}
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+			$kept_error = $import();
+			$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+			$this->assertInstanceOf( \WP_Error::class, $kept_error, $shape );
+			$deleted_id = $kept_error->get_error_data()['attachmentId'];
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ] = false;
+			$GLOBALS['_bricks_mcp_test_post_cache']                               = [];
+			$target_status = get_post( 15 )->post_status;
+			$replacement   = null;
+			$on_api_fetch  = static function () use ( $deleted_id, $import, &$replacement, $parent ): void {
+				wp_delete_attachment( $deleted_id, true );
+				$replacement    = $import();
+				$replacement_id = $replacement['attachmentId'];
+				// The stored replacement has its new parent, as the database holds it after the editor's change.
+				$GLOBALS['_bricks_mcp_test_posts'][ $replacement_id ]->post_parent      = $parent;
+				$GLOBALS['_bricks_mcp_test_posts'][15]->post_status                    = 'private';
+				$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ] = false;
+				// Like map_meta_cap(), an inherit attachment takes its status from its parents, attachment by attachment.
+				$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] = static function () use ( $replacement_id ): bool {
+					$post = get_post( $replacement_id );
+					while ( 'attachment' === $post->post_type && 'inherit' === $post->post_status && 0 !== $post->post_parent ) {
+						$post = get_post( $post->post_parent );
+					}
+					return 'private' !== $post->post_status;
+				};
 			};
-		};
-		$private_replace = $import();
-		$GLOBALS['_bricks_mcp_test_post_cache']             = null;
-		$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = $target_status;
-		unset(
-			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ],
-			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement['attachmentId'] ],
-			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement['attachmentId'] ]
-		);
-		$this->assertIsArray( $replacement );
-		$this->assertIsArray( $private_replace );
-		$this->assertNotContains( $private_replace['attachmentId'], [ $deleted_id, $replacement['attachmentId'] ] );
-		$this->assertFalse( $private_replace['duplicate'] );
-		$this->assertSame( 15, get_post( $replacement['attachmentId'] )->post_parent );
-		$this->assertEqualsCanonicalizing( [ $replacement['attachmentId'], $private_replace['attachmentId'] ], $attachment_ids() );
+			$private_replace = $import();
+			$GLOBALS['_bricks_mcp_test_post_cache']             = null;
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = $target_status;
+			unset(
+				$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $deleted_id ],
+				$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement['attachmentId'] ],
+				$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement['attachmentId'] ]
+			);
+			$this->assertIsArray( $replacement, $shape );
+			$this->assertIsArray( $private_replace, $shape );
+			$this->assertNotContains( $private_replace['attachmentId'], [ $deleted_id, $replacement['attachmentId'], 960 ], $shape );
+			$this->assertFalse( $private_replace['duplicate'], $shape );
+			$this->assertSame( $parent, get_post( $replacement['attachmentId'] )->post_parent, $shape );
+			$this->assertEqualsCanonicalizing(
+				array_merge( [ $replacement['attachmentId'], $private_replace['attachmentId'] ], 960 === $parent ? [ 960 ] : [] ),
+				$attachment_ids(),
+				$shape
+			);
+		}
 
 		// The retry returns the replacement it checked access to, not a newer private import of the photo that appears
 		// after that check.

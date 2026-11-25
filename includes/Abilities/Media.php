@@ -265,12 +265,9 @@ final class Media implements Module {
 				$existing_id    = null;
 				$pending        = false;
 				if ( null !== $replacement_id && $replacement_id !== $deleted_id ) {
-					// The request may hold the replacement's parent from before it was attached, such as the target post.
-					clean_post_cache( $replacement_id );
-					$replacement = get_post( $replacement_id );
-					if ( $replacement && (int) ( $replacement->post_parent ?? 0 ) > 0 ) {
-						clean_post_cache( (int) $replacement->post_parent );
-					}
+					// The request may hold the replacement's parents from before it was attached, such as the target post,
+					// and an attachment inherits its status from them, parent by parent.
+					$this->clean_post_cache_with_parents( $replacement_id );
 					if ( current_user_can( 'edit_post', $replacement_id ) || current_user_can( 'read_post', $replacement_id ) ) {
 						// As at the start of an import, only an unfinished import, or a legacy one this caller can edit, is
 						// completed below; any other replacement is returned as it is.
@@ -1234,6 +1231,22 @@ final class Media implements Module {
 		}
 
 		return $this->format_existing_attachment( $attachment_id, $photo_id );
+	}
+
+	/**
+	 * Drop a post and each of its parents from the request's cache, so a capability check reads them afresh.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return void
+	 */
+	private function clean_post_cache_with_parents( int $post_id ): void {
+		$seen = [];
+		while ( $post_id > 0 && ! isset( $seen[ $post_id ] ) ) {
+			$seen[ $post_id ] = true;
+			clean_post_cache( $post_id );
+			$post    = get_post( $post_id );
+			$post_id = $post ? (int) ( $post->post_parent ?? 0 ) : 0;
+		}
 	}
 
 	/**
