@@ -37,6 +37,11 @@ final class DebugLogAccessTest extends TestCase {
 	private const STALL_TIMEOUT = 1;
 
 	/**
+	 * What a whole response of the earlier-target plant step that got the lock is, as a regular expression.
+	 */
+	private const PLANTED = '(planted|present|blocked) (held|none)';
+
+	/**
 	 * Logs a canary through the requesting site's WordPress and reports where it went.
 	 *
 	 * Both sites serve the plugin checkout, so each one runs it with its own wp-config.php.
@@ -159,29 +164,11 @@ PHP;
 	 * checked in place, as it was before that file was planted.
 	 */
 	public function test_directory_at_an_earlier_target_does_not_stop_the_symlink_check(): void {
-		$path     = '/tmp/bricks-mcp-access-test.log';
-		$steps    = self::earlier_target_steps( $path );
-		$planting = null;
-		$swapping = '';
-
-		try {
-			$planting    = $this->run_on_server( self::SERVER, $steps['plant'] );
-			[ $planted ] = explode( ' ', $planting );
-			$this->assertNotSame( 'busy', $planted, "Another run holds {$path}.lock on the tests site, or one stopped before its cleanup: with no run going, put back what it kept under {$path}-<hex>, then remove the lock folder." );
-			$this->assertNotSame( 'blocked', $planted, "Could not put a regular file at {$path} on the tests site." );
-			$swapping       = $this->run_on_server( self::SERVER, $steps['swap'] );
-			[ $dir, $file ] = explode( ' ', $swapping ) + [ '', '' ];
-			$this->assertNotSame( 'blocked', $dir, "Could not make a directory at {$path} on the tests site." );
-			$this->assertSame( 'planted' === $planted ? 'moved' : 'kept', $file, "The regular file at {$path} was not moved aside." );
-			$this->assert_symlinked_outside_log_denied();
-		} catch ( SkippedTest $e ) {
-			// A skip ends the run as OK without the HTTP check, the way the case once skipped on this file.
-			$this->fail( "The check skipped on the regular file at {$path} instead of running: {$e->getMessage()}" );
-		} finally {
-			$restored = self::undo_earlier_target( $steps, $planting, $swapping, fn ( string $code ): string => $this->run_on_server( self::SERVER, $code ) );
-		}
-
-		$this->assertSame( 'back', $restored, "The regular file at {$path} did not come back as it was, or what the tests site held there is still under {$path}-<hex> with {$path}.lock." );
+		$this->check_at_earlier_target(
+			'/tmp/bricks-mcp-access-test.log',
+			fn ( string $code ): string => $this->run_on_server( self::SERVER, $code ),
+			fn () => $this->assert_symlinked_outside_log_denied()
+		);
 	}
 
 	/**
@@ -208,7 +195,7 @@ PHP;
 			$first_swapping  = self::run_here( $first['swap'] );
 			$second_planting = self::run_here( $second['plant'] );
 			$this->assertSame( [ 'planted held', 'made moved', 'busy' ], [ $first_planting, $first_swapping, $second_planting ] );
-			$this->assertSame( '', $second['restore']( $second_planting, '' ), 'The refused run has something to undo.' );
+			$this->assertSame( '', self::undo_earlier_target( $second, $second_planting, '', static fn ( string $code ): string => self::run_here( $code ) ), 'The refused run had something to undo.' );
 			$first_restored = self::run_here( $first['restore']( $first_planting, $first_swapping ) );
 
 			clearstatcache();
@@ -304,35 +291,40 @@ PHP;
 	}
 
 	/**
-	 * A run whose planting response is lost still puts the site's log back and frees the lock.
+	 * A run whose planting response is lost or cut short still puts the site's log back and frees the lock.
 	 *
 	 * Apache could finish plant while the caller threw before its cleanup, as on a dropped
 	 * response, so the log stayed under a -<hex> name with the lock kept and every later run
-	 * reported busy. The cleanup now asks the site what plant printed. A run refused while
-	 * another holds the lock finds nothing of its own there, so it leaves that run alone.
+	 * reported busy. A body cut short to planted made the cleanup report back with the log still
+	 * kept aside. The cleanup now undoes what the site recorded plant did.
 	 *
-	 * Needs no web server: it runs each step's PHP here, on a path of its own.
+	 * Needs no web server: it runs the check's steps here, on a path of its own.
+	 *
+	 * @dataProvider planting_responses
 	 */
-	public function test_lost_planting_response_still_puts_the_log_back(): void {
+	public function test_lost_planting_response_still_puts_the_log_back( \Closure $response ): void {
 		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
 		$path   = "{$folder}/bricks-mcp-access-test.log";
 		$log    = "The site's own log\n";
 		mkdir( $folder );
 		file_put_contents( $path, $log );
-		$first  = self::earlier_target_steps( $path );
-		$second = self::earlier_target_steps( $path );
-		$run    = static fn ( string $code ): string => self::run_here( $code );
+		$calls = 0;
+		// plant runs to the end on the site, and only its response is lost or cut short on the way.
+		$run = static function ( string $code ) use ( &$calls, $response ): string {
+			$printed = self::run_here( $code );
+			return 0 === $calls++ ? $response( $printed ) : $printed;
+		};
 
 		try {
-			// Both plant steps run to the end and neither caller gets what they printed.
-			self::run_here( $first['plant'] );
-			self::run_here( $second['plant'] );
-			$this->assertSame( '', self::undo_earlier_target( $second, null, '', $run ), 'The refused run had something to undo.' );
-			$this->assertDirectoryExists( "{$path}.lock", 'The refused run freed the lock the other run holds.' );
-			$this->assertSame( 'back', self::undo_earlier_target( $first, null, '', $run ) );
+			try {
+				$this->check_at_earlier_target( $path, $run, static fn () => null );
+			} catch ( \RuntimeException | AssertionFailedError $e ) {
+				$failure = $e->getMessage();
+			}
+			$this->assertTrue( isset( $failure ), 'The check passed on a planting response it did not get whole.' );
 
 			clearstatcache();
-			$this->assertSame( [ $path ], glob( "{$folder}/*" ), "The runs left more than the log in {$folder}." );
+			$this->assertSame( [ $path ], glob( "{$folder}/*" ), "The run left more than the log in {$folder}: {$failure}" );
 			$this->assertSame( $log, file_get_contents( $path ) );
 		} finally {
 			foreach ( glob( "{$path}.lock/*" ) as $left ) {
@@ -343,6 +335,22 @@ PHP;
 			}
 			rmdir( $folder );
 		}
+	}
+
+	/**
+	 * What the caller gets from a plant step that printed planted held.
+	 *
+	 * @return array<string, array{\Closure(string): string}>
+	 */
+	public static function planting_responses(): array {
+		return [
+			'lost'      => [
+				static function (): string {
+					throw new \RuntimeException( 'The planting response was lost.' );
+				},
+			],
+			'cut short' => [ static fn ( string $printed ): string => substr( $printed, 0, strlen( 'planted' ) ) ],
+		];
 	}
 
 	/**
@@ -916,15 +924,52 @@ PHP;
 	}
 
 	/**
+	 * Runs the earlier-target check on $path and puts back what it changed there.
+	 *
+	 * @param \Closure(string): string $run   Runs PHP on the site and returns what it prints.
+	 * @param \Closure(): void         $check The check to run with the directory at $path.
+	 */
+	private function check_at_earlier_target( string $path, \Closure $run, \Closure $check ): void {
+		$steps    = self::earlier_target_steps( $path );
+		$planting = null;
+		$swapping = '';
+
+		try {
+			$planting    = $run( $steps['plant'] );
+			[ $planted ] = explode( ' ', $planting );
+			$this->assertMatchesRegularExpression( '/\A(busy|' . self::PLANTED . ')\z/', $planting, "The tests site's planting response for {$path} was cut short." );
+			$this->assertNotSame( 'busy', $planted, "Another run holds {$path}.lock on the tests site, or one stopped before its cleanup: with no run going, put back what it kept under {$path}-<hex>, then remove the lock folder." );
+			$this->assertNotSame( 'blocked', $planted, "Could not put a regular file at {$path} on the tests site." );
+			$swapping       = $run( $steps['swap'] );
+			[ $dir, $file ] = explode( ' ', $swapping ) + [ '', '' ];
+			$this->assertNotSame( 'blocked', $dir, "Could not make a directory at {$path} on the tests site." );
+			$this->assertSame( 'planted' === $planted ? 'moved' : 'kept', $file, "The regular file at {$path} was not moved aside." );
+			$check();
+		} catch ( SkippedTest $e ) {
+			// A skip ends the run as OK without the HTTP check, the way the case once skipped on this file.
+			$this->fail( "The check skipped on the regular file at {$path} instead of running: {$e->getMessage()}" );
+		} finally {
+			$restored = self::undo_earlier_target( $steps, $planting, $swapping, $run );
+		}
+
+		$this->assertSame( 'back', $restored, "The regular file at {$path} did not come back as it was, or what the tests site held there is still under {$path}-<hex> with {$path}.lock." );
+	}
+
+	/**
 	 * Undoes what the earlier-target steps did and returns what restore printed, '' when there was nothing to undo.
 	 *
+	 * It undoes what the site recorded plant did, or what a whole planting response says when
+	 * plant could not write its record: a response lost or cut short may name less than it did.
+	 *
 	 * @param array{plant: string, swap: string, recall: string, restore: \Closure(string, string): string} $steps The run's steps.
-	 * @param string|null                                                                                      $planting What plant printed, null when its response never came.
+	 * @param string|null                                                                                      $planting What the caller got from plant, null when its response never came.
 	 * @param string                                                                                           $swapping What swap printed, '' when it did not run.
 	 * @param \Closure(string): string                                                                         $run      Runs PHP where plant ran and returns what it prints.
 	 */
 	private static function undo_earlier_target( array $steps, ?string $planting, string $swapping, \Closure $run ): string {
-		$undo = $steps['restore']( $planting ?? $run( $steps['recall'] ), $swapping );
+		$recorded = $run( $steps['recall'] );
+		$whole    = static fn ( ?string $printed ): bool => 1 === preg_match( '/\A' . self::PLANTED . '\z/', (string) $printed );
+		$undo     = $steps['restore']( $whole( $recorded ) ? $recorded : ( $whole( $planting ) ? $planting : '' ), $swapping );
 
 		return '' === $undo ? '' : $run( $undo );
 	}
