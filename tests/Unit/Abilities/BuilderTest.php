@@ -374,14 +374,29 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( [ ...$stored, $category ], get_option( 'bricks_global_classes_categories' ) );
 	}
 
+	/**
+	 * Two functions the fixture can call whatever the runner disables.
+	 *
+	 * get_extension_funcs() leaves out the functions disabled in this process, and the fixture's -n
+	 * still has the always-loaded standard extension, so the rows that need a callable name never
+	 * lean on one the runner may have disabled.
+	 *
+	 * @return string[] Two lowercase function names.
+	 */
+	private static function callable_names(): array {
+		return array_slice( get_extension_funcs( 'standard' ), 0, 2 );
+	}
+
 	public static function parent_restrictions(): array {
+		[ $first, $second ] = self::callable_names();
+
 		return [
 			'only the runner\'s'         => [ [] ],
 			'mb_send_mail disabled'      => [ [ 'mb_send_mail' ] ],
 			'passthru disabled'          => [ [ 'passthru' ] ],
-			'uppercase name PHP keeps'   => [ [ 'PASSTHRU' ] ],
+			'uppercase name PHP keeps'   => [ [ strtoupper( $first ) ] ],
 			'environment calls disabled' => [ [ 'getenv', 'putenv' ] ],
-			'space-separated names lost' => [ [], 'str_repeat ucfirst', [ 'str_repeat', 'ucfirst' ] ],
+			'space-separated names lost' => [ [], $first . ' ' . $second, [ $first, $second ] ],
 		];
 	}
 
@@ -419,6 +434,17 @@ final class BuilderTest extends TestCase {
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertStringContainsString( 'OK (1 test,', implode( "\n", $output ) );
+	}
+
+	public function test_category_creation_without_mbstring_rows_run_where_the_runner_disables_their_names(): void {
+		// A runner that disables the names these rows pick makes the launched PHPUnit pick others, so the space-separated row still sees them and the uppercase row still tells them apart from the lowercase one.
+		$ini    = php_ini_loaded_file();
+		$output = [];
+		$status = 1;
+		exec( escapeshellarg( PHP_BINARY ) . ( false === $ini ? '' : ' -c ' . escapeshellarg( $ini ) ) . ' -d ' . escapeshellarg( 'disable_functions=' . implode( ',', [ ini_get( 'disable_functions' ), ...self::callable_names() ] ) ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_works_without_mbstring@(uppercase name PHP keeps|space-separated names lost)' ) . ' 2>&1', $output, $status );
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertStringContainsString( 'OK (2 tests,', implode( "\n", $output ) );
 	}
 
 	public function test_category_creation_without_mbstring_runs_where_the_runner_loads_its_extensions_with_c(): void {
