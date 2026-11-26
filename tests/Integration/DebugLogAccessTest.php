@@ -107,7 +107,7 @@ echo PHP_EOL, wp_json_encode(
 PHP;
 
 	protected function setUp(): void {
-		if ( ! in_array( $this->name(), [ 'test_fixtures_left_in_the_checkout_are_ignored_by_git', 'test_run_during_another_leaves_the_earlier_target_alone', 'test_cleanup_that_cannot_put_the_log_back_reports_it', 'test_planted_file_cut_short_leaves_the_log_to_go_back', 'test_directory_the_site_cannot_move_is_checked_in_place', 'test_lost_planting_response_still_puts_the_log_back', 'test_cleanup_while_plant_still_runs_leaves_the_lock_to_it' ], true ) && gethostbyname( self::SERVER ) === self::SERVER ) {
+		if ( ! in_array( $this->name(), [ 'test_fixtures_left_in_the_checkout_are_ignored_by_git', 'test_run_during_another_leaves_the_earlier_target_alone', 'test_cleanup_that_cannot_put_the_log_back_reports_it', 'test_planted_file_cut_short_leaves_the_log_to_go_back', 'test_directory_the_site_cannot_move_is_checked_in_place', 'test_lost_planting_response_still_puts_the_log_back', 'test_cleanup_while_plant_still_runs_waits_for_it' ], true ) && gethostbyname( self::SERVER ) === self::SERVER ) {
 			$this->markTestSkipped( 'Needs the wp-env tests site: run npm run test:integration.' );
 		}
 	}
@@ -297,7 +297,7 @@ PHP;
 	 * response, so the log stayed under a -<hex> name with the lock kept and every later run
 	 * reported busy. A body cut short to planted made the cleanup report back with the log still
 	 * kept aside. The cleanup now undoes what a whole planting response says, or else what the
-	 * site finds plant did, and plant makes the lock's mark of its run before it changes anything.
+	 * site finds plant did, and plant locks its ticket before it changes anything.
 	 *
 	 * Needs no web server: it runs the check's steps here, on a path of its own.
 	 *
@@ -351,63 +351,64 @@ PHP;
 		};
 		$cut  = static fn ( string $printed ): string => substr( $printed, 0, strlen( 'planted' ) );
 		// No inode is left for a new file, as on a /tmp full of small files.
-		$no_inode = 'namespace BricksMCP\Tests\NoInode;' . "\nfunction file_put_contents( string \$file, string \$data ): int|false {\n\treturn file_exists( \$file ) ? \\file_put_contents( \$file, \$data ) : false;\n}\n"
-			. "function fopen( string \$file, string \$mode ) {\n\treturn file_exists( \$file ) ? \\fopen( \$file, \$mode ) : false;\n}\n";
+		$no_inode = 'namespace BricksMCP\Tests\NoInode;' . "\nfunction fopen( string \$file, string \$mode ) {\n\treturn file_exists( \$file ) ? \\fopen( \$file, \$mode ) : false;\n}\n";
 
 		return [
 			'planting lost'                          => [ [ 0 => $lost ], '' ],
 			'planting cut short'                     => [ [ 0 => $cut ], '' ],
-			'planting lost, no inode for a mark'     => [ [ 0 => $lost ], $no_inode ],
+			'planting lost, no inode for a ticket'   => [ [ 0 => $lost ], $no_inode ],
 			'first cleanup response lost'            => [ [ 2 => $lost ], '' ],
 			'planting lost, cleanup reply cut short' => [ [ 0 => $lost, 1 => $cut ], '' ],
 		];
 	}
 
 	/**
-	 * A cleanup that comes while plant still runs on the site leaves the lock to it, and a later one puts the log back.
+	 * A cleanup that comes while plant still runs on the site waits for it, and the site's log goes back.
 	 *
-	 * A request that times out may still be running plant. A cleanup that found its mark before
-	 * plant moved the site's log aside took that for a plant that had changed nothing and freed
-	 * the lock, and plant then moved the log aside with no lock left. plant now holds its mark
-	 * locked until it ends, and the cleanup changes nothing while it does.
+	 * A request that times out may still be running plant. The cleanup freed the lock when it
+	 * came between plant making its mark and locking it, and gave up while plant held the mark,
+	 * so plant then moved the log aside with no lock left or with no cleanup to come. plant now
+	 * locks its ticket before it takes the lock, the cleanup waits on that ticket, and a cleanup
+	 * that comes before plant has locked it calls the run off.
 	 *
 	 * Needs no web server: it runs each step's PHP here, on a path of its own.
+	 *
+	 * @dataProvider plant_pauses
+	 *
+	 * @param string $pause PHP plant runs before its steps, to stop where the cleanup comes.
 	 */
-	public function test_cleanup_while_plant_still_runs_leaves_the_lock_to_it(): void {
+	public function test_cleanup_while_plant_still_runs_waits_for_it( string $pause ): void {
 		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
 		$path   = "{$folder}/bricks-mcp-access-test.log";
 		$log    = "The site's own log\n";
 		mkdir( $folder );
 		file_put_contents( $path, $log );
 		$steps = self::earlier_target_steps( $path );
-		$run   = static fn ( string $code ): string => self::run_here( $code );
-		// plant waits before it moves the site's log aside until the test lets it go on, as a slow request does.
-		$pause = <<<'PHP'
-namespace BricksMCP\Tests\Pause;
-function rename( string $from, string $to ): bool {
-	echo "paused\n";
-	fgets( STDIN );
-	return \rename( $from, $to );
-}
-
-PHP;
-		$plant = proc_open( [ PHP_BINARY, '-r', $pause . $steps['plant'] ], [ [ 'pipe', 'r' ], [ 'pipe', 'w' ] ], $pipes );
+		$pipes = [];
+		$plant = proc_open( [ PHP_BINARY, '-r', str_replace( 'PATH', var_export( $path, true ), $pause ) . $steps['plant'] ], [ [ 'pipe', 'r' ], [ 'pipe', 'w' ] ], $pipes );
+		// The cleanup says when it starts to wait on a lock, and plant then goes on.
+		$wait = 'namespace BricksMCP\Tests\Wait;' . "\nfunction flock( \$stream, int \$operation ): bool {\n\techo \"waiting\\n\";\n\treturn \\flock( \$stream, \$operation );\n}\n";
+		$run  = static function ( string $code ) use ( $wait, $pipes ): string {
+			$cleanup = proc_open( [ PHP_BINARY, '-r', $wait . $code ], [ [ 'pipe', 'r' ], [ 'pipe', 'w' ] ], $cleanup_pipes );
+			$first   = (string) fgets( $cleanup_pipes[1] );
+			fwrite( $pipes[0], "\n" );
+			$printed = str_replace( "waiting\n", '', $first . stream_get_contents( $cleanup_pipes[1] ) );
+			fclose( $cleanup_pipes[0] );
+			fclose( $cleanup_pipes[1] );
+			proc_close( $cleanup );
+			return $printed;
+		};
 
 		try {
 			$this->assertSame( "paused\n", fgets( $pipes[1] ) );
-			$this->assertSame( '', self::undo_earlier_target( $steps, null, '', $run ), 'The cleanup undid a plant that still runs.' );
-			fwrite( $pipes[0], "\n" );
-			$planting = stream_get_contents( $pipes[1] );
+			$restored = self::undo_earlier_target( $steps, null, '', $run );
+			stream_get_contents( $pipes[1] );
 			fclose( $pipes[0] );
 			fclose( $pipes[1] );
 			$plant = proc_close( $plant );
 
 			clearstatcache();
-			$this->assertSame( 'planted held', $planting );
-			$this->assertDirectoryExists( "{$path}.lock", 'The cleanup freed the lock while plant still ran.' );
-			$this->assertSame( 'back', self::undo_earlier_target( $steps, null, '', $run ) );
-
-			clearstatcache();
+			$this->assertNotSame( 'lost', $restored );
 			$this->assertSame( [ $path ], glob( "{$folder}/*" ), "The runs left more than the log in {$folder}." );
 			$this->assertSame( $log, file_get_contents( $path ) );
 		} finally {
@@ -423,6 +424,21 @@ PHP;
 			}
 			rmdir( $folder );
 		}
+	}
+
+	/**
+	 * Where plant stops until the cleanup has come, as a slow request does.
+	 *
+	 * @return array<string, array{string}>
+	 */
+	public static function plant_pauses(): array {
+		$pause = "\techo \"paused\\n\";\n\tfgets( STDIN );\n";
+
+		return [
+			'before it makes its ticket'    => [ 'namespace BricksMCP\Tests\Pause;' . "\nfunction fopen( string \$file, string \$mode ) {\n\tstatic \$paused = false;\n\tif ( ! \$paused ) {\n\t\t\$paused = true;\n\t{$pause}\t}\n\treturn \\fopen( \$file, \$mode );\n}\n" ],
+			'before it locks its ticket'    => [ 'namespace BricksMCP\Tests\Pause;' . "\nfunction flock( \$stream, int \$operation ): bool {\n{$pause}\treturn \\flock( \$stream, \$operation );\n}\n" ],
+			'before it moves the log aside' => [ 'namespace BricksMCP\Tests\Pause;' . "\nfunction rename( string \$from, string \$to ): bool {\n\tif ( PATH === \$from ) {\n\t{$pause}\t}\n\treturn \\rename( \$from, \$to );\n}\n" ],
+		];
 	}
 
 	/**
@@ -935,16 +951,18 @@ PHP;
 	/**
 	 * The PHP each step of the earlier-target check runs, for the regular file an earlier run logged to at $path.
 	 *
-	 * plant first makes the lock <path>.lock, so one run at a time uses the path: a run that finds
-	 * the lock prints busy and changes nothing. It then puts its run's empty mark in the lock and
-	 * holds it locked until plant ends, or frees the lock and prints blocked none when it cannot. It then keeps whatever is at the path aside under a
+	 * plant first makes its run's empty ticket <path>.ticket-<hex> and holds it locked until plant
+	 * ends, printing blocked none when it cannot. It then makes the lock <path>.lock, so one run at
+	 * a time uses the path: a run that finds the lock prints busy and changes nothing. It moves its
+	 * ticket into the lock as the mark of the run that holds it. It then keeps whatever is at the path aside under a
 	 * fresh -<hex> name and puts that file there, removing it and printing blocked when it cannot
 	 * write all of it; swap moves it aside under another and makes a directory in its place. A directory plant cannot move aside stays and plant prints present,
 	 * so the check runs against it in place. For a caller with no whole planting response, recover
 	 * works out on the site what plant did from what is on the disk and runs restore's code for
-	 * it there, printing what restore prints; it changes nothing while the lock holds no mark of
-	 * this run or plant still holds it. restore, given what both printed, undoes what they did
-	 * and removes its mark and then the lock last. It moves nothing over what is at the path and deletes only its own
+	 * it there, printing what restore prints. It first waits for a plant that still holds its
+	 * ticket, and calls off a plant that has not locked one: plant then changes nothing. It changes
+	 * nothing else while the lock holds no mark of this run. restore, given what both printed, undoes what they did
+	 * and removes its mark, then the lock, and the ticket last. It moves nothing over what is at the path and deletes only its own
 	 * planted file. It prints back only when that file was there as planted, or the directory is
 	 * still there, and what the site held is back at the path; when that cannot go back, it prints
 	 * lost and keeps the lock.
@@ -957,10 +975,12 @@ PHP;
 		$held    = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
 		$old_log = var_export( 'An earlier run logged here ' . bin2hex( random_bytes( 8 ) ) . "\n", true );
 		$lock    = var_export( $path . '.lock', true );
-		$mark    = var_export( $path . '.lock/' . bin2hex( random_bytes( 8 ) ), true );
+		$hex     = bin2hex( random_bytes( 8 ) );
+		$ticket  = var_export( "{$path}.ticket-{$hex}", true );
+		$mark    = var_export( "{$path}.lock/{$hex}", true );
 		// fopen( 'x' ) and link() fail on whatever is at the path, so nothing put there between a check and a write is replaced.
 		$put_back = static fn ( string $from ): string => "@link( {$from}, {$earlier} ) && unlink( {$from} )";
-		$restore  = static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $lock, $mark, $put_back ): string {
+		$restore  = static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $lock, $ticket, $mark, $put_back ): string {
 			[ $planted, $kept ] = explode( ' ', $planting ) + [ '', '' ];
 			[ $dir, $file ]     = explode( ' ', $swapping ) + [ '', '' ];
 			if ( '' === $planted || 'busy' === $planted ) {
@@ -980,11 +1000,16 @@ PHP;
 			}
 
 			// What the site held stays locked under its -<hex> name until someone puts it back.
-			// A plant that made no mark freed the lock itself, which another run may hold by now.
-			return $undo . "if ( \$returned && @unlink( {$mark} ) ) {\n\trmdir( {$lock} );\n}";
+			// A plant that did not move its ticket into the lock as its mark freed the lock itself, which another run may hold by now.
+			return $undo . "if ( \$returned && @unlink( {$mark} ) ) {\n\trmdir( {$lock} );\n}\n@unlink( {$ticket} );";
 		};
-		// What plant left on the disk, before swap runs: only its run's file holds old_log and only its run keeps anything as held.
-		$recover = "\$marked = @fopen( {$mark}, 'r' );\nif ( \$marked && flock( \$marked, LOCK_EX | LOCK_NB ) ) {\n\t\$held = file_exists( {$held} ) || is_link( {$held} );\n"
+		// A free ticket path means plant has not made its ticket, so the one made here calls the run off, or has moved it into the lock.
+		// Locking the ticket waits for a plant that still runs; got first, plant is called off by deleting it.
+		$recover = "\$called_off = @fopen( {$ticket}, 'x' );\n\$locked = ( \$called_off ? false : @fopen( {$ticket}, 'r' ) ) ?: @fopen( {$mark}, 'r' );\n"
+			. "if ( \$locked && flock( \$locked, LOCK_EX ) ) {\n\tclearstatcache();\n\tif ( ! file_exists( {$mark} ) ) {\n\t\t\$called_off || @unlink( {$ticket} );\n\t\texit;\n\t}\n"
+			. "\t\$called_off && unlink( {$ticket} );\n"
+			// What plant left on the disk, before swap runs: only its run's file holds old_log and only its run keeps anything as held.
+			. "\t\$held = file_exists( {$held} ) || is_link( {$held} );\n"
 			. "\t\$planted = is_file( {$earlier} ) && ! is_link( {$earlier} ) && {$old_log} === @file_get_contents( {$earlier} );\n"
 			. "\t\$planting = ( \$planted ? 'planted' : ( ! \$held && is_dir( {$earlier} ) && ! is_link( {$earlier} ) ? 'present' : 'blocked' ) ) . ( \$held ? ' held' : ' none' );\n"
 			// Undone here, so a reply that is lost or cut short does not keep the log from going back.
@@ -997,10 +1022,11 @@ PHP;
 		$recover .= "\t}\n}";
 
 		return [
-			'plant'   => "if ( ! @mkdir( {$lock} ) ) {\n\texit( 'busy' );\n}\n"
-				// The mark, made before anything changes, tells recover this run holds the lock: it needs no space but an inode.
-				// plant keeps it locked until it ends, as the lock goes with the process, so recover leaves a plant that still runs alone.
-				. "\$marked = @fopen( {$mark}, 'x' );\nif ( ! \$marked || ! flock( \$marked, LOCK_EX ) ) {\n\t\$marked && unlink( {$mark} );\n\trmdir( {$lock} );\n\texit( 'blocked none' );\n}\n\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
+			// The ticket, locked until plant ends as the lock goes with the process, keeps recover waiting while plant runs.
+			// It needs no space but an inode, and is moved into the lock as the mark of the run that holds it. A ticket
+			// recover made first calls the run off and goes with it; one recover deleted fails the move, so the run changes nothing.
+			'plant'   => "\$locked = @fopen( {$ticket}, 'x' );\nif ( ! \$locked || ! flock( \$locked, LOCK_EX ) ) {\n\t@unlink( {$ticket} );\n\texit( 'blocked none' );\n}\n"
+				. "if ( ! @mkdir( {$lock} ) ) {\n\texit( 'busy' );\n}\nif ( ! @rename( {$ticket}, {$mark} ) ) {\n\trmdir( {$lock} );\n\texit( 'blocked none' );\n}\n\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
 				. "\$log = @fopen( {$earlier}, 'x' );\n\$whole = \$log && strlen( {$old_log} ) === @fwrite( \$log, {$old_log} );\n\$whole = \$log && fclose( \$log ) && \$whole;\n"
 				// A file cut short, as by a full disk, is not the planted one restore removes, so it would keep the log from going back.
 				. "\$log && ! \$whole && unlink( {$earlier} );\n\$present = ! \$held && is_dir( {$earlier} ) && ! is_link( {$earlier} );\n"
