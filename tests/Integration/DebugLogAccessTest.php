@@ -296,23 +296,28 @@ PHP;
 	 * Apache could finish plant while the caller threw before its cleanup, as on a dropped
 	 * response, so the log stayed under a -<hex> name with the lock kept and every later run
 	 * reported busy. A body cut short to planted made the cleanup report back with the log still
-	 * kept aside. The cleanup now undoes what the site recorded plant did.
+	 * kept aside. The cleanup now undoes what a whole planting response says, or else what the
+	 * site finds plant did, and plant makes the lock's mark of its run before it changes anything.
 	 *
 	 * Needs no web server: it runs the check's steps here, on a path of its own.
 	 *
-	 * @dataProvider planting_responses
+	 * @dataProvider lost_responses
+	 *
+	 * @param int      $call     Which call's response is lost or cut short: 0 is plant's, 2 the cleanup's first.
+	 * @param \Closure $response What the caller gets instead of what that call printed.
+	 * @param string   $site     PHP the site runs before each step.
 	 */
-	public function test_lost_planting_response_still_puts_the_log_back( \Closure $response ): void {
+	public function test_lost_planting_response_still_puts_the_log_back( int $call, \Closure $response, string $site ): void {
 		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
 		$path   = "{$folder}/bricks-mcp-access-test.log";
 		$log    = "The site's own log\n";
 		mkdir( $folder );
 		file_put_contents( $path, $log );
 		$calls = 0;
-		// plant runs to the end on the site, and only its response is lost or cut short on the way.
-		$run = static function ( string $code ) use ( &$calls, $response ): string {
-			$printed = self::run_here( $code );
-			return 0 === $calls++ ? $response( $printed ) : $printed;
+		// Each step runs to the end on the site, and only that call's response is lost or cut short on the way.
+		$run = static function ( string $code ) use ( &$calls, $call, $response, $site ): string {
+			$printed = self::run_here( $site . $code );
+			return $call === $calls++ ? $response( $printed ) : $printed;
 		};
 
 		try {
@@ -321,7 +326,7 @@ PHP;
 			} catch ( \RuntimeException | AssertionFailedError $e ) {
 				$failure = $e->getMessage();
 			}
-			$this->assertTrue( isset( $failure ), 'The check passed on a planting response it did not get whole.' );
+			$this->assertTrue( isset( $failure ), 'The check passed on a response it did not get whole.' );
 
 			clearstatcache();
 			$this->assertSame( [ $path ], glob( "{$folder}/*" ), "The run left more than the log in {$folder}: {$failure}" );
@@ -338,18 +343,20 @@ PHP;
 	}
 
 	/**
-	 * What the caller gets from a plant step that printed planted held.
-	 *
-	 * @return array<string, array{\Closure(string): string}>
+	 * @return array<string, array{int, \Closure(string): string, string}>
 	 */
-	public static function planting_responses(): array {
+	public static function lost_responses(): array {
+		$lost = static function (): string {
+			throw new \RuntimeException( 'The response was lost.' );
+		};
+		// No inode is left for a new file, as on a /tmp full of small files.
+		$no_inode = 'namespace BricksMCP\Tests\NoInode;' . "\nfunction file_put_contents( string \$file, string \$data ): int|false {\n\treturn file_exists( \$file ) ? \\file_put_contents( \$file, \$data ) : false;\n}\n";
+
 		return [
-			'lost'      => [
-				static function (): string {
-					throw new \RuntimeException( 'The planting response was lost.' );
-				},
-			],
-			'cut short' => [ static fn ( string $printed ): string => substr( $printed, 0, strlen( 'planted' ) ) ],
+			'planting lost'                      => [ 0, $lost, '' ],
+			'planting cut short'                 => [ 0, static fn ( string $printed ): string => substr( $printed, 0, strlen( 'planted' ) ), '' ],
+			'planting lost, no inode for a mark' => [ 0, $lost, $no_inode ],
+			'first cleanup response lost'        => [ 2, $lost, '' ],
 		];
 	}
 
@@ -864,13 +871,14 @@ PHP;
 	 * The PHP each step of the earlier-target check runs, for the regular file an earlier run logged to at $path.
 	 *
 	 * plant first makes the lock <path>.lock, so one run at a time uses the path: a run that finds
-	 * the lock prints busy and changes nothing. It then keeps whatever is at the path aside under a
+	 * the lock prints busy and changes nothing. It then puts its run's empty mark in the lock, or
+	 * frees the lock and prints blocked none when no file can be made. It then keeps whatever is at the path aside under a
 	 * fresh -<hex> name and puts that file there, removing it and printing blocked when it cannot
 	 * write all of it; swap moves it aside under another and makes a directory in its place. A directory plant cannot move aside stays and plant prints present,
-	 * so the check runs against it in place. plant also records what it printed in the lock, and
-	 * recall prints that record, '' when this run made no lock, for a caller whose response was
-	 * lost. restore, given what both printed, undoes what they did
-	 * and removes the lock last. It moves nothing over what is at the path and deletes only its own
+	 * so the check runs against it in place. For a caller whose planting response was lost, recall
+	 * prints what plant did as plant prints it, worked out from what is on the disk, or '' when the
+	 * lock holds no mark of this run. restore, given what both printed, undoes what they did
+	 * and removes its mark and then the lock last. It moves nothing over what is at the path and deletes only its own
 	 * planted file. It prints back only when that file was there as planted, or the directory is
 	 * still there, and what the site held is back at the path; when that cannot go back, it prints
 	 * lost and keeps the lock.
@@ -883,22 +891,25 @@ PHP;
 		$held    = var_export( $path . '-' . bin2hex( random_bytes( 8 ) ), true );
 		$old_log = var_export( 'An earlier run logged here ' . bin2hex( random_bytes( 8 ) ) . "\n", true );
 		$lock    = var_export( $path . '.lock', true );
-		$record  = var_export( $path . '.lock/' . bin2hex( random_bytes( 8 ) ), true );
+		$mark    = var_export( $path . '.lock/' . bin2hex( random_bytes( 8 ) ), true );
 		// fopen( 'x' ) and link() fail on whatever is at the path, so nothing put there between a check and a write is replaced.
 		$put_back = static fn ( string $from ): string => "@link( {$from}, {$earlier} ) && unlink( {$from} )";
 
 		return [
-			'plant'   => "if ( ! @mkdir( {$lock} ) ) {\n\texit( 'busy' );\n}\n\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
+			'plant'   => "if ( ! @mkdir( {$lock} ) ) {\n\texit( 'busy' );\n}\n"
+				// The mark, made before anything changes, tells recall this run holds the lock: it needs no space but an inode.
+				. "if ( false === @file_put_contents( {$mark}, '' ) ) {\n\trmdir( {$lock} );\n\texit( 'blocked none' );\n}\n\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
 				. "\$log = @fopen( {$earlier}, 'x' );\n\$whole = \$log && strlen( {$old_log} ) === @fwrite( \$log, {$old_log} );\n\$whole = \$log && fclose( \$log ) && \$whole;\n"
 				// A file cut short, as by a full disk, is not the planted one restore removes, so it would keep the log from going back.
 				. "\$log && ! \$whole && unlink( {$earlier} );\n\$present = ! \$held && is_dir( {$earlier} ) && ! is_link( {$earlier} );\n"
-				. "\$planting = ( \$whole ? 'planted' : ( \$present ? 'present' : 'blocked' ) ) . ( \$held ? ' held' : ' none' );\n"
-				// A response lost on the way leaves this record for recall, so the cleanup still knows what to undo.
-				. "@file_put_contents( {$record}, \$planting );\necho \$planting;",
-			'recall'  => "echo (string) @file_get_contents( {$record} );",
+				. "echo \$whole ? 'planted' : ( \$present ? 'present' : 'blocked' ), \$held ? ' held' : ' none';",
+			// What plant left on the disk, before swap runs: only its run's file holds old_log and only its run keeps anything as held.
+			'recall'  => "if ( file_exists( {$mark} ) ) {\n\t\$held = file_exists( {$held} ) || is_link( {$held} );\n"
+				. "\t\$planted = is_file( {$earlier} ) && ! is_link( {$earlier} ) && {$old_log} === @file_get_contents( {$earlier} );\n"
+				. "\techo \$planted ? 'planted' : ( ! \$held && is_dir( {$earlier} ) && ! is_link( {$earlier} ) ? 'present' : 'blocked' ), \$held ? ' held' : ' none';\n}",
 			'swap'    => "\$moved = ! is_dir( {$earlier} ) && ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$aside} );\n"
 				. "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' ), \$moved ? ' moved' : ' kept';",
-			'restore' => static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $lock, $record, $put_back ): string {
+			'restore' => static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $lock, $mark, $put_back ): string {
 				[ $planted, $kept ] = explode( ' ', $planting ) + [ '', '' ];
 				[ $dir, $file ]     = explode( ' ', $swapping ) + [ '', '' ];
 				if ( '' === $planted || 'busy' === $planted ) {
@@ -918,7 +929,8 @@ PHP;
 				}
 
 				// What the site held stays locked under its -<hex> name until someone puts it back.
-				return $undo . "if ( \$returned ) {\n\t@unlink( {$record} );\n\trmdir( {$lock} );\n}";
+				// A plant that made no mark freed the lock itself, which another run may hold by now.
+				return $undo . "if ( \$returned && @unlink( {$mark} ) ) {\n\trmdir( {$lock} );\n}";
 			},
 		];
 	}
@@ -958,8 +970,8 @@ PHP;
 	/**
 	 * Undoes what the earlier-target steps did and returns what restore printed, '' when there was nothing to undo.
 	 *
-	 * It undoes what the site recorded plant did, or what a whole planting response says when
-	 * plant could not write its record: a response lost or cut short may name less than it did.
+	 * It undoes what a whole planting response says, or else what recall finds plant did: a
+	 * response lost or cut short may name less than it did.
 	 *
 	 * @param array{plant: string, swap: string, recall: string, restore: \Closure(string, string): string} $steps The run's steps.
 	 * @param string|null                                                                                      $planting What the caller got from plant, null when its response never came.
@@ -967,9 +979,11 @@ PHP;
 	 * @param \Closure(string): string                                                                         $run      Runs PHP where plant ran and returns what it prints.
 	 */
 	private static function undo_earlier_target( array $steps, ?string $planting, string $swapping, \Closure $run ): string {
-		$recorded = $run( $steps['recall'] );
-		$whole    = static fn ( ?string $printed ): bool => 1 === preg_match( '/\A' . self::PLANTED . '\z/', (string) $printed );
-		$undo     = $steps['restore']( $whole( $recorded ) ? $recorded : ( $whole( $planting ) ? $planting : '' ), $swapping );
+		$whole = static fn ( ?string $printed ): bool => 1 === preg_match( '/\A' . self::PLANTED . '\z/', (string) $printed );
+		if ( ! $whole( $planting ) ) {
+			$planting = $run( $steps['recall'] );
+		}
+		$undo = $steps['restore']( $whole( $planting ) ? $planting : '', $swapping );
 
 		return '' === $undo ? '' : $run( $undo );
 	}
