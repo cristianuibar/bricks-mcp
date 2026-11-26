@@ -571,19 +571,26 @@ PHP;
 	 * A 403 response that stalls before its trailing canary fails the check instead of passing on the part it sent.
 	 *
 	 * The page is gone from the checkout while it stalls, so a run stopped during the wait leaves nothing behind.
+	 *
+	 * @dataProvider read_pauses
 	 */
-	public function test_stalled_response_fails_the_check(): void {
+	public function test_stalled_response_fails_the_check( int $pause ): void {
 		$canary = 'diagnostic canary ' . bin2hex( random_bytes( 8 ) );
+		// Longer than the body's timeout, and shorter than a 3 s one or TIMEOUT.
+		$gap   = self::STALL_TIMEOUT + 1;
+		$parts = intdiv( self::TIMEOUT, $gap );
 		// A length, like a static file's, so the body is not chunked and a read that times out returns nothing.
-		// Headers slower than the body's timeout, so only the body is held to it.
-		// The canary halfway between the body's timeout and TIMEOUT, so a read held to TIMEOUT instead finds it,
-		// and the check needs no clock that a pause after the read would also count.
-		$code  = "sleep( %d );\nhttp_response_code( 403 );\nheader( 'Content-Length: %d' );\necho str_repeat( 'x', 65536 );\nflush();\nsleep( %d );\necho %s;";
-		$page  = $this->write_page( sprintf( $code, self::STALL_TIMEOUT + 1, 65536 + strlen( $canary ), intdiv( self::STALL_TIMEOUT + self::TIMEOUT, 2 ), var_export( $canary, true ) ) );
+		// Output buffers ended, as php.ini can start one (php -S does), so each part goes out when it is flushed.
+		// Headers one gap late, so only the body is held to its timeout.
+		// The rest of the body a byte a gap, then the canary: a read held to its own timeout gives up on the first gap
+		// it waits through, however late it starts, while a read held to a longer one gets through them all to the canary.
+		$code = "while ( ob_get_level() > 0 && ob_end_flush() ) {\n}\nsleep( %1\$d );\nhttp_response_code( 403 );\nheader( 'Content-Length: %2\$d' );\necho str_repeat( 'x', 65536 );\nflush();\n"
+			. "for ( \$i = 1; \$i < %3\$d; \$i++ ) {\n\tsleep( %1\$d );\n\techo 'x';\n\tflush();\n}\nsleep( %1\$d );\necho %4\$s;";
+		$page = $this->write_page( sprintf( $code, $gap, 65536 + $parts - 1 + strlen( $canary ), $parts, var_export( $canary, true ) ) );
 		$file = dirname( __DIR__, 2 ) . '/' . $page;
 
 		try {
-			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/' . $page, $canary, self::STALL_TIMEOUT );
+			$this->assert_denied( self::SERVER, '/wp-content/plugins/bricks-mcp/' . $page, $canary, self::STALL_TIMEOUT, $pause );
 		} catch ( AssertionFailedError $e ) {
 			// Not 'served the canary': the read gave up before the canary came, so the body was held to its own timeout.
 			$this->assertStringContainsString( 'timed out before the end of its body', $e->getMessage() );
@@ -596,6 +603,18 @@ PHP;
 		}
 
 		$this->fail( 'The check passed for a response that stalled before its canary.' );
+	}
+
+	/**
+	 * Seconds the check waits between the headers and reading the body, as a busy runner may.
+	 *
+	 * @return array<string, array{int}>
+	 */
+	public static function read_pauses(): array {
+		return [
+			'read at once'       => [ 0 ],
+			'read after a pause' => [ 6 ],
+		];
 	}
 
 	/**
@@ -825,12 +844,14 @@ PHP;
 	 * The request is refused and its whole body, read in chunks so a large log fits in memory, holds no canary.
 	 *
 	 * @param int $timeout Seconds to wait for each part of its body.
+	 * @param int $pause   Seconds to wait before reading its body.
 	 */
-	private function assert_denied( string $server, string $path, string $canary, int $timeout = self::TIMEOUT ): void {
+	private function assert_denied( string $server, string $path, string $canary, int $timeout = self::TIMEOUT, int $pause = 0 ): void {
 		[ $status, $stream ] = $this->open( $server, $path, $timeout );
 
 		try {
 			$this->assertSame( 403, $status, $server . $path );
+			sleep( $pause );
 
 			// Keep the end of each chunk, so a canary split across two chunks is still found.
 			$tail = '';
