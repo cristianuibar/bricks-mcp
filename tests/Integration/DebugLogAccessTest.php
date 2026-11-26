@@ -42,6 +42,11 @@ final class DebugLogAccessTest extends TestCase {
 	private const PLANTED = '(planted|present|blocked) (held|none)';
 
 	/**
+	 * An fopen() for a filesystem with no inode left: it opens a file that exists and makes none.
+	 */
+	private const NO_INODE = "function fopen( string \$file, string \$mode ) {\n\treturn file_exists( \$file ) ? \\fopen( \$file, \$mode ) : false;\n}\n";
+
+	/**
 	 * Logs a canary through the requesting site's WordPress and reports where it went.
 	 *
 	 * Both sites serve the plugin checkout, so each one runs it with its own wp-config.php.
@@ -107,7 +112,7 @@ echo PHP_EOL, wp_json_encode(
 PHP;
 
 	protected function setUp(): void {
-		if ( ! in_array( $this->name(), [ 'test_fixtures_left_in_the_checkout_are_ignored_by_git', 'test_run_during_another_leaves_the_earlier_target_alone', 'test_cleanup_that_cannot_put_the_log_back_reports_it', 'test_planted_file_cut_short_leaves_the_log_to_go_back', 'test_directory_the_site_cannot_move_is_checked_in_place', 'test_lost_planting_response_still_puts_the_log_back', 'test_cleanup_while_plant_still_runs_waits_for_it' ], true ) && gethostbyname( self::SERVER ) === self::SERVER ) {
+		if ( ! in_array( $this->name(), [ 'test_fixtures_left_in_the_checkout_are_ignored_by_git', 'test_run_during_another_leaves_the_earlier_target_alone', 'test_cleanup_that_cannot_put_the_log_back_reports_it', 'test_planted_file_cut_short_leaves_the_log_to_go_back', 'test_directory_the_site_cannot_move_is_checked_in_place', 'test_lost_planting_response_still_puts_the_log_back', 'test_cleanup_while_plant_still_runs_waits_for_it', 'test_cleanup_page_left_in_the_queue_still_runs' ], true ) && gethostbyname( self::SERVER ) === self::SERVER ) {
 			$this->markTestSkipped( 'Needs the wp-env tests site: run npm run test:integration.' );
 		}
 	}
@@ -166,7 +171,7 @@ PHP;
 	public function test_directory_at_an_earlier_target_does_not_stop_the_symlink_check(): void {
 		$this->check_at_earlier_target(
 			'/tmp/bricks-mcp-access-test.log',
-			fn ( string $code ): string => $this->run_on_server( self::SERVER, $code ),
+			fn ( string $code, string $before = '', bool $keep = false ): string => $this->run_on_server( self::SERVER, $code, $keep, $before ),
 			fn () => $this->assert_symlinked_outside_log_denied()
 		);
 	}
@@ -191,9 +196,9 @@ PHP;
 		$second = self::earlier_target_steps( $path );
 
 		try {
-			$first_planting  = self::run_here( $first['plant'] );
+			$first_planting  = self::run_here( $first['enter'] . $first['plant'] );
 			$first_swapping  = self::run_here( $first['swap'] );
-			$second_planting = self::run_here( $second['plant'] );
+			$second_planting = self::run_here( $second['enter'] . $second['plant'] );
 			$this->assertSame( [ 'planted held', 'made moved', 'busy' ], [ $first_planting, $first_swapping, $second_planting ] );
 			$this->assertSame( '', self::undo_earlier_target( $second, $second_planting, '', static fn ( string $code ): string => self::run_here( $code ) ), 'The refused run had something to undo.' );
 			$first_restored = self::run_here( $first['restore']( $first_planting, $first_swapping ) );
@@ -233,7 +238,7 @@ PHP;
 			. var_export( $path, true ) . ' === $file && file_put_contents( $file, ' . var_export( $probe, true ) . " );\n\treturn \$gone;\n}\n";
 
 		try {
-			$planting = self::run_here( $steps['plant'] );
+			$planting = self::run_here( $steps['enter'] . $steps['plant'] );
 			$swapping = self::run_here( $steps['swap'] );
 			$this->assertSame( [ 'planted held', 'made moved' ], [ $planting, $swapping ] );
 			$restored = self::run_here( $recreate . $steps['restore']( $planting, $swapping ) );
@@ -275,7 +280,7 @@ PHP;
 		$full = 'namespace BricksMCP\Tests\Full;' . "\nfunction fwrite( \$stream, string \$data ): int|false {\n\treturn \\fwrite( \$stream, substr( \$data, 0, 5 ) );\n}\n";
 
 		try {
-			$planting = self::run_here( $full . $steps['plant'] );
+			$planting = self::run_here( $full . $steps['enter'] . $steps['plant'] );
 			$this->assertSame( 'blocked held', $planting );
 			self::run_here( $steps['restore']( $planting, '' ) );
 
@@ -314,8 +319,8 @@ PHP;
 		file_put_contents( $path, $log );
 		$calls = 0;
 		// Each step runs to the end on the site, and only those calls' responses are lost or cut short on the way.
-		$run = static function ( string $code ) use ( &$calls, $responses, $site ): string {
-			$printed = self::run_here( $site . $code );
+		$run = static function ( string $code, string $before = '' ) use ( &$calls, $responses, $site ): string {
+			$printed = self::run_here( $site . $before . $code );
 			$call    = $calls++;
 			return isset( $responses[ $call ] ) ? $responses[ $call ]( $printed ) : $printed;
 		};
@@ -351,7 +356,7 @@ PHP;
 		};
 		$cut  = static fn ( string $printed ): string => substr( $printed, 0, strlen( 'planted' ) );
 		// No inode is left for a new file, as on a /tmp full of small files.
-		$no_inode = 'namespace BricksMCP\Tests\NoInode;' . "\nfunction fopen( string \$file, string \$mode ) {\n\treturn file_exists( \$file ) ? \\fopen( \$file, \$mode ) : false;\n}\n";
+		$no_inode = 'namespace BricksMCP\Tests\NoInode;' . self::NO_INODE;
 
 		return [
 			'planting lost'                          => [ [ 0 => $lost ], '' ],
@@ -367,28 +372,40 @@ PHP;
 	 *
 	 * A request that times out may still be running plant. The cleanup freed the lock when it
 	 * came between plant making its mark and locking it, and gave up while plant held the mark,
-	 * so plant then moved the log aside with no lock left or with no cleanup to come. plant now
-	 * locks its ticket before it takes the lock, the cleanup waits on that ticket, and a cleanup
-	 * that comes before plant has locked it calls the run off.
+	 * so plant then moved the log aside with no lock left or with no cleanup to come. A cleanup
+	 * with no inode left to call off a plant that had not made its ticket let that plant go on
+	 * later. plant now locks its ticket before its page deletes itself, the caller deletes a page
+	 * its request left behind, so a plant that had not got that far never goes on, and the
+	 * cleanup waits on the ticket of one that had.
 	 *
-	 * Needs no web server: it runs each step's PHP here, on a path of its own.
+	 * Needs no web server: it runs plant's page and the cleanup here, on a path of its own.
 	 *
 	 * @dataProvider plant_pauses
 	 *
-	 * @param string $pause PHP plant runs before its steps, to stop where the cleanup comes.
+	 * @param string $pause   PHP plant's page runs first, to stop where the cleanup comes.
+	 * @param string $cleanup Functions the cleanup runs with, in place of PHP's.
 	 */
-	public function test_cleanup_while_plant_still_runs_waits_for_it( string $pause ): void {
+	public function test_cleanup_while_plant_still_runs_waits_for_it( string $pause, string $cleanup ): void {
 		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
 		$path   = "{$folder}/bricks-mcp-access-test.log";
 		$log    = "The site's own log\n";
 		mkdir( $folder );
 		file_put_contents( $path, $log );
-		$steps = self::earlier_target_steps( $path );
+		$plant = null;
 		$pipes = [];
-		$plant = proc_open( [ PHP_BINARY, '-r', str_replace( 'PATH', var_export( $path, true ), $pause ) . $steps['plant'] ], [ [ 'pipe', 'r' ], [ 'pipe', 'w' ] ], $pipes );
+		// plant's request is lost once plant has stopped where the cleanup comes.
+		$request = static function ( string $page ) use ( &$plant, &$pipes ): array {
+			$plant = proc_open( [ PHP_BINARY, dirname( __DIR__, 2 ) . '/' . $page ], [ [ 'pipe', 'r' ], [ 'pipe', 'w' ] ], $pipes );
+			self::assertSame( "paused\n", fgets( $pipes[1] ) );
+			throw new \RuntimeException( 'The planting response was lost.' );
+		};
 		// The cleanup says when it starts to wait on a lock, and plant then goes on.
-		$wait = 'namespace BricksMCP\Tests\Wait;' . "\nfunction flock( \$stream, int \$operation ): bool {\n\techo \"waiting\\n\";\n\treturn \\flock( \$stream, \$operation );\n}\n";
-		$run  = static function ( string $code ) use ( $wait, $pipes ): string {
+		$wait  = 'namespace BricksMCP\Tests\Wait;' . "\nfunction flock( \$stream, int \$operation ): bool {\n\techo \"waiting\\n\";\n\treturn \\flock( \$stream, \$operation );\n}\n" . $cleanup;
+		$calls = 0;
+		$run   = function ( string $code, string $before = '', bool $keep = false ) use ( &$calls, &$pipes, $request, $pause, $path, $wait ): string {
+			if ( 0 === $calls++ ) {
+				return $this->run_page( $code, $request, $keep, str_replace( 'PATH', var_export( $path, true ), $pause ) . $before );
+			}
 			$cleanup = proc_open( [ PHP_BINARY, '-r', $wait . $code ], [ [ 'pipe', 'r' ], [ 'pipe', 'w' ] ], $cleanup_pipes );
 			$first   = (string) fgets( $cleanup_pipes[1] );
 			fwrite( $pipes[0], "\n" );
@@ -400,15 +417,17 @@ PHP;
 		};
 
 		try {
-			$this->assertSame( "paused\n", fgets( $pipes[1] ) );
-			$restored = self::undo_earlier_target( $steps, null, '', $run );
+			try {
+				$this->check_at_earlier_target( $path, $run, static fn () => null );
+			} catch ( \RuntimeException $e ) {
+				$this->assertSame( 'The planting response was lost.', $e->getMessage() );
+			}
 			stream_get_contents( $pipes[1] );
 			fclose( $pipes[0] );
 			fclose( $pipes[1] );
 			$plant = proc_close( $plant );
 
 			clearstatcache();
-			$this->assertNotSame( 'lost', $restored );
 			$this->assertSame( [ $path ], glob( "{$folder}/*" ), "The runs left more than the log in {$folder}." );
 			$this->assertSame( $log, file_get_contents( $path ) );
 		} finally {
@@ -427,18 +446,72 @@ PHP;
 	}
 
 	/**
-	 * Where plant stops until the cleanup has come, as a slow request does.
+	 * Where plant stops until the cleanup has come, as a slow request does, and what the cleanup runs with.
 	 *
-	 * @return array<string, array{string}>
+	 * @return array<string, array{string, string}>
 	 */
 	public static function plant_pauses(): array {
-		$pause = "\techo \"paused\\n\";\n\tfgets( STDIN );\n";
+		$pause  = "\techo \"paused\\n\";\n\tfgets( STDIN );\n";
+		$ticket = 'namespace BricksMCP\Tests\Pause;' . "\nfunction fopen( string \$file, string \$mode ) {\n\tstatic \$paused = false;\n\tif ( ! \$paused ) {\n\t\t\$paused = true;\n\t{$pause}\t}\n\treturn \\fopen( \$file, \$mode );\n}\n";
 
 		return [
-			'before it makes its ticket'    => [ 'namespace BricksMCP\Tests\Pause;' . "\nfunction fopen( string \$file, string \$mode ) {\n\tstatic \$paused = false;\n\tif ( ! \$paused ) {\n\t\t\$paused = true;\n\t{$pause}\t}\n\treturn \\fopen( \$file, \$mode );\n}\n" ],
-			'before it locks its ticket'    => [ 'namespace BricksMCP\Tests\Pause;' . "\nfunction flock( \$stream, int \$operation ): bool {\n{$pause}\treturn \\flock( \$stream, \$operation );\n}\n" ],
-			'before it moves the log aside' => [ 'namespace BricksMCP\Tests\Pause;' . "\nfunction rename( string \$from, string \$to ): bool {\n\tif ( PATH === \$from ) {\n\t{$pause}\t}\n\treturn \\rename( \$from, \$to );\n}\n" ],
+			'before it makes its ticket'                        => [ $ticket, '' ],
+			'before it makes its ticket, cleanup with no inode' => [ $ticket, self::NO_INODE ],
+			'before it locks its ticket'                        => [ 'namespace BricksMCP\Tests\Pause;' . "\nfunction flock( \$stream, int \$operation ): bool {\n{$pause}\treturn \\flock( \$stream, \$operation );\n}\n", '' ],
+			'before it moves the log aside'                     => [ 'namespace BricksMCP\Tests\Pause;' . "\nfunction rename( string \$from, string \$to ): bool {\n\tif ( PATH === \$from ) {\n\t{$pause}\t}\n\treturn \\rename( \$from, \$to );\n}\n", '' ],
 		];
+	}
+
+	/**
+	 * A cleanup page whose request times out in the web server's queue still runs, and the site's log goes back.
+	 *
+	 * The caller deleted every page whose request failed, so a cleanup the server had queued
+	 * found no page when it got to it, and the log stayed under its -<hex> name with the lock.
+	 * Cleanup pages now stay for the server to run.
+	 *
+	 * Needs no web server: it runs the cleanup's pages here, on a path of its own.
+	 */
+	public function test_cleanup_page_left_in_the_queue_still_runs(): void {
+		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
+		$path   = "{$folder}/bricks-mcp-access-test.log";
+		$log    = "The site's own log\n";
+		mkdir( $folder );
+		file_put_contents( $path, $log );
+		$steps = self::earlier_target_steps( $path );
+		// plant ran to the end, and its response was lost.
+		self::run_here( $steps['enter'] . $steps['plant'] );
+		$queued  = [];
+		$request = static function ( string $page ) use ( &$queued ): array {
+			$queued[] = dirname( __DIR__, 2 ) . '/' . $page;
+			throw new \RuntimeException( 'The cleanup request timed out in the queue.' );
+		};
+
+		try {
+			try {
+				self::undo_earlier_target( $steps, null, '', fn ( string $code, string $before = '', bool $keep = false ): string => $this->run_page( $code, $request, $keep, $before ) );
+			} catch ( \RuntimeException $e ) {
+				$this->assertSame( 'The cleanup request timed out in the queue.', $e->getMessage() );
+			}
+			// The server gets to the queued request after the caller gave up: a page that is gone is a 404.
+			foreach ( $queued as $page ) {
+				is_file( $page ) && shell_exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( $page ) );
+			}
+
+			clearstatcache();
+			$this->assertSame( [ $path ], glob( "{$folder}/*" ), "The cleanup left more than the log in {$folder}." );
+			$this->assertSame( $log, file_get_contents( $path ) );
+		} finally {
+			foreach ( $queued as $page ) {
+				is_file( $page ) && unlink( $page );
+			}
+			foreach ( glob( "{$path}.lock/*" ) as $left ) {
+				unlink( $left );
+			}
+			foreach ( glob( "{$folder}/*" ) as $left ) {
+				is_dir( $left ) ? rmdir( $left ) : unlink( $left );
+			}
+			rmdir( $folder );
+		}
 	}
 
 	/**
@@ -463,7 +536,7 @@ PHP;
 			. var_export( $path, true ) . " !== \$from && \\rename( \$from, \$to );\n}\n";
 
 		try {
-			$planting = self::run_here( $sticky . $steps['plant'] );
+			$planting = self::run_here( $sticky . $steps['enter'] . $steps['plant'] );
 			$swapping = self::run_here( $sticky . $steps['swap'] );
 			$this->assertSame( [ 'present none', 'present kept' ], [ $planting, $swapping ] );
 			$restored = self::run_here( $sticky . $steps['restore']( $planting, $swapping ) );
@@ -911,31 +984,47 @@ PHP;
 	 * Writes a page of PHP code to the plugin checkout's root.
 	 *
 	 * The page deletes itself before running the code, like the probe, so it runs once and a
-	 * run stopped while the server runs it leaves nothing in the checkout.
+	 * run stopped while the server runs it leaves nothing in the checkout. $before runs first, on
+	 * every request, so it must leave nothing to undo when the page then stops.
 	 *
 	 * @return string Its path in the checkout.
 	 */
-	private function write_page( string $code ): string {
+	private function write_page( string $code, string $before = '' ): string {
 		$page = 'bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) ) . '.php';
-		file_put_contents( dirname( __DIR__, 2 ) . '/' . $page, "<?php\nif ( ! @unlink( __FILE__ ) ) {\n\thttp_response_code( 500 );\n\texit( 'The page could not delete itself.' );\n}\n{$code}\n" );
+		file_put_contents( dirname( __DIR__, 2 ) . '/' . $page, "<?php\n{$before}\nif ( ! @unlink( __FILE__ ) ) {\n\thttp_response_code( 500 );\n\texit( 'The page could not delete itself.' );\n}\n{$code}\n" );
 
 		return $page;
 	}
 
 	/**
 	 * Runs PHP code on a site's web server and returns what it prints.
+	 *
+	 * @param bool   $keep   Whether a page whose request fails stays for the server to run, see run_page().
+	 * @param string $before PHP the page runs before it deletes itself, see write_page().
 	 */
-	private function run_on_server( string $server, string $code ): string {
-		$page = $this->write_page( $code );
+	private function run_on_server( string $server, string $code, bool $keep = false, string $before = '' ): string {
+		return $this->run_page( $code, fn ( string $page ): array => $this->get( $server, '/wp-content/plugins/bricks-mcp/' . $page ), $keep, $before );
+	}
+
+	/**
+	 * Writes PHP code as a page, has $request ask for it, and returns what it prints.
+	 *
+	 * @param \Closure(string): array{int, string} $request Requests the page by its path in the checkout.
+	 * @param bool                               $keep    Whether a page whose request fails stays for the server to run.
+	 * @param string                             $before  PHP the page runs before it deletes itself, see write_page().
+	 */
+	private function run_page( string $code, \Closure $request, bool $keep = false, string $before = '' ): string {
+		$page = $this->write_page( $code, $before );
 		$file = dirname( __DIR__, 2 ) . '/' . $page;
 
 		try {
-			[ $status, $body ] = $this->get( $server, '/wp-content/plugins/bricks-mcp/' . $page );
-			$this->assertSame( 200, $status, "The page failed on {$server}:\n{$body}" );
+			[ $status, $body ] = $request( $page );
+			$this->assertSame( 200, $status, "The page failed:\n{$body}" );
 
 			return $body;
 		} finally {
-			if ( file_exists( $file ) ) {
+			// A page left behind has not run its code: deleted, it never does, as a page a cleanup needs must.
+			if ( ! $keep && file_exists( $file ) ) {
 				unlink( $file );
 			}
 		}
@@ -951,8 +1040,9 @@ PHP;
 	/**
 	 * The PHP each step of the earlier-target check runs, for the regular file an earlier run logged to at $path.
 	 *
-	 * plant first makes its run's empty ticket <path>.ticket-<hex> and holds it locked until plant
-	 * ends, printing blocked none when it cannot. It then makes the lock <path>.lock, so one run at
+	 * enter, which a page of plant runs before it deletes itself, makes the run's empty ticket
+	 * <path>.ticket-<hex> and holds it locked until plant ends, printing blocked none when it
+	 * cannot; a ticket not moved into the lock goes as plant stops. plant then makes the lock <path>.lock, so one run at
 	 * a time uses the path: a run that finds the lock prints busy and changes nothing. It moves its
 	 * ticket into the lock as the mark of the run that holds it. It then keeps whatever is at the path aside under a
 	 * fresh -<hex> name and puts that file there, removing it and printing blocked when it cannot
@@ -960,14 +1050,14 @@ PHP;
 	 * so the check runs against it in place. For a caller with no whole planting response, recover
 	 * works out on the site what plant did from what is on the disk and runs restore's code for
 	 * it there, printing what restore prints. It first waits for a plant that still holds its
-	 * ticket, and calls off a plant that has not locked one: plant then changes nothing. It changes
+	 * ticket, and deletes a ticket plant has not locked yet: plant then changes nothing. It changes
 	 * nothing else while the lock holds no mark of this run. restore, given what both printed, undoes what they did
-	 * and removes its mark, then the lock, and the ticket last. It moves nothing over what is at the path and deletes only its own
+	 * and removes its mark and then the lock last. It moves nothing over what is at the path and deletes only its own
 	 * planted file. It prints back only when that file was there as planted, or the directory is
 	 * still there, and what the site held is back at the path; when that cannot go back, it prints
 	 * lost and keeps the lock.
 	 *
-	 * @return array{plant: string, swap: string, recover: string, restore: \Closure(string, string): string} restore's code is '' when there is nothing to undo.
+	 * @return array{enter: string, plant: string, swap: string, recover: string, restore: \Closure(string, string): string} restore's code is '' when there is nothing to undo.
 	 */
 	private static function earlier_target_steps( string $path ): array {
 		$earlier = var_export( $path, true );
@@ -980,7 +1070,7 @@ PHP;
 		$mark    = var_export( "{$path}.lock/{$hex}", true );
 		// fopen( 'x' ) and link() fail on whatever is at the path, so nothing put there between a check and a write is replaced.
 		$put_back = static fn ( string $from ): string => "@link( {$from}, {$earlier} ) && unlink( {$from} )";
-		$restore  = static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $lock, $ticket, $mark, $put_back ): string {
+		$restore  = static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $lock, $mark, $put_back ): string {
 			[ $planted, $kept ] = explode( ' ', $planting ) + [ '', '' ];
 			[ $dir, $file ]     = explode( ' ', $swapping ) + [ '', '' ];
 			if ( '' === $planted || 'busy' === $planted ) {
@@ -1001,13 +1091,13 @@ PHP;
 
 			// What the site held stays locked under its -<hex> name until someone puts it back.
 			// A plant that did not move its ticket into the lock as its mark freed the lock itself, which another run may hold by now.
-			return $undo . "if ( \$returned && @unlink( {$mark} ) ) {\n\trmdir( {$lock} );\n}\n@unlink( {$ticket} );";
+			return $undo . "if ( \$returned && @unlink( {$mark} ) ) {\n\trmdir( {$lock} );\n}";
 		};
-		// A free ticket path means plant has not made its ticket, so the one made here calls the run off, or has moved it into the lock.
-		// Locking the ticket waits for a plant that still runs; got first, plant is called off by deleting it.
-		$recover = "\$called_off = @fopen( {$ticket}, 'x' );\n\$locked = ( \$called_off ? false : @fopen( {$ticket}, 'r' ) ) ?: @fopen( {$mark}, 'r' );\n"
-			. "if ( \$locked && flock( \$locked, LOCK_EX ) ) {\n\tclearstatcache();\n\tif ( ! file_exists( {$mark} ) ) {\n\t\t\$called_off || @unlink( {$ticket} );\n\t\texit;\n\t}\n"
-			. "\t\$called_off && unlink( {$ticket} );\n"
+		// Locking the ticket, or the mark it became, waits for a plant that still runs. With neither there, plant has not
+		// made its ticket, so its page has not deleted itself and the caller deleted it: that plant changes nothing.
+		// Got first, the ticket is deleted, so plant cannot move it into the lock and changes nothing either.
+		$recover = "\$locked = @fopen( {$ticket}, 'r' ) ?: @fopen( {$mark}, 'r' );\n"
+			. "if ( \$locked && flock( \$locked, LOCK_EX ) ) {\n\tclearstatcache();\n\tif ( ! file_exists( {$mark} ) ) {\n\t\t@unlink( {$ticket} );\n\t\texit;\n\t}\n"
 			// What plant left on the disk, before swap runs: only its run's file holds old_log and only its run keeps anything as held.
 			. "\t\$held = file_exists( {$held} ) || is_link( {$held} );\n"
 			. "\t\$planted = is_file( {$earlier} ) && ! is_link( {$earlier} ) && {$old_log} === @file_get_contents( {$earlier} );\n"
@@ -1022,17 +1112,18 @@ PHP;
 		$recover .= "\t}\n}";
 
 		return [
-			// The ticket, locked until plant ends as the lock goes with the process, keeps recover waiting while plant runs.
-			// It needs no space but an inode, and is moved into the lock as the mark of the run that holds it. A ticket
-			// recover made first calls the run off and goes with it; one recover deleted fails the move, so the run changes nothing.
-			'plant'   => "\$locked = @fopen( {$ticket}, 'x' );\nif ( ! \$locked || ! flock( \$locked, LOCK_EX ) ) {\n\t@unlink( {$ticket} );\n\texit( 'blocked none' );\n}\n"
-				. "if ( ! @mkdir( {$lock} ) ) {\n\texit( 'busy' );\n}\nif ( ! @rename( {$ticket}, {$mark} ) ) {\n\trmdir( {$lock} );\n\texit( 'blocked none' );\n}\n\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
+			'plant'   => "if ( ! @mkdir( {$lock} ) ) {\n\texit( 'busy' );\n}\nif ( ! @rename( {$ticket}, {$mark} ) ) {\n\trmdir( {$lock} );\n\texit( 'blocked none' );\n}\n\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
 				. "\$log = @fopen( {$earlier}, 'x' );\n\$whole = \$log && strlen( {$old_log} ) === @fwrite( \$log, {$old_log} );\n\$whole = \$log && fclose( \$log ) && \$whole;\n"
 				// A file cut short, as by a full disk, is not the planted one restore removes, so it would keep the log from going back.
 				. "\$log && ! \$whole && unlink( {$earlier} );\n\$present = ! \$held && is_dir( {$earlier} ) && ! is_link( {$earlier} );\n"
 				. "echo \$whole ? 'planted' : ( \$present ? 'present' : 'blocked' ), \$held ? ' held' : ' none';",
 			'swap'    => "\$moved = ! is_dir( {$earlier} ) && ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$aside} );\n"
 				. "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' ), \$moved ? ' moved' : ' kept';",
+			// The ticket, locked until plant ends as the lock goes with the process, keeps recover waiting while plant runs.
+			// It needs no space but an inode, and is moved into the lock as the mark of the run that holds it. On a page it is
+			// locked before the page deletes itself, so a plant that got past that has one. A ticket left out of the lock goes as plant stops.
+			'enter'   => "\$locked = @fopen( {$ticket}, 'x' );\nif ( ! \$locked || ! flock( \$locked, LOCK_EX ) ) {\n\t\$locked && unlink( {$ticket} );\n\texit( 'blocked none' );\n}\n"
+				. "register_shutdown_function(\n\tstatic function () {\n\t\t@unlink( {$ticket} );\n\t}\n);\n",
 			'recover' => $recover,
 			'restore' => $restore,
 		];
@@ -1041,8 +1132,8 @@ PHP;
 	/**
 	 * Runs the earlier-target check on $path and puts back what it changed there.
 	 *
-	 * @param \Closure(string): string $run   Runs PHP on the site and returns what it prints.
-	 * @param \Closure(): void         $check The check to run with the directory at $path.
+	 * @param \Closure(string, string=, bool=): string $run   Runs PHP on the site like run_on_server() and returns what it prints.
+	 * @param \Closure(): void                         $check The check to run with the directory at $path.
 	 */
 	private function check_at_earlier_target( string $path, \Closure $run, \Closure $check ): void {
 		$steps    = self::earlier_target_steps( $path );
@@ -1050,7 +1141,7 @@ PHP;
 		$swapping = '';
 
 		try {
-			$planting    = $run( $steps['plant'] );
+			$planting    = $run( $steps['plant'], $steps['enter'] );
 			[ $planted ] = explode( ' ', $planting );
 			$this->assertMatchesRegularExpression( '/\A(busy|' . self::PLANTED . ')\z/', $planting, "The tests site's planting response for {$path} was cut short." );
 			$this->assertNotSame( 'busy', $planted, "Another run holds {$path}.lock on the tests site, or one stopped before its cleanup: with no run going, put back what it kept under {$path}-<hex>, then remove the lock folder." );
@@ -1076,18 +1167,18 @@ PHP;
 	 * It undoes what a whole planting response says, or else has recover undo on the site what
 	 * plant did: a response lost or cut short may name less than it did.
 	 *
-	 * @param array{plant: string, swap: string, recover: string, restore: \Closure(string, string): string} $steps The run's steps.
-	 * @param string|null                                                                                      $planting What the caller got from plant, null when its response never came.
-	 * @param string                                                                                           $swapping What swap printed, '' when it did not run.
-	 * @param \Closure(string): string                                                                         $run      Runs PHP where plant ran and returns what it prints.
+	 * @param array{enter: string, plant: string, swap: string, recover: string, restore: \Closure(string, string): string} $steps The run's steps.
+	 * @param string|null                                                                                                    $planting What the caller got from plant, null when its response never came.
+	 * @param string                                                                                                         $swapping What swap printed, '' when it did not run.
+	 * @param \Closure(string, string=, bool=): string                                                                       $run      Runs PHP where plant ran like run_on_server() and returns what it prints.
 	 */
 	private static function undo_earlier_target( array $steps, ?string $planting, string $swapping, \Closure $run ): string {
 		if ( 1 !== preg_match( '/\A' . self::PLANTED . '\z/', (string) $planting ) ) {
-			return $run( $steps['recover'] );
+			return $run( $steps['recover'], '', true );
 		}
 		$undo = $steps['restore']( $planting, $swapping );
 
-		return '' === $undo ? '' : $run( $undo );
+		return '' === $undo ? '' : $run( $undo, '', true );
 	}
 
 	/**
