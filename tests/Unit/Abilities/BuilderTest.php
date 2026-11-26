@@ -411,13 +411,14 @@ final class BuilderTest extends TestCase {
 	public function test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv(): void {
 		// PHPUnit itself needs getenv(), so only putenv() is taken from the runner here; the dataset covers both in the launched processes.
 		// The runner's php.ini goes along, so an extension it loads only through php -c still loads in the launched PHPUnit.
+		// The launch is the same for every dataset, so the launched PHPUnit runs only the one that keeps just the runner's restrictions.
 		$ini    = php_ini_loaded_file();
 		$output = [];
 		$status = 1;
-		exec( escapeshellarg( PHP_BINARY ) . ( false === $ini ? '' : ' -c ' . escapeshellarg( $ini ) ) . ' -d ' . escapeshellarg( 'disable_functions=' . ini_get( 'disable_functions' ) . ',putenv' ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_works_without_mbstring' ) . ' 2>&1', $output, $status );
+		exec( escapeshellarg( PHP_BINARY ) . ( false === $ini ? '' : ' -c ' . escapeshellarg( $ini ) ) . ' -d ' . escapeshellarg( 'disable_functions=' . ini_get( 'disable_functions' ) . ',putenv' ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_works_without_mbstring@only the runner\'s' ) . ' 2>&1', $output, $status );
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
-		$this->assertStringContainsString( 'OK (' . count( self::parent_restrictions() ) . ' tests', implode( "\n", $output ) );
+		$this->assertStringContainsString( 'OK (1 test,', implode( "\n", $output ) );
 	}
 
 	public function test_category_creation_without_mbstring_runs_where_the_runner_loads_its_extensions_with_c(): void {
