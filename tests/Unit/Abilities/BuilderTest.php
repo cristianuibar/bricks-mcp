@@ -377,14 +377,15 @@ final class BuilderTest extends TestCase {
 	/**
 	 * Two functions the fixture can call whatever the runner disables.
 	 *
-	 * get_extension_funcs() leaves out the functions disabled in this process, and the fixture's -n
-	 * still has the always-loaded standard extension, so the rows that need a callable name never
-	 * lean on one the runner may have disabled.
+	 * The candidates are standard functions, which the fixture's -n keeps, that neither PHPUnit nor
+	 * the plugin calls, so a runner can disable them and still run the tests. function_exists() skips
+	 * the ones disabled in this process, so the rows that need a callable name never lean on one the
+	 * runner disabled.
 	 *
 	 * @return string[] Two lowercase function names.
 	 */
 	private static function callable_names(): array {
-		return array_slice( get_extension_funcs( 'standard' ), 0, 2 );
+		return array_slice( array_values( array_filter( [ 'levenshtein', 'metaphone', 'similar_text', 'soundex', 'quoted_printable_encode', 'quoted_printable_decode' ], 'function_exists' ) ), 0, 2 );
 	}
 
 	public static function parent_restrictions(): array {
