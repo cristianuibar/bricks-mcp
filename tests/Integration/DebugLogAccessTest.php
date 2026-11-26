@@ -102,7 +102,7 @@ echo PHP_EOL, wp_json_encode(
 PHP;
 
 	protected function setUp(): void {
-		if ( ! in_array( $this->name(), [ 'test_fixtures_left_in_the_checkout_are_ignored_by_git', 'test_run_during_another_leaves_the_earlier_target_alone', 'test_cleanup_that_cannot_put_the_log_back_reports_it', 'test_directory_the_site_cannot_move_is_checked_in_place' ], true ) && gethostbyname( self::SERVER ) === self::SERVER ) {
+		if ( ! in_array( $this->name(), [ 'test_fixtures_left_in_the_checkout_are_ignored_by_git', 'test_run_during_another_leaves_the_earlier_target_alone', 'test_cleanup_that_cannot_put_the_log_back_reports_it', 'test_planted_file_cut_short_leaves_the_log_to_go_back', 'test_directory_the_site_cannot_move_is_checked_in_place' ], true ) && gethostbyname( self::SERVER ) === self::SERVER ) {
 			$this->markTestSkipped( 'Needs the wp-env tests site: run npm run test:integration.' );
 		}
 	}
@@ -257,6 +257,41 @@ PHP;
 			$kept = array_values( array_filter( glob( "{$path}-*" ), static fn ( string $file ): bool => file_get_contents( $file ) === $log ) );
 			$this->assertCount( 1, $kept, "The site's log is not kept aside next to {$path}." );
 			$this->assertDirectoryExists( "{$path}.lock", 'The cleanup removed the lock with the log still kept aside.' );
+		} finally {
+			foreach ( glob( "{$folder}/*" ) as $left ) {
+				is_dir( $left ) ? rmdir( $left ) : unlink( $left );
+			}
+			rmdir( $folder );
+		}
+	}
+
+	/**
+	 * A planted file cut short by a full disk does not stop the cleanup from putting the site's log back.
+	 *
+	 * plant made its file at the path and wrote only part of it, so the cleanup found neither its
+	 * own file nor a free path: the site's log stayed under a -<hex> name with the lock kept. plant
+	 * now removes the part it wrote and reports blocked, and the cleanup puts the log back.
+	 *
+	 * Needs no web server: it runs each step's PHP here, on a path of its own.
+	 */
+	public function test_planted_file_cut_short_leaves_the_log_to_go_back(): void {
+		$folder = sys_get_temp_dir() . '/bricks-mcp-access-test-' . bin2hex( random_bytes( 8 ) );
+		$path   = "{$folder}/bricks-mcp-access-test.log";
+		$log    = "The site's own log\n";
+		mkdir( $folder );
+		file_put_contents( $path, $log );
+		$steps = self::earlier_target_steps( $path );
+		// The disk fills after the first few bytes, as a full /tmp does.
+		$full = 'namespace BricksMCP\Tests\Full;' . "\nfunction fwrite( \$stream, string \$data ): int|false {\n\treturn \\fwrite( \$stream, substr( \$data, 0, 5 ) );\n}\n";
+
+		try {
+			$planting = self::run_here( $full . $steps['plant'] );
+			$this->assertSame( 'blocked held', $planting );
+			self::run_here( $steps['restore']( $planting, '' ) );
+
+			clearstatcache();
+			$this->assertSame( [ $path ], glob( "{$folder}/*" ), "The run left more than the log in {$folder}." );
+			$this->assertSame( $log, file_get_contents( $path ) );
 		} finally {
 			foreach ( glob( "{$folder}/*" ) as $left ) {
 				is_dir( $left ) ? rmdir( $left ) : unlink( $left );
@@ -777,8 +812,8 @@ PHP;
 	 *
 	 * plant first makes the lock <path>.lock, so one run at a time uses the path: a run that finds
 	 * the lock prints busy and changes nothing. It then keeps whatever is at the path aside under a
-	 * fresh -<hex> name and puts that file there; swap moves it aside under another and makes a
-	 * directory in its place. A directory plant cannot move aside stays and plant prints present,
+	 * fresh -<hex> name and puts that file there, removing it and printing blocked when it cannot
+	 * write all of it; swap moves it aside under another and makes a directory in its place. A directory plant cannot move aside stays and plant prints present,
 	 * so the check runs against it in place. restore, given what both printed, undoes what they did
 	 * and removes the lock last. It moves nothing over what is at the path and deletes only its own
 	 * planted file. It prints back only when that file was there as planted, or the directory is
@@ -798,8 +833,10 @@ PHP;
 
 		return [
 			'plant'   => "if ( ! @mkdir( {$lock} ) ) {\n\texit( 'busy' );\n}\n\$held = ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$held} );\n"
-				. "\$log = @fopen( {$earlier}, 'x' );\n\$present = ! \$held && is_dir( {$earlier} ) && ! is_link( {$earlier} );\n"
-				. "echo \$log && false !== fwrite( \$log, {$old_log} ) && fclose( \$log ) ? 'planted' : ( \$present ? 'present' : 'blocked' ), \$held ? ' held' : ' none';",
+				. "\$log = @fopen( {$earlier}, 'x' );\n\$whole = \$log && strlen( {$old_log} ) === @fwrite( \$log, {$old_log} );\n\$whole = \$log && fclose( \$log ) && \$whole;\n"
+				// A file cut short, as by a full disk, is not the planted one restore removes, so it would keep the log from going back.
+				. "\$log && ! \$whole && unlink( {$earlier} );\n\$present = ! \$held && is_dir( {$earlier} ) && ! is_link( {$earlier} );\n"
+				. "echo \$whole ? 'planted' : ( \$present ? 'present' : 'blocked' ), \$held ? ' held' : ' none';",
 			'swap'    => "\$moved = ! is_dir( {$earlier} ) && ( file_exists( {$earlier} ) || is_link( {$earlier} ) ) && @rename( {$earlier}, {$aside} );\n"
 				. "echo is_dir( {$earlier} ) ? 'present' : ( @mkdir( {$earlier} ) ? 'made' : 'blocked' ), \$moved ? ' moved' : ' kept';",
 			'restore' => static function ( string $planting, string $swapping ) use ( $earlier, $aside, $held, $old_log, $lock, $put_back ): string {
