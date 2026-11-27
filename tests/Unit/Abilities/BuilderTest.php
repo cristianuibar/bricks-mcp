@@ -388,6 +388,17 @@ final class BuilderTest extends TestCase {
 		return array_slice( array_values( array_filter( [ 'levenshtein', 'metaphone', 'similar_text', 'soundex', 'quoted_printable_encode', 'quoted_printable_decode' ], 'function_exists' ) ), 0, 2 );
 	}
 
+	/**
+	 * The ini files this process scanned, in load order.
+	 *
+	 * PHP ends every name but the last with ",\n", so a comma inside a path does not split it.
+	 *
+	 * @return string[] Absolute paths.
+	 */
+	private static function scanned_ini_files(): array {
+		return array_values( array_filter( explode( ",\n", rtrim( (string) php_ini_scanned_files(), "\n" ) ) ) );
+	}
+
 	public static function parent_restrictions(): array {
 		[ $first, $second ] = self::callable_names();
 
@@ -458,7 +469,7 @@ final class BuilderTest extends TestCase {
 		// The file also prepends a script that logs each process loading it, so the nested PHPUnit shows it got the file even where the default php.ini loads every extension.
 		$ini   = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
 		$log   = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
-		$files = array_filter( [ php_ini_loaded_file(), ...array_map( 'trim', explode( ',', (string) php_ini_scanned_files() ) ) ] );
+		$files = array_filter( [ php_ini_loaded_file(), ...self::scanned_ini_files() ] );
 		file_put_contents( $ini, implode( "\n", [ ...array_map( 'file_get_contents', $files ), 'auto_prepend_file = "' . __DIR__ . '/fixtures/record-ini-load.php"', 'bricks_mcp_test_log = "' . $log . '"' ] ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 		$output = [];
 		$status = 1;
@@ -473,6 +484,32 @@ final class BuilderTest extends TestCase {
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertStringContainsString( 'OK (1 test', implode( "\n", $output ) );
 		$this->assertSame( [ '::test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv', '::test_category_creation_works_without_mbstring@only the runner\'s' ], $loaded );
+	}
+
+	public function test_category_creation_without_mbstring_runs_where_the_runner_scans_ini_files_from_a_path_with_a_comma(): void {
+		// This process's scanned files are copied, in order, into a directory whose name has a comma, and the launched PHPUnit scans only that one.
+		// Its -c test must still copy every scanned file, DOM's among them, into the php.ini it hands its runner.
+		$dir = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
+		unlink( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+		$dir .= ',qa';
+		mkdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
+		$copies = [];
+		foreach ( self::scanned_ini_files() as $index => $file ) {
+			$copies[] = sprintf( '%s/%03d-%s', $dir, $index, basename( $file ) );
+			copy( $file, end( $copies ) );
+		}
+		$ini    = php_ini_loaded_file();
+		$output = [];
+		$status = 1;
+		try {
+			exec( 'PHP_INI_SCAN_DIR=' . escapeshellarg( $dir ) . ' ' . escapeshellarg( PHP_BINARY ) . ( false === $ini ? '' : ' -c ' . escapeshellarg( $ini ) ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_without_mbstring_runs_where_the_runner_loads_its_extensions_with_c' ) . ' 2>&1', $output, $status );
+		} finally {
+			array_map( 'unlink', $copies );
+			rmdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
+		}
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertStringContainsString( 'OK (1 test', implode( "\n", $output ) );
 	}
 
 	public function test_category_deletion_uncategorizes_its_classes(): void {
