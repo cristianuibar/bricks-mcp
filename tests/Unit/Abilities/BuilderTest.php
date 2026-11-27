@@ -455,19 +455,24 @@ final class BuilderTest extends TestCase {
 
 	public function test_category_creation_without_mbstring_runs_where_the_runner_loads_its_extensions_with_c(): void {
 		// This process's php.ini and scanned files go into one file that a runner loads with -c and scanning off, so its extensions, PHPUnit's among them, come only from -c.
+		// The file also prepends a script that logs each process loading it, so the nested PHPUnit shows it got the file even where the default php.ini loads every extension.
 		$ini   = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
+		$log   = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
 		$files = array_filter( [ php_ini_loaded_file(), ...array_map( 'trim', explode( ',', (string) php_ini_scanned_files() ) ) ] );
-		file_put_contents( $ini, implode( "\n", array_map( 'file_get_contents', $files ) ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		file_put_contents( $ini, implode( "\n", [ ...array_map( 'file_get_contents', $files ), 'auto_prepend_file = "' . __DIR__ . '/fixtures/record-ini-load.php"', 'bricks_mcp_test_log = "' . $log . '"' ] ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 		$output = [];
 		$status = 1;
 		try {
 			exec( 'PHP_INI_SCAN_DIR= ' . escapeshellarg( PHP_BINARY ) . ' -c ' . escapeshellarg( $ini ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv' ) . ' 2>&1', $output, $status );
+			$loaded = file( $log, FILE_IGNORE_NEW_LINES );
 		} finally {
 			unlink( $ini ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+			unlink( $log ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
 		}
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertStringContainsString( 'OK (1 test', implode( "\n", $output ) );
+		$this->assertSame( [ '::test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv', '::test_category_creation_works_without_mbstring@only the runner\'s' ], $loaded );
 	}
 
 	public function test_category_deletion_uncategorizes_its_classes(): void {
