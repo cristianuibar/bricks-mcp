@@ -492,7 +492,8 @@ final class BuilderTest extends TestCase {
 		$dir = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
 		unlink( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
 		$dir .= ',qa';
-		mkdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
+		// Only this user can enter the directory, so the copied host configuration stays private; a directory someone else made at that path fails the test instead of being used.
+		$this->assertTrue( mkdir( $dir, 0700 ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
 		$copies = [];
 		foreach ( self::scanned_ini_files() as $index => $file ) {
 			$copies[] = sprintf( '%s/%03d-%s', $dir, $index, basename( $file ) );
