@@ -467,6 +467,7 @@ final class BuilderTest extends TestCase {
 	public function test_category_creation_without_mbstring_runs_where_the_runner_loads_its_extensions_with_c(): void {
 		// This process's php.ini and scanned files go into one file that a runner loads with -c and scanning off, so its extensions, PHPUnit's among them, come only from -c.
 		// The file also prepends a script that logs each process loading it, so the nested PHPUnit shows it got the file even where the default php.ini loads every extension.
+		// This process's disable_functions goes along too, so a function the runner enabled with -d over its php.ini stays enabled.
 		$ini   = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
 		$log   = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
 		$files = array_filter( [ php_ini_loaded_file(), ...self::scanned_ini_files() ] );
@@ -474,7 +475,7 @@ final class BuilderTest extends TestCase {
 		$output = [];
 		$status = 1;
 		try {
-			exec( 'PHP_INI_SCAN_DIR= ' . escapeshellarg( PHP_BINARY ) . ' -c ' . escapeshellarg( $ini ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv' ) . ' 2>&1', $output, $status );
+			exec( 'PHP_INI_SCAN_DIR= ' . escapeshellarg( PHP_BINARY ) . ' -c ' . escapeshellarg( $ini ) . ' -d ' . escapeshellarg( 'disable_functions=' . ini_get( 'disable_functions' ) ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_without_mbstring_runs_where_the_runner_lacks_putenv' ) . ' 2>&1', $output, $status );
 			$loaded = file( $log, FILE_IGNORE_NEW_LINES );
 		} finally {
 			unlink( $ini ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
@@ -489,6 +490,7 @@ final class BuilderTest extends TestCase {
 	public function test_category_creation_without_mbstring_runs_where_the_runner_scans_ini_files_from_a_path_with_a_comma(): void {
 		// This process's scanned files are copied, in order, into a directory whose name has a comma, and the launched PHPUnit scans only that one.
 		// Its -c test must still copy every scanned file, DOM's among them, into the php.ini it hands its runner.
+		// This process's disable_functions goes along too, so a function the runner enabled with -d over its php.ini stays enabled.
 		$dir = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
 		unlink( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
 		$dir .= ',qa';
@@ -503,7 +505,7 @@ final class BuilderTest extends TestCase {
 		$output = [];
 		$status = 1;
 		try {
-			exec( 'PHP_INI_SCAN_DIR=' . escapeshellarg( $dir ) . ' ' . escapeshellarg( PHP_BINARY ) . ( false === $ini ? '' : ' -c ' . escapeshellarg( $ini ) ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_without_mbstring_runs_where_the_runner_loads_its_extensions_with_c' ) . ' 2>&1', $output, $status );
+			exec( 'PHP_INI_SCAN_DIR=' . escapeshellarg( $dir ) . ' ' . escapeshellarg( PHP_BINARY ) . ( false === $ini ? '' : ' -c ' . escapeshellarg( $ini ) ) . ' -d ' . escapeshellarg( 'disable_functions=' . ini_get( 'disable_functions' ) ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_without_mbstring_runs_where_the_runner_loads_its_extensions_with_c' ) . ' 2>&1', $output, $status );
 		} finally {
 			array_map( 'unlink', $copies );
 			rmdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
@@ -511,6 +513,24 @@ final class BuilderTest extends TestCase {
 
 		$this->assertSame( 0, $status, implode( "\n", $output ) );
 		$this->assertStringContainsString( 'OK (1 test', implode( "\n", $output ) );
+	}
+
+	public function test_category_creation_without_mbstring_runs_where_the_runner_enables_exec_over_its_php_ini(): void {
+		// The launched PHPUnit loads a php.ini that disables exec() and gets it back through -d, as a runner started with -d disable_functions= over a host php.ini does.
+		// Its -c and comma tests hand that php.ini on to the PHPUnit they launch, so they must pass the effective list along too, or that PHPUnit cannot start the fixture.
+		$ini    = tempnam( sys_get_temp_dir(), 'bricks_mcp_test_' );
+		$loaded = php_ini_loaded_file();
+		file_put_contents( $ini, ( false === $loaded ? '' : file_get_contents( $loaded ) ) . "\ndisable_functions = exec\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$output = [];
+		$status = 1;
+		try {
+			exec( escapeshellarg( PHP_BINARY ) . ' -c ' . escapeshellarg( $ini ) . ' -d ' . escapeshellarg( 'disable_functions=' . ini_get( 'disable_functions' ) ) . ' ' . escapeshellarg( dirname( __DIR__, 3 ) . '/vendor/bin/phpunit' ) . ' -c ' . escapeshellarg( dirname( __DIR__, 3 ) . '/phpunit-unit.xml' ) . ' --do-not-cache-result --no-progress --filter ' . escapeshellarg( '::test_category_creation_without_mbstring_runs_where_the_runner_(loads_its_extensions_with_c|scans_ini_files_from_a_path_with_a_comma)' ) . ' 2>&1', $output, $status );
+		} finally {
+			unlink( $ini ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+		}
+
+		$this->assertSame( 0, $status, implode( "\n", $output ) );
+		$this->assertStringContainsString( 'OK (2 tests,', implode( "\n", $output ) );
 	}
 
 	public function test_category_deletion_uncategorizes_its_classes(): void {
