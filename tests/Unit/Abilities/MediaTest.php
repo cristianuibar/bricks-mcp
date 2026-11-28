@@ -1701,6 +1701,28 @@ final class MediaTest extends TestCase {
 			$this->assertSame( 'https://unsplash.com?utm_source=bricks_mcp&utm_medium=referral', get_post_meta( $replacement_id, '_unsplash_photographer_url', true ), $replacement );
 		}
 
+		// A credited replacement that an editor attaches to a post this caller cannot read is not shown to the caller, nor
+		// uploaded again: the retry is refused.
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$deleted_id     = $kept_error->get_error_data()['attachmentId'];
+		$replacement_id = null;
+		$on_api_fetch   = static function () use ( $deleted_id, $import, &$replacement_id ): void {
+			wp_delete_attachment( $deleted_id, true );
+			$replacement_id = $import()['attachmentId'];
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] = false;
+		};
+		$unreadable = $import();
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] );
+		$this->assertInstanceOf( \WP_Error::class, $unreadable );
+		$this->assertSame( 'bricks_mcp_forbidden', $unreadable->get_error_code() );
+		$this->assertSame( 403, $unreadable->get_error_data()['status'] );
+		$this->assertSame( [ $replacement_id ], $attachment_ids() );
+
 		// A legacy attachment deleted while its credit backfill waits on a failing Unsplash request is not returned either.
 		$clear_attachments();
 		bricks_mcp_test_add_post(

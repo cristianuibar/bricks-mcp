@@ -261,6 +261,15 @@ final class Media implements Module {
 					$state   = $this->unsplash_import_state( $existing_id );
 					$pending = 'pending' === $state;
 					if ( 'credited' === $state || ( 'legacy' === $state && ! current_user_can( 'edit_post', $existing_id ) ) ) {
+						// An editor may have attached it to a post this caller cannot read, so its details are not shown then.
+						if ( ! current_user_can( 'edit_post', $existing_id ) && ! current_user_can( 'read_post', $existing_id ) ) {
+							return new \WP_Error(
+								'bricks_mcp_forbidden',
+								__( 'This Unsplash photo was imported meanwhile as an attachment you are not allowed to read.', 'bricks-mcp' ),
+								[ 'status' => 403 ]
+							);
+						}
+
 						return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 					}
 					$existing_post = get_post( $existing_id );
