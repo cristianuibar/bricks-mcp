@@ -107,7 +107,7 @@ class HttpsCheck implements DiagnosticCheck {
 				'id'        => $this->id(),
 				'label'     => $this->label(),
 				'status'    => 'warn',
-				'message'   => __( 'Your site is not served over HTTPS, but Application Passwords are enabled. Every MCP request sends the username and Application Password in cleartext.', 'bricks-mcp' ),
+				'message'   => __( 'This request was not served over HTTPS, but Application Passwords are enabled. Any request that sends the username and Application Password over plain HTTP sends them in cleartext.', 'bricks-mcp' ),
 				'fix_steps' => $fix_steps,
 				'category'  => $this->category(),
 			);
