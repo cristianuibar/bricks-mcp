@@ -223,17 +223,10 @@ final class Media implements Module {
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 		$pending     = false;
 		if ( null !== $existing_id ) {
-			// The credit URL is saved last, so an attachment without it lacks its attribution. This import names its
-			// upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is an unfinished
-			// import even if its pending mark failed. Releases before stored attribution kept the Unsplash file name.
-			$uncredited = '' === (string) get_post_meta( $existing_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true );
-			$pending    = $uncredited && (
-				'' !== (string) get_post_meta( $existing_id, self::UNSPLASH_PENDING_META_KEY, true )
-				|| str_starts_with( wp_basename( (string) get_post_meta( $existing_id, '_wp_attached_file', true ) ), 'unsplash-' )
-			);
+			$state   = $this->unsplash_import_state( $existing_id );
+			$pending = 'pending' === $state;
 			// A legacy attachment is completed when this caller can, else returned as it is.
-			$uncredited = $uncredited && ! $pending;
-			$completing = $pending || ( $uncredited && current_user_can( 'edit_post', $existing_id ) && '' !== $this->get_unsplash_api_key() );
+			$completing = $pending || ( 'legacy' === $state && current_user_can( 'edit_post', $existing_id ) && '' !== $this->get_unsplash_api_key() );
 			if ( ! $completing ) {
 				return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
@@ -259,10 +252,21 @@ final class Media implements Module {
 			clean_post_cache( $existing_id );
 			$existing_post = get_post( $existing_id );
 			if ( ! $existing_post || 'attachment' !== $existing_post->post_type || 'inherit' !== $existing_post->post_status ) {
-				// Its uploader deleted or trashed it during the request, so it is not returned and this call imports anew.
-				$existing_id = null;
+				// Its uploader deleted or trashed it during the request, so it is not returned. Another import may have
+				// uploaded the photo again meanwhile: that attachment is handled as if found before the request rather than
+				// duplicated, and without one this call imports anew.
+				$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 				$pending     = false;
-			} else {
+				if ( null !== $existing_id ) {
+					$state   = $this->unsplash_import_state( $existing_id );
+					$pending = 'pending' === $state;
+					if ( 'credited' === $state || ( 'legacy' === $state && ! current_user_can( 'edit_post', $existing_id ) ) ) {
+						return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
+					}
+					$existing_post = get_post( $existing_id );
+				}
+			}
+			if ( null !== $existing_id ) {
 				if ( (int) ( $existing_post->post_parent ?? 0 ) > 0 ) {
 					clean_post_cache( (int) $existing_post->post_parent );
 				}
@@ -1214,6 +1218,26 @@ final class Media implements Module {
 		}
 
 		return $this->format_existing_attachment( $attachment_id, $photo_id );
+	}
+
+	/**
+	 * Classify an attachment found by its Unsplash photo ID.
+	 *
+	 * @param int $attachment_id Attachment ID.
+	 * @return string 'credited', 'pending' for an unfinished import, or 'legacy' for an uncredited older import.
+	 */
+	private function unsplash_import_state( int $attachment_id ): string {
+		// The credit URL is saved last, so an attachment without it lacks its attribution. This import names its
+		// upload unsplash-<photoId>, which WordPress stores with the upload itself: such an upload is an unfinished
+		// import even if its pending mark failed. Releases before stored attribution kept the Unsplash file name.
+		if ( '' !== (string) get_post_meta( $attachment_id, self::UNSPLASH_PHOTOGRAPHER_URL_META_KEY, true ) ) {
+			return 'credited';
+		}
+
+		return '' !== (string) get_post_meta( $attachment_id, self::UNSPLASH_PENDING_META_KEY, true )
+			|| str_starts_with( wp_basename( (string) get_post_meta( $attachment_id, '_wp_attached_file', true ) ), 'unsplash-' )
+			? 'pending'
+			: 'legacy';
 	}
 
 	/**
