@@ -122,8 +122,7 @@ Version 2.0 is a breaking change.
 
 | Old tool | Use now |
 |---|---|
-| `content` read page elements | `bricks/get-page-elements`| 1.x tool | Use now |
-|---|---|
+| `content` read page elements | `bricks/get-page-elements` |
 | `get_site_info` | `bricks/get-system-information` |
 | `get_builder_guide` | `bricks/start-here`, `bricks/get-builder-guide`, `bricks-mcp/get-guide` |
 | `wordpress` | `bricks/find-post` |
@@ -151,7 +150,8 @@ Version 2.0 is a breaking change.
 | `woocommerce` | `bricks/get-woo-setup-status`, `bricks/plan-woo-setup`, `bricks/run-woo-setup` |
 | `font` | `bricks-mcp/list-adobe-fonts`, `bricks-mcp/update-font-settings` |
 | `code` page CSS and scripts | `bricks/set-page-settings` with `customCss`, `customScriptsHeader`, `customScriptsBodyHeader` or `customScriptsBodyFooter` |
- which abilities are enabled under Bricks > Settings > AI.
+
+Check the live list of `bricks/*` abilities with your client's tool listing. Bricks decides which abilities are enabled under Bricks > Settings > AI.
 
 ## Local development
 
