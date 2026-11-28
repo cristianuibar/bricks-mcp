@@ -1717,10 +1717,14 @@ final class MediaTest extends TestCase {
 			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] = false;
 		};
 		$unreadable = $import();
+		// A later import of the photo finds that attachment before asking Unsplash, and refuses it all the same.
+		$unreadable_again = $import();
 		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] );
-		$this->assertInstanceOf( \WP_Error::class, $unreadable );
-		$this->assertSame( 'bricks_mcp_forbidden', $unreadable->get_error_code() );
-		$this->assertSame( 403, $unreadable->get_error_data()['status'] );
+		foreach ( [ 'retry' => $unreadable, 'later import' => $unreadable_again ] as $label => $refused ) {
+			$this->assertInstanceOf( \WP_Error::class, $refused, $label );
+			$this->assertSame( 'bricks_mcp_forbidden', $refused->get_error_code(), $label );
+			$this->assertSame( 403, $refused->get_error_data()['status'], $label );
+		}
 		$this->assertSame( [ $replacement_id ], $attachment_ids() );
 
 		// The same holds when the caller can read only attachments on public posts and an editor makes the target post,

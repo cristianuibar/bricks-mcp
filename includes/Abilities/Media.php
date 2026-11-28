@@ -229,6 +229,11 @@ final class Media implements Module {
 			// A legacy attachment is completed when this caller can, else returned as it is.
 			$completing = $pending || ( 'legacy' === $state && current_user_can( 'edit_post', $existing_id ) && '' !== $this->get_unsplash_api_key() );
 			if ( ! $completing ) {
+				// An editor may have attached it to a post this caller cannot read, so its details are not shown then.
+				if ( ! current_user_can( 'edit_post', $existing_id ) && ! current_user_can( 'read_post', $existing_id ) ) {
+					return $this->unsplash_attachment_unreadable_error();
+				}
+
 				return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 			}
 
@@ -282,11 +287,7 @@ final class Media implements Module {
 				if ( $replaced && ( 'credited' === $state || ( 'legacy' === $state && ! current_user_can( 'edit_post', $existing_id ) ) ) ) {
 					// An editor may have attached it to a post this caller cannot read, read afresh above, so its details are not shown then.
 					if ( ! current_user_can( 'edit_post', $existing_id ) && ! current_user_can( 'read_post', $existing_id ) ) {
-						return new \WP_Error(
-							'bricks_mcp_forbidden',
-							__( 'This Unsplash photo was imported meanwhile as an attachment you are not allowed to read.', 'bricks-mcp' ),
-							[ 'status' => 403 ]
-						);
+						return $this->unsplash_attachment_unreadable_error();
 					}
 
 					return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
@@ -988,6 +989,19 @@ final class Media implements Module {
 		return new \WP_Error(
 			'bricks_mcp_unsplash_import_incomplete',
 			__( 'An earlier import of this Unsplash photo left an attachment without its attribution. A user who can edit that attachment must retry the import.', 'bricks-mcp' ),
+			[ 'status' => 403 ]
+		);
+	}
+
+	/**
+	 * Error returned when the photo's attachment is one the current user can neither edit nor read.
+	 *
+	 * @return \WP_Error
+	 */
+	private function unsplash_attachment_unreadable_error(): \WP_Error {
+		return new \WP_Error(
+			'bricks_mcp_forbidden',
+			__( 'This Unsplash photo is already imported as an attachment you are not allowed to read.', 'bricks-mcp' ),
 			[ 'status' => 403 ]
 		);
 	}
