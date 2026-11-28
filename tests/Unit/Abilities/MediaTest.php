@@ -1723,6 +1723,40 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 403, $unreadable->get_error_data()['status'] );
 		$this->assertSame( [ $replacement_id ], $attachment_ids() );
 
+		// The same holds when the caller can read only attachments on public posts and an editor makes the target post,
+		// which this request cached as public, private and imports the credited replacement onto it meanwhile.
+		$clear_attachments();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$deleted_id                            = $kept_error->get_error_data()['attachmentId'];
+		$replacement_id                        = null;
+		$GLOBALS['_bricks_mcp_test_post_cache'] = [];
+		$this->assertSame( 'publish', get_post( 15 )->post_status );
+		$on_api_fetch = static function () use ( $deleted_id, $import, &$replacement_id ): void {
+			wp_delete_attachment( $deleted_id, true );
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = 'private';
+			// The editor's import is another request, with a post cache of its own.
+			$cache                                  = $GLOBALS['_bricks_mcp_test_post_cache'];
+			$GLOBALS['_bricks_mcp_test_post_cache'] = null;
+			$replacement_id                         = $import()['attachmentId'];
+			$GLOBALS['_bricks_mcp_test_post_cache'] = $cache;
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] = static function () use ( $replacement_id ): bool {
+				$parent_id = get_post( $replacement_id )->post_parent;
+				return 0 === $parent_id || 'private' !== get_post( $parent_id )->post_status;
+			};
+		};
+		$private_parent = $import();
+		$GLOBALS['_bricks_mcp_test_post_cache']             = null;
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = 'publish';
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] );
+		$this->assertInstanceOf( \WP_Error::class, $private_parent );
+		$this->assertSame( 'bricks_mcp_forbidden', $private_parent->get_error_code() );
+		$this->assertSame( 15, get_post( $replacement_id )->post_parent );
+		$this->assertSame( [ $replacement_id ], $attachment_ids() );
+
 		// A legacy attachment deleted while its credit backfill waits on a failing Unsplash request is not returned either.
 		$clear_attachments();
 		bricks_mcp_test_add_post(

@@ -222,6 +222,7 @@ final class Media implements Module {
 		$post_id     = isset( $input['postId'] ) ? (int) $input['postId'] : 0;
 		$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 		$pending     = false;
+		$replaced    = false;
 		if ( null !== $existing_id ) {
 			$state   = $this->unsplash_import_state( $existing_id );
 			$pending = 'pending' === $state;
@@ -257,27 +258,29 @@ final class Media implements Module {
 				// duplicated, and without one this call imports anew.
 				$existing_id = $this->find_existing_unsplash_attachment( $photo_id );
 				$pending     = false;
-				if ( null !== $existing_id ) {
-					$state   = $this->unsplash_import_state( $existing_id );
-					$pending = 'pending' === $state;
-					if ( 'credited' === $state || ( 'legacy' === $state && ! current_user_can( 'edit_post', $existing_id ) ) ) {
-						// An editor may have attached it to a post this caller cannot read, so its details are not shown then.
-						if ( ! current_user_can( 'edit_post', $existing_id ) && ! current_user_can( 'read_post', $existing_id ) ) {
-							return new \WP_Error(
-								'bricks_mcp_forbidden',
-								__( 'This Unsplash photo was imported meanwhile as an attachment you are not allowed to read.', 'bricks-mcp' ),
-								[ 'status' => 403 ]
-							);
-						}
-
-						return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
-					}
+				$replaced    = null !== $existing_id;
+				if ( $replaced ) {
+					clean_post_cache( $existing_id );
 					$existing_post = get_post( $existing_id );
+					$state         = $this->unsplash_import_state( $existing_id );
+					$pending       = 'pending' === $state;
 				}
 			}
 			if ( null !== $existing_id ) {
 				if ( (int) ( $existing_post->post_parent ?? 0 ) > 0 ) {
 					clean_post_cache( (int) $existing_post->post_parent );
+				}
+				if ( $replaced && ( 'credited' === $state || ( 'legacy' === $state && ! current_user_can( 'edit_post', $existing_id ) ) ) ) {
+					// An editor may have attached it to a post this caller cannot read, read afresh above, so its details are not shown then.
+					if ( ! current_user_can( 'edit_post', $existing_id ) && ! current_user_can( 'read_post', $existing_id ) ) {
+						return new \WP_Error(
+							'bricks_mcp_forbidden',
+							__( 'This Unsplash photo was imported meanwhile as an attachment you are not allowed to read.', 'bricks-mcp' ),
+							[ 'status' => 403 ]
+						);
+					}
+
+					return $this->reuse_existing_attachment( $existing_id, $photo_id, $post_id );
 				}
 				// A repair that finished during the request saved the credit, so an Unsplash failure here no longer leaves
 				// the import unfinished and the attachment is returned with that credit.
