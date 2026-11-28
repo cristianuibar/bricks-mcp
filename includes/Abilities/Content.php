@@ -21,7 +21,7 @@ final class Content implements Module {
 
 	private const CATEGORY = 'bricks-mcp-content';
 
-	private const SEO_TEXT_FIELDS = [ 'title', 'description', 'ogTitle', 'ogDescription', 'twitterTitle', 'twitterDescription', 'focusKeyword' ];
+	public const SEO_TEXT_FIELDS = [ 'title', 'description', 'ogTitle', 'ogDescription', 'twitterTitle', 'twitterDescription', 'focusKeyword' ];
 
 	private const SEO_URL_FIELDS = [ 'canonical', 'ogImage', 'twitterImage' ];
 

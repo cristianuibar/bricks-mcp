@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace BricksMCP\Safety;
 
+use BricksMCP\Abilities\Content;
 use BricksMCP\Options;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -132,7 +133,36 @@ final class CssGuard {
 			return $is_valid;
 		}
 
-		return $this->scan_input( 'bricks/set-page-elements' === $name ? $this->without_stored_elements( $input ) : $input ) ?? $is_valid;
+		$input = match ( $name ) {
+			'bricks/set-page-elements' => $this->without_stored_elements( $input ),
+			'bricks-mcp/update-seo'    => $this->with_sanitized_seo_text( $input ),
+			default                    => $input,
+		};
+
+		return $this->scan_input( $input ) ?? $is_valid;
+	}
+
+	/**
+	 * Replace the plain-text SEO fields with the text `bricks-mcp/update-seo` stores for them.
+	 *
+	 * The ability strips markup from these fields before storing them, so copied markup is
+	 * checked as the text that remains. The ability itself still receives the raw input.
+	 *
+	 * @param mixed $input Normalized `bricks-mcp/update-seo` input.
+	 * @return mixed
+	 */
+	private function with_sanitized_seo_text( mixed $input ): mixed {
+		if ( ! is_array( $input ) || ! is_array( $input['seo'] ?? null ) ) {
+			return $input;
+		}
+
+		foreach ( Content::SEO_TEXT_FIELDS as $field ) {
+			if ( is_string( $input['seo'][ $field ] ?? null ) ) {
+				$input['seo'][ $field ] = sanitize_text_field( $input['seo'][ $field ] );
+			}
+		}
+
+		return $input;
 	}
 
 	/**
