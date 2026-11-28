@@ -267,8 +267,17 @@ final class Media implements Module {
 				}
 			}
 			if ( null !== $existing_id ) {
-				if ( (int) ( $existing_post->post_parent ?? 0 ) > 0 ) {
-					clean_post_cache( (int) $existing_post->post_parent );
+				// An attachment inherits the status of its parent, which may itself be an attachment, so the read checks
+				// depend on each post up that chain.
+				$ancestor_id = (int) ( $existing_post->post_parent ?? 0 );
+				$seen        = [ $existing_id => true ];
+				while ( $ancestor_id > 0 && ! isset( $seen[ $ancestor_id ] ) ) {
+					$seen[ $ancestor_id ] = true;
+					clean_post_cache( $ancestor_id );
+					$ancestor    = get_post( $ancestor_id );
+					$ancestor_id = $ancestor && 'attachment' === $ancestor->post_type && 'inherit' === $ancestor->post_status
+						? (int) ( $ancestor->post_parent ?? 0 )
+						: 0;
 				}
 				if ( $replaced && ( 'credited' === $state || ( 'legacy' === $state && ! current_user_can( 'edit_post', $existing_id ) ) ) ) {
 					// An editor may have attached it to a post this caller cannot read, read afresh above, so its details are not shown then.

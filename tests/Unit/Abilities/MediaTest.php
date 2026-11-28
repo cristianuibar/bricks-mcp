@@ -1757,6 +1757,50 @@ final class MediaTest extends TestCase {
 		$this->assertSame( 15, get_post( $replacement_id )->post_parent );
 		$this->assertSame( [ $replacement_id ], $attachment_ids() );
 
+		// Nor when the replacement is moved onto another attachment, whose status it inherits, on that target post made
+		// private meanwhile: WordPress reads the status up the chain of attachments to the post.
+		$clear_attachments();
+		bricks_mcp_test_add_post(
+			[
+				'ID'          => 700,
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'post_parent' => 15,
+			]
+		);
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = [ '_unsplash_photographer_url' ];
+		$kept_error = $import();
+		$GLOBALS['_bricks_mcp_test_media_update_post_meta_fail'] = false;
+		$this->assertInstanceOf( \WP_Error::class, $kept_error );
+		$deleted_id                            = $kept_error->get_error_data()['attachmentId'];
+		$replacement_id                        = null;
+		$GLOBALS['_bricks_mcp_test_post_cache'] = [];
+		$this->assertSame( 'publish', get_post( 15 )->post_status );
+		$on_api_fetch = static function () use ( $deleted_id, $import, &$replacement_id ): void {
+			wp_delete_attachment( $deleted_id, true );
+			$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = 'private';
+			$cache                                  = $GLOBALS['_bricks_mcp_test_post_cache'];
+			$GLOBALS['_bricks_mcp_test_post_cache'] = null;
+			$replacement_id                         = $import()['attachmentId'];
+			$GLOBALS['_bricks_mcp_test_posts'][ $replacement_id ]->post_parent = 700;
+			$GLOBALS['_bricks_mcp_test_post_cache']                            = $cache;
+			$GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ] = false;
+			$GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] = static function () use ( $replacement_id ): bool {
+				$post = get_post( $replacement_id );
+				while ( 'attachment' === $post->post_type && 'inherit' === $post->post_status && $post->post_parent > 0 ) {
+					$post = get_post( $post->post_parent );
+				}
+				return 'private' !== $post->post_status;
+			};
+		};
+		$private_ancestor = $import();
+		$GLOBALS['_bricks_mcp_test_post_cache']             = null;
+		$GLOBALS['_bricks_mcp_test_posts'][15]->post_status = 'publish';
+		unset( $GLOBALS['_bricks_mcp_test_object_caps']['edit_post'][ $replacement_id ], $GLOBALS['_bricks_mcp_test_object_caps']['read_post'][ $replacement_id ] );
+		$this->assertInstanceOf( \WP_Error::class, $private_ancestor );
+		$this->assertSame( 'bricks_mcp_forbidden', $private_ancestor->get_error_code() );
+		$this->assertSame( [ 700, $replacement_id ], $attachment_ids() );
+
 		// A legacy attachment deleted while its credit backfill waits on a failing Unsplash request is not returned either.
 		$clear_attachments();
 		bricks_mcp_test_add_post(
