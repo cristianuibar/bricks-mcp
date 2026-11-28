@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace BricksMCP\Tests\Unit\Safety;
 
+use BricksMCP\Abilities\Content;
 use BricksMCP\Options;
 use BricksMCP\Safety\CssGuard;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -24,6 +25,15 @@ final class CssGuardTest extends TestCase {
 
 	// Core validates input only against a declared schema, so fixtures declare a permissive one.
 	private const SCHEMA = [ 'type' => 'object' ];
+
+	// The `{ postId, seo }` shape of `bricks-mcp/update-seo` input.
+	private const SEO_SCHEMA = [
+		'type'       => 'object',
+		'properties' => [
+			'postId' => [ 'type' => 'integer' ],
+			'seo'    => [ 'type' => 'object' ],
+		],
+	];
 
 	private WP_Ability $ability;
 
@@ -314,6 +324,85 @@ final class CssGuardTest extends TestCase {
 				self::assertSame( 'executed', $ability->execute( $input ), $input['title'] );
 			}
 		}
+	}
+
+	public function test_scans_seo_text_fields_as_the_plain_text_update_seo_stores(): void {
+		$ability = make_safety_ability( 'bricks-mcp/update-seo', [ 'input_schema' => self::SEO_SCHEMA, 'execute_callback' => static fn() => 'executed' ] );
+		$markup  = [ '<span style="behavior: url(example.htc)">Short title</span>', '<span style="font-weight:bold">Short title</span>' ];
+
+		foreach ( [ false, true ] as $dom_missing ) {
+			$GLOBALS['_bricks_mcp_test_missing_classes'] = $dom_missing ? [ \DOMDocument::class ] : [];
+			foreach ( [ 'title', 'description', 'ogTitle', 'ogDescription', 'twitterTitle', 'twitterDescription', 'focusKeyword' ] as $field ) {
+				foreach ( $markup as $html ) {
+					self::assertSame( 'executed', $ability->execute( [ 'postId' => 42, 'seo' => [ $field => $html ] ] ), "$field: $html" );
+				}
+			}
+		}
+	}
+
+	public function test_blocks_style_markup_outside_the_seo_text_fields(): void {
+		$seo      = make_safety_ability( 'bricks-mcp/update-seo', [ 'input_schema' => self::SEO_SCHEMA, 'execute_callback' => static fn() => 'executed' ] );
+		$settings = make_safety_ability( 'bricks/set-page-settings', [ 'input_schema' => self::SCHEMA, 'execute_callback' => static fn() => 'executed' ] );
+		$elements = make_safety_ability( 'bricks/set-page-elements', [ 'input_schema' => self::SCHEMA, 'execute_callback' => static fn() => 'executed' ] );
+		$behavior = '<span style="behavior: url(example.htc)">Short title</span>';
+		$cases    = [
+			'canonical behavior'   => [ $seo, [ 'postId' => 42, 'seo' => [ 'canonical' => $behavior ] ] ],
+			'canonical expression' => [ $seo, [ 'postId' => 42, 'seo' => [ 'title' => 'Short title', 'canonical' => '<span style="color: expression(1)">x</span>' ] ] ],
+			'page settings'        => [ $settings, [ 'postId' => 42, 'settings' => [ 'documentTitle' => $behavior ] ] ],
+			'page settings seo'    => [ $settings, [ 'postId' => 42, 'seo' => [ 'title' => $behavior ] ] ],
+			'page elements'        => [ $elements, [ 'postId' => 42, 'elements' => [ [ 'id' => 'a', 'settings' => [ 'text' => $behavior ] ] ] ] ],
+		];
+
+		self::assertSame(
+			[
+				'canonical behavior'   => [ 'status' => 400, 'path' => 'seo.canonical.styleAttribute.0', 'pattern' => 'behaviour' ],
+				'canonical expression' => [ 'status' => 400, 'path' => 'seo.canonical.styleAttribute.0', 'pattern' => 'expression' ],
+				'page settings'        => [ 'status' => 400, 'path' => 'settings.documentTitle.styleAttribute.0', 'pattern' => 'behaviour' ],
+				'page settings seo'    => [ 'status' => 400, 'path' => 'seo.title.styleAttribute.0', 'pattern' => 'behaviour' ],
+				'page elements'        => [ 'status' => 400, 'path' => 'elements.0.settings.text.styleAttribute.0', 'pattern' => 'behaviour' ],
+			],
+			array_map(
+				static function ( array $case ): mixed {
+					$result = $case[0]->execute( $case[1] );
+					return $result instanceof WP_Error ? $result->get_error_data() : $result;
+				},
+				$cases
+			)
+		);
+
+		$GLOBALS['_bricks_mcp_test_missing_classes'] = [ \DOMDocument::class ];
+		$result = $seo->execute( [ 'postId' => 42, 'seo' => [ 'canonical' => '<span style="font-weight:bold">x</span>' ] ] );
+		self::assertInstanceOf( WP_Error::class, $result );
+		self::assertSame( [ 'status' => 500, 'path' => 'seo.canonical', 'pattern' => 'html_parser' ], $result->get_error_data() );
+	}
+
+	public function test_update_seo_receives_the_raw_title_and_stores_the_plain_text(): void {
+		bricks_mcp_test_add_post( [ 'ID' => 42, 'post_type' => 'page' ] );
+		\Bricks\Capabilities::$can_use_builder = true;
+		wp_register_ability(
+			'bricks/set-page-settings',
+			[
+				'execute_callback' => static function ( array $input ): array {
+					update_post_meta( $input['postId'], '_bricks_page_settings', $input['settings'] );
+					return [ 'postId' => $input['postId'], 'settings' => $input['settings'] ];
+				},
+			]
+		);
+		$args     = ( new Content() )->abilities()['bricks-mcp/update-seo'];
+		$received = null;
+		$execute  = $args['execute_callback'];
+
+		$args['execute_callback'] = static function ( $input ) use ( $execute, &$received ) {
+			$received = $input;
+			return $execute( $input );
+		};
+		$input = [ 'postId' => 42, 'seo' => [ 'title' => '<span style="behavior: url(example.htc)">Short title</span>' ] ];
+
+		$result = make_safety_ability( 'bricks-mcp/update-seo', $args )->execute( $input );
+
+		self::assertIsArray( $result );
+		self::assertSame( $input, $received );
+		self::assertSame( [ 'documentTitle' => 'Short title' ], get_post_meta( 42, '_bricks_page_settings', true ) );
 	}
 
 	public function test_allows_inline_images_in_css(): void {
