@@ -9,14 +9,14 @@
  *
  * @wordpress-plugin
  * Plugin Name:       Bricks MCP Extensions
- * Plugin URI:        https://aiforbricks.com
+ * Plugin URI:        https://github.com/cristianuibar/bricks-mcp
  * Description:       Adds SEO, media, template and page-QA abilities to the AI abilities built into Bricks Builder. AI agents reach them through the same MCP connection as Bricks.
- * Version:           2.0.0
+ * Version:           2.0.1
  * Requires at least: 7.1
  * Requires PHP:      8.2
  * Requires Plugins:  mcp-adapter
  * Author:            Uibar Ion-Cristian
- * Author URI:        https://aiforbricks.com
+ * Author URI:        https://github.com/cristianuibar/bricks-mcp
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       bricks-mcp
@@ -32,7 +32,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin version.
-define( 'BRICKS_MCP_VERSION', '2.0.0' );
+define( 'BRICKS_MCP_VERSION', '2.0.1' );
 
 // Minimum PHP version.
 define( 'BRICKS_MCP_MIN_PHP_VERSION', '8.2' );

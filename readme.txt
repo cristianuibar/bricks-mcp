@@ -3,7 +3,7 @@ Contributors: cristianuibar, optiwebopz
 Tags: ai, bricks builder, mcp, abilities api, seo
 Requires at least: 7.1
 Tested up to: 7.1
-Stable tag: 2.0.0
+Stable tag: 2.0.1
 Requires PHP: 8.2
 Requires Plugins: mcp-adapter
 License: GPL-2.0-or-later
@@ -110,6 +110,24 @@ No. Uninstalling removes only this plugin's options and transients. It does not 
 1. The settings page under Bricks > Bricks MCP Extensions.
 
 == Changelog ==
+
+= 2.0.1 =
+Maintenance release. No settings change and no action is needed after updating.
+
+Fixes:
+* SEO writes report a database failure instead of success, keep literal backslashes in keywords, and keep a write on a revision off the parent post.
+* An SEO update that changes nothing now shows the stored value, and stored Rank Math robots are accepted in any order.
+* Rank Math: when the use-Facebook toggle cannot be saved, every Twitter override is reported as failed, and saved fields are told apart from unsaved ones.
+* Slim SEO: only the fields that changed are listed as failed, empty and differently encoded records are cleared correctly, and a clear that a newer save kept is reported as failed.
+* SEOPress target keyword maps to `focusKeyword`. The dynamic sharing image is reported over a saved URL and falls back to the saved URL when the dynamic tag is blank.
+* Unsplash import: retries and repairs no longer duplicate attachments, return a deleted attachment or a stale error, or lose the photographer credit. An unreadable unfinished import is refused before Unsplash is asked.
+* Updates: a release whose checksum is blocked shows on the Updates card instead of "up to date", and the Check Now notice shows its version.
+* CSS guard: moved element subtrees are checked for stored CSS.
+
+Development:
+* The local debug log is protected from HTTP access, and the tests for it were hardened.
+* Dependency updates: PHPCS, WPCS and PHPCSUtils (security advisories), WordPress stubs 7.1.2, actions/checkout 7.0.1.
+* A contributor guide (`AGENTS.md`) was added and the README documents keeping GitHub "Latest" on the 1.5.x bridge.
 
 = 2.0.0 =
 Breaking changes:
@@ -246,6 +264,9 @@ Fixes:
 * Unsplash API integration for image search.
 
 == Upgrade Notice ==
+
+= 2.0.1 =
+Maintenance release for 2.0.0: fixes for SEO writes, Unsplash imports, the update check and the CSS guard. No action needed.
 
 = 2.0.0 =
 Breaking release. Requires WordPress 7.1, Bricks 2.5 and the MCP Adapter plugin. The old endpoint is removed: reconnect your AI client once through Bricks > Settings > AI.
