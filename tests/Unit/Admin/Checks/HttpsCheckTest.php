@@ -120,6 +120,26 @@ final class HttpsCheckTest extends TestCase {
 	}
 
 	/**
+	 * The plain-HTTP warning describes this request, not every MCP request.
+	 *
+	 * @return void
+	 */
+	public function test_warn_message_describes_this_request_only(): void {
+		$GLOBALS['_bricks_mcp_test_app_passwords_available'] = true;
+
+		foreach ( [ 'production', 'staging' ] as $env ) {
+			$GLOBALS['_bricks_mcp_test_environment_type'] = $env;
+
+			$result = ( new HttpsCheck() )->run();
+
+			$this->assertSame( 'warn', $result['status'], $env );
+			$this->assertStringNotContainsString( 'Every MCP request', $result['message'], $env );
+			$this->assertStringContainsString( 'cleartext', $result['message'], $env );
+			$this->assertStringContainsString( 'Application Password', $result['message'], $env );
+		}
+	}
+
+	/**
 	 * The local force-enable step carries a cleartext warning.
 	 *
 	 * @return void
